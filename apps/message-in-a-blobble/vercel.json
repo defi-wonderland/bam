@@ -1,0 +1,4 @@
+{
+  "installCommand": "cd ../.. && pnpm install",
+  "buildCommand": "cd ../.. && pnpm --filter bam-sdk build && cd apps/message-in-a-blobble && next build"
+}
