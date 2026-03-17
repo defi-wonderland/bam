@@ -1,0 +1,46 @@
+{
+  "name": "bam-sdk",
+  "version": "0.1.0",
+  "description": "BAM SDK - Blob Authenticated Messaging protocol toolkit",
+  "type": "module",
+  "main": "dist/esm/index.js",
+  "module": "dist/esm/index.js",
+  "types": "dist/types/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/esm/index.js",
+      "types": "./dist/types/index.d.ts"
+    },
+    "./browser": {
+      "import": "./dist/esm/browser.js",
+      "types": "./dist/types/browser.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "data"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.esm.json && tsc -p tsconfig.types.json",
+    "clean": "rm -rf dist",
+    "test": "vitest",
+    "test:run": "vitest --run",
+    "test:integration": "vitest --run -c /dev/null tests/integration/",
+    "lint": "eslint src tests"
+  },
+  "dependencies": {
+    "@noble/bls12-381": "^1.4.0",
+    "@noble/hashes": "^1.3.3",
+    "@noble/secp256k1": "^2.1.0",
+    "c-kzg": "^4.1.0",
+    "fzstd": "^0.1.1",
+    "viem": "^2.21.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "license": "MIT"
+}

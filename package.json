@@ -1,0 +1,42 @@
+{
+  "name": "bam",
+  "private": true,
+  "description": "Blob Authenticated Messaging workspace",
+  "scripts": {
+    "build": "pnpm -r build",
+    "test": "pnpm -r test",
+    "test:run": "pnpm -r test:run",
+    "lint": "pnpm -r lint",
+    "clean": "pnpm -r clean",
+    "sync:abis": "cd packages/bam-contracts && forge build && cd ../.. && npx tsx scripts/sync-abis.ts",
+    "sync:deployments": "npx tsx scripts/sync-deployments.ts",
+    "deploy:save": "npx tsx scripts/save-deployment.ts && npx tsx scripts/sync-deployments.ts"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "packageManager": "pnpm@10.28.2",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "better-sqlite3",
+      "c-kzg",
+      "esbuild"
+    ]
+  },
+  "devDependencies": {
+    "@commitlint/cli": "^20.4.1",
+    "@commitlint/config-conventional": "^20.4.1",
+    "@typescript-eslint/eslint-plugin": "^6.21.0",
+    "@typescript-eslint/parser": "^6.21.0",
+    "@vitest/coverage-v8": "^1.2.0",
+    "eslint": "^8.56.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.2.7",
+    "prettier": "^3.8.1",
+    "typescript": "^5.3.3",
+    "vitest": "^1.2.0"
+  }
+}

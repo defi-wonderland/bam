@@ -1,0 +1,296 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Social-Blobs Message Test Vectors",
+  "description": "Message encoding/decoding test vectors with actual binary outputs",
+  "version": "0.1.0",
+  "generated": "2026-01-27",
+  "vectors": [
+    {
+      "name": "minimal_message_bls",
+      "description": "Shortest valid message - simple ASCII content with BLS signature",
+      "input": {
+        "author": "0x1234567890abcdef1234567890abcdef12345678",
+        "timestamp": 1706400000,
+        "nonce": 0,
+        "content": "gm",
+        "signatureType": "bls",
+        "replyTo": null
+      },
+      "expectedOutput": {
+        "magic": "0x534f424d",
+        "version": 1,
+        "flags": 2,
+        "headerSize": 33,
+        "contentSize": 2,
+        "signatureSize": 96,
+        "totalSize": 131,
+        "canEncode": true,
+        "canDecode": true
+      }
+    },
+    {
+      "name": "typical_message_bls",
+      "description": "Typical 100-character message with BLS signature",
+      "input": {
+        "author": "0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
+        "timestamp": 1706486400,
+        "nonce": 42,
+        "content": "Just deployed the new Social-Blobs aggregator! Excited to see how this scales with blob compression.",
+        "signatureType": "bls",
+        "replyTo": null
+      },
+      "expectedOutput": {
+        "magic": "0x534f424d",
+        "version": 1,
+        "flags": 2,
+        "contentSize": 98,
+        "signatureSize": 96,
+        "canEncode": true,
+        "canDecode": true
+      }
+    },
+    {
+      "name": "maximal_message_bls",
+      "description": "Maximum 280-character message",
+      "input": {
+        "author": "0xabcdef0123456789abcdef0123456789abcdef01",
+        "timestamp": 1706572800,
+        "nonce": 65535,
+        "content": "Social-Blobs is a minimal social media protocol built on Ethereum blobs. It uses BLS signature aggregation for efficiency, Zstd compression with trained dictionaries, and achieves ~11,500 messages per blob. Twitter-scale throughput at sub-dollar costs. 280 chars max!",
+        "signatureType": "bls",
+        "replyTo": null
+      },
+      "expectedOutput": {
+        "magic": "0x534f424d",
+        "version": 1,
+        "flags": 2,
+        "contentSize": 273,
+        "signatureSize": 96,
+        "canEncode": true,
+        "canDecode": true
+      }
+    },
+    {
+      "name": "unicode_emoji_message",
+      "description": "Message with emoji, CJK, and RTL scripts",
+      "input": {
+        "author": "0x0000000000000000000000000000000000000001",
+        "timestamp": 1706659200,
+        "nonce": 1,
+        "content": "Hello 世界! 🌍🚀 日本語 한국어 العربية עברית 👋🔥💎",
+        "signatureType": "bls",
+        "replyTo": null
+      },
+      "expectedOutput": {
+        "magic": "0x534f424d",
+        "version": 1,
+        "flags": 2,
+        "canEncode": true,
+        "canDecode": true,
+        "note": "UTF-8 byte count will be larger than character count"
+      }
+    },
+    {
+      "name": "message_with_reply",
+      "description": "Message replying to another message",
+      "input": {
+        "author": "0x2222222222222222222222222222222222222222",
+        "timestamp": 1706745600,
+        "nonce": 10,
+        "content": "Great point! I agree completely.",
+        "signatureType": "bls",
+        "replyTo": "0xabcd1234567890abcdef1234567890abcdef1234567890abcdef1234567890ab"
+      },
+      "expectedOutput": {
+        "magic": "0x534f424d",
+        "version": 1,
+        "flags": 10,
+        "hasReplyFlag": true,
+        "canEncode": true,
+        "canDecode": true
+      }
+    },
+    {
+      "name": "message_ecdsa",
+      "description": "Message with ECDSA signature instead of BLS",
+      "input": {
+        "author": "0x3333333333333333333333333333333333333333",
+        "timestamp": 1706832000,
+        "nonce": 5,
+        "content": "Testing ECDSA signatures for wallet compatibility",
+        "signatureType": "ecdsa",
+        "replyTo": null
+      },
+      "expectedOutput": {
+        "magic": "0x534f424d",
+        "version": 1,
+        "flags": 1,
+        "signatureSize": 65,
+        "canEncode": true,
+        "canDecode": true
+      }
+    },
+    {
+      "name": "url_and_hashtags",
+      "description": "Message with URL and hashtags",
+      "input": {
+        "author": "0x4444444444444444444444444444444444444444",
+        "timestamp": 1706918400,
+        "nonce": 100,
+        "content": "Check out the new protocol at https://socialblobs.eth #web3 #ethereum #decentralized",
+        "signatureType": "bls",
+        "replyTo": null
+      },
+      "expectedOutput": {
+        "magic": "0x534f424d",
+        "version": 1,
+        "flags": 2,
+        "canEncode": true,
+        "canDecode": true
+      }
+    },
+    {
+      "name": "newlines_and_formatting",
+      "description": "Message with newlines and special characters",
+      "input": {
+        "author": "0x5555555555555555555555555555555555555555",
+        "timestamp": 1707004800,
+        "nonce": 200,
+        "content": "Line 1\nLine 2\n\nLine 4 (with blank line)\n\nSpecial chars: !@#$%^&*()_+-=[]{}|;':\",./<>?",
+        "signatureType": "bls",
+        "replyTo": null
+      },
+      "expectedOutput": {
+        "magic": "0x534f424d",
+        "version": 1,
+        "flags": 2,
+        "canEncode": true,
+        "canDecode": true
+      }
+    },
+    {
+      "name": "empty_content",
+      "description": "Valid message with zero-length content",
+      "input": {
+        "author": "0x6666666666666666666666666666666666666666",
+        "timestamp": 1707091200,
+        "nonce": 0,
+        "content": "",
+        "signatureType": "bls",
+        "replyTo": null
+      },
+      "expectedOutput": {
+        "magic": "0x534f424d",
+        "version": 1,
+        "flags": 2,
+        "contentSize": 0,
+        "headerSize": 33,
+        "signatureSize": 96,
+        "totalSize": 129,
+        "canEncode": true,
+        "canDecode": true
+      }
+    },
+    {
+      "name": "max_nonce",
+      "description": "Message with maximum nonce value (2^16 - 1)",
+      "input": {
+        "author": "0x7777777777777777777777777777777777777777",
+        "timestamp": 1707177600,
+        "nonce": 65535,
+        "content": "Testing maximum nonce value",
+        "signatureType": "bls",
+        "replyTo": null
+      },
+      "expectedOutput": {
+        "magic": "0x534f424d",
+        "version": 1,
+        "flags": 2,
+        "canEncode": true,
+        "canDecode": true
+      }
+    },
+    {
+      "name": "extended_bls_signature",
+      "description": "Extended signature mode with BLS scheme (SigType 11)",
+      "input": {
+        "author": "0x8888888888888888888888888888888888888888",
+        "timestamp": 1707264000,
+        "nonce": 1,
+        "content": "Testing extended BLS signature mode",
+        "signatureType": "extended",
+        "extendedHeader": {
+          "scheme": 2,
+          "schemeVersion": 1
+        },
+        "replyTo": null
+      },
+      "expectedOutput": {
+        "magic": "0x534f424d",
+        "version": 1,
+        "flags": 3,
+        "extendedSchemeId": 2,
+        "extendedSchemeVersion": 1,
+        "signatureSize": 48,
+        "canEncode": true,
+        "canDecode": true,
+        "note": "Flags 0x03 indicates extended mode (SigType 11)"
+      }
+    },
+    {
+      "name": "extended_ecdsa_signature",
+      "description": "Extended signature mode with ECDSA scheme (SigType 11)",
+      "input": {
+        "author": "0x9999999999999999999999999999999999999999",
+        "timestamp": 1707350400,
+        "nonce": 2,
+        "content": "Testing extended ECDSA signature mode",
+        "signatureType": "extended",
+        "extendedHeader": {
+          "scheme": 1,
+          "schemeVersion": 1
+        },
+        "replyTo": null
+      },
+      "expectedOutput": {
+        "magic": "0x534f424d",
+        "version": 1,
+        "flags": 3,
+        "extendedSchemeId": 1,
+        "extendedSchemeVersion": 1,
+        "signatureSize": 65,
+        "canEncode": true,
+        "canDecode": true,
+        "note": "Extended ECDSA uses same 65-byte signature as direct ECDSA"
+      }
+    },
+    {
+      "name": "extended_with_reply",
+      "description": "Extended signature mode with reply-to reference",
+      "input": {
+        "author": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "timestamp": 1707436800,
+        "nonce": 3,
+        "content": "Replying with extended signature",
+        "signatureType": "extended",
+        "extendedHeader": {
+          "scheme": 2,
+          "schemeVersion": 1
+        },
+        "replyTo": "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
+      },
+      "expectedOutput": {
+        "magic": "0x534f424d",
+        "version": 1,
+        "flags": 11,
+        "hasReplyFlag": true,
+        "extendedSchemeId": 2,
+        "extendedSchemeVersion": 1,
+        "signatureSize": 48,
+        "canEncode": true,
+        "canDecode": true,
+        "note": "Flags 0x0B = reply flag (0x08) + extended mode (0x03)"
+      }
+    }
+  ]
+}

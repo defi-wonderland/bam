@@ -1,0 +1,390 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Social-Blobs Batch Test Vectors",
+  "description": "Batch encoding/decoding test vectors with compression",
+  "version": "0.1.0",
+  "generated": "2026-01-27",
+  "vectors": [
+    {
+      "name": "tiny_batch_single_author",
+      "description": "Minimal batch with 1 author, 1 message",
+      "input": {
+        "baseTimestamp": 1706400000,
+        "dictionaryRef": "0x0000000000000000000000000000000000000000000000000000000000000000",
+        "messages": [
+          {
+            "author": "0x1111111111111111111111111111111111111111",
+            "timestamp": 1706400000,
+            "nonce": 0,
+            "content": "Solo message",
+            "signatureType": "bls"
+          }
+        ],
+        "compress": false
+      },
+      "expectedOutput": {
+        "magic": "0x534f4231",
+        "version": 1,
+        "flags": 2,
+        "authorCount": 1,
+        "messageCount": 1,
+        "hasCompression": false,
+        "canEncode": true,
+        "canDecode": true
+      }
+    },
+    {
+      "name": "small_batch_multi_author",
+      "description": "Small batch with 3 authors, 10 messages",
+      "input": {
+        "baseTimestamp": 1706400000,
+        "dictionaryRef": "0x0000000000000000000000000000000000000000000000000000000000000000",
+        "messages": [
+          {
+            "author": "0x1111111111111111111111111111111111111111",
+            "timestamp": 1706400000,
+            "nonce": 0,
+            "content": "First message",
+            "signatureType": "bls"
+          },
+          {
+            "author": "0x2222222222222222222222222222222222222222",
+            "timestamp": 1706400010,
+            "nonce": 0,
+            "content": "Second author joins",
+            "signatureType": "bls"
+          },
+          {
+            "author": "0x1111111111111111111111111111111111111111",
+            "timestamp": 1706400020,
+            "nonce": 1,
+            "content": "First author replies",
+            "signatureType": "bls"
+          },
+          {
+            "author": "0x3333333333333333333333333333333333333333",
+            "timestamp": 1706400030,
+            "nonce": 0,
+            "content": "Third author appears",
+            "signatureType": "bls"
+          },
+          {
+            "author": "0x2222222222222222222222222222222222222222",
+            "timestamp": 1706400040,
+            "nonce": 1,
+            "content": "Second author again",
+            "signatureType": "bls"
+          },
+          {
+            "author": "0x1111111111111111111111111111111111111111",
+            "timestamp": 1706400050,
+            "nonce": 2,
+            "content": "Conversation continues...",
+            "signatureType": "bls"
+          },
+          {
+            "author": "0x3333333333333333333333333333333333333333",
+            "timestamp": 1706400060,
+            "nonce": 1,
+            "content": "Third author contributes",
+            "signatureType": "bls"
+          },
+          {
+            "author": "0x1111111111111111111111111111111111111111",
+            "timestamp": 1706400070,
+            "nonce": 3,
+            "content": "More from first",
+            "signatureType": "bls"
+          },
+          {
+            "author": "0x2222222222222222222222222222222222222222",
+            "timestamp": 1706400080,
+            "nonce": 2,
+            "content": "And second",
+            "signatureType": "bls"
+          },
+          {
+            "author": "0x3333333333333333333333333333333333333333",
+            "timestamp": 1706400090,
+            "nonce": 2,
+            "content": "Final message from third",
+            "signatureType": "bls"
+          }
+        ],
+        "compress": false
+      },
+      "expectedOutput": {
+        "magic": "0x534f4231",
+        "version": 1,
+        "flags": 2,
+        "authorCount": 3,
+        "messageCount": 10,
+        "hasCompression": false,
+        "canEncode": true,
+        "canDecode": true,
+        "note": "Author indices: 0, 1, 0, 2, 1, 0, 2, 0, 1, 2"
+      }
+    },
+    {
+      "name": "medium_batch_compressed",
+      "description": "Medium batch with 50 authors, 100 messages, compressed",
+      "input": {
+        "baseTimestamp": 1706400000,
+        "dictionaryRef": "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+        "authorCount": 50,
+        "messageCount": 100,
+        "compress": true,
+        "note": "Synthetic batch - actual messages not specified for brevity"
+      },
+      "expectedOutput": {
+        "magic": "0x534f4231",
+        "version": 1,
+        "flags": 6,
+        "authorCount": 50,
+        "messageCount": 100,
+        "hasCompression": true,
+        "authorTableSize": 1000,
+        "headerSize": ">=1098",
+        "canEncode": true,
+        "canDecode": true
+      }
+    },
+    {
+      "name": "large_batch_compressed",
+      "description": "Large batch with 200 authors, 1000 messages, compressed",
+      "input": {
+        "baseTimestamp": 1706400000,
+        "dictionaryRef": "0xabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcd",
+        "authorCount": 200,
+        "messageCount": 1000,
+        "compress": true,
+        "note": "Synthetic batch - represents typical aggregator submission"
+      },
+      "expectedOutput": {
+        "magic": "0x534f4231",
+        "version": 1,
+        "flags": 6,
+        "authorCount": 200,
+        "messageCount": 1000,
+        "hasCompression": true,
+        "authorTableSize": 4000,
+        "headerSize": ">=4098",
+        "compressionRatioMin": 5.0,
+        "canEncode": true,
+        "canDecode": true
+      }
+    },
+    {
+      "name": "max_authors_batch",
+      "description": "Batch with maximum 256 unique authors",
+      "input": {
+        "baseTimestamp": 1706400000,
+        "dictionaryRef": "0x0000000000000000000000000000000000000000000000000000000000000000",
+        "authorCount": 256,
+        "messageCount": 256,
+        "compress": false,
+        "note": "One message per author to test maximum author table size"
+      },
+      "expectedOutput": {
+        "magic": "0x534f4231",
+        "version": 1,
+        "flags": 2,
+        "authorCount": 256,
+        "messageCount": 256,
+        "authorTableSize": 5120,
+        "canEncode": true,
+        "canDecode": true
+      }
+    },
+    {
+      "name": "timestamp_delta_range",
+      "description": "Batch testing timestamp delta encoding limits",
+      "input": {
+        "baseTimestamp": 1706400000,
+        "dictionaryRef": "0x0000000000000000000000000000000000000000000000000000000000000000",
+        "messages": [
+          {
+            "author": "0x1111111111111111111111111111111111111111",
+            "timestamp": 1706400000,
+            "nonce": 0,
+            "content": "At base timestamp",
+            "signatureType": "bls"
+          },
+          {
+            "author": "0x1111111111111111111111111111111111111111",
+            "timestamp": 1706400001,
+            "nonce": 1,
+            "content": "+1 second",
+            "signatureType": "bls"
+          },
+          {
+            "author": "0x1111111111111111111111111111111111111111",
+            "timestamp": 1706400100,
+            "nonce": 2,
+            "content": "+100 seconds",
+            "signatureType": "bls"
+          },
+          {
+            "author": "0x1111111111111111111111111111111111111111",
+            "timestamp": 1706403600,
+            "nonce": 3,
+            "content": "+1 hour",
+            "signatureType": "bls"
+          },
+          {
+            "author": "0x1111111111111111111111111111111111111111",
+            "timestamp": 1706464800,
+            "nonce": 4,
+            "content": "+18 hours (near max delta)",
+            "signatureType": "bls"
+          }
+        ],
+        "compress": false
+      },
+      "expectedOutput": {
+        "magic": "0x534f4231",
+        "version": 1,
+        "authorCount": 1,
+        "messageCount": 5,
+        "maxTimestampDelta": 64800,
+        "canEncode": true,
+        "canDecode": true,
+        "note": "Max delta is 18 hours = 64,800 seconds (fits in uint16)"
+      }
+    },
+    {
+      "name": "mixed_signature_types",
+      "description": "Batch with both BLS and ECDSA signatures (invalid for aggregation)",
+      "input": {
+        "baseTimestamp": 1706400000,
+        "dictionaryRef": "0x0000000000000000000000000000000000000000000000000000000000000000",
+        "messages": [
+          {
+            "author": "0x1111111111111111111111111111111111111111",
+            "timestamp": 1706400000,
+            "nonce": 0,
+            "content": "BLS message",
+            "signatureType": "bls"
+          },
+          {
+            "author": "0x2222222222222222222222222222222222222222",
+            "timestamp": 1706400010,
+            "nonce": 0,
+            "content": "ECDSA message",
+            "signatureType": "ecdsa"
+          }
+        ],
+        "compress": false
+      },
+      "expectedOutput": {
+        "canEncode": false,
+        "error": "MIXED_SIGNATURE_TYPES",
+        "note": "All messages in a batch must use the same signature type for aggregation"
+      }
+    },
+    {
+      "name": "unicode_batch",
+      "description": "Batch with Unicode and emoji content",
+      "input": {
+        "baseTimestamp": 1706400000,
+        "dictionaryRef": "0x0000000000000000000000000000000000000000000000000000000000000000",
+        "messages": [
+          {
+            "author": "0x1111111111111111111111111111111111111111",
+            "timestamp": 1706400000,
+            "nonce": 0,
+            "content": "Hello 世界! 🌍",
+            "signatureType": "bls"
+          },
+          {
+            "author": "0x2222222222222222222222222222222222222222",
+            "timestamp": 1706400010,
+            "nonce": 0,
+            "content": "مرحبا بالعالم 🚀",
+            "signatureType": "bls"
+          },
+          {
+            "author": "0x3333333333333333333333333333333333333333",
+            "timestamp": 1706400020,
+            "nonce": 0,
+            "content": "שלום עולם 💎",
+            "signatureType": "bls"
+          },
+          {
+            "author": "0x4444444444444444444444444444444444444444",
+            "timestamp": 1706400030,
+            "nonce": 0,
+            "content": "안녕하세요 세계 🔥",
+            "signatureType": "bls"
+          }
+        ],
+        "compress": false
+      },
+      "expectedOutput": {
+        "magic": "0x534f4231",
+        "version": 1,
+        "authorCount": 4,
+        "messageCount": 4,
+        "canEncode": true,
+        "canDecode": true,
+        "note": "UTF-8 encoding preserves all characters correctly"
+      }
+    },
+    {
+      "name": "large_batch_1000_messages",
+      "description": "Large batch with 1000 messages from 100 authors - specification only",
+      "generatorSpec": {
+        "messageCount": 1000,
+        "authorCount": 100,
+        "contentPattern": "Message #{index} from author {authorIndex}: Testing batch capacity at scale with typical social content",
+        "timestampBase": 1706400000,
+        "timestampIncrement": 1,
+        "nonceStrategy": "per-author-sequential"
+      },
+      "expectedOutput": {
+        "magic": "0x534f4231",
+        "version": 1,
+        "authorCount": 100,
+        "messageCount": 1000,
+        "hasCompression": true,
+        "estimatedSizeRange": {
+          "uncompressed": [70000, 90000],
+          "compressed": [8000, 12000],
+          "note": "With 9x compression ratio"
+        },
+        "canEncode": true,
+        "canDecode": true,
+        "roundTripIntegrity": true,
+        "performanceTargets": {
+          "encodeTimeMs": 100,
+          "decodeTimeMs": 50,
+          "note": "Targets for reasonable hardware"
+        }
+      }
+    },
+    {
+      "name": "max_capacity_batch",
+      "description": "Maximum capacity batch testing blob limits - specification only",
+      "generatorSpec": {
+        "messageCount": 11500,
+        "authorCount": 200,
+        "contentPattern": "Max capacity test message #{index}",
+        "note": "Empirical max from compression research: 11,543 messages per blob"
+      },
+      "expectedOutput": {
+        "magic": "0x534f4231",
+        "version": 1,
+        "authorCount": 200,
+        "messageCount": 11500,
+        "hasCompression": true,
+        "estimatedSizeRange": {
+          "compressed": [120000, 131072],
+          "note": "Should fit within 128KB blob limit"
+        },
+        "canEncode": true,
+        "canDecode": true,
+        "blobCompatible": true
+      }
+    }
+  ]
+}

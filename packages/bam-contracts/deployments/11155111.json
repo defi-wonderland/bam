@@ -1,0 +1,19 @@
+{
+  "chainId": 11155111,
+  "name": "sepolia",
+  "timestamp": "2026-03-17T18:32:09.035Z",
+  "contracts": {
+    "SocialBlobsCore": {
+      "address": "0x11a825a0774d0471292eab4706743bffcdd5d137"
+    },
+    "SimpleBoolVerifier": {
+      "address": "0xdec5faa3e32d6296e53bae7e359e059b58a482f4"
+    },
+    "BLSRegistry": {
+      "address": "0x15866bf5a8724f2aa9fe75e262d8f00ba2818e25"
+    },
+    "BLSExposer": {
+      "address": "0x443029b4b96fbf2d8feba77d828a394d19615a48"
+    }
+  }
+}

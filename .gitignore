@@ -1,0 +1,39 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+.next/
+
+# Foundry
+**/bam-contracts/lib/
+**/bam-contracts/out/
+**/bam-contracts/cache/
+**/bam-contracts/broadcast/
+.foundry/cache/
+.svm/
+
+# Environment
+.env
+.env.*
+!.env.*.example
+
+# SQLite
+*.db
+*.db-wal
+*.db-shm
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+
+# Archives
+*.tgz
+
+# Claude Code
+.claude/context-snapshots/
+.claude/settings.local.json

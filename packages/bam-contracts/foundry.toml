@@ -1,0 +1,42 @@
+[profile.default]
+src = "src"
+out = "out"
+libs = ["lib"]
+auto_detect_solc = true
+solc_version = "0.8.24"
+offline = false
+optimizer = true
+optimizer_runs = 200
+via_ir = true
+evm_version = "cancun"
+
+[profile.default.fuzz]
+runs = 1000
+max_test_rejects = 65536
+
+[profile.ci]
+fuzz = { runs = 10000 }
+
+[profile.default.invariant]
+runs = 256
+depth = 15
+
+[fmt]
+bracket_spacing = true
+int_types = "long"
+line_length = 100
+multiline_func_header = "attributes_first"
+number_underscore = "thousands"
+quote_style = "double"
+single_line_statement_blocks = "single"
+tab_width = 4
+wrap_comments = true
+
+[rpc_endpoints]
+sepolia = "${SEPOLIA_RPC_URL}"
+mainnet = "${MAINNET_RPC_URL}"
+local = "http://localhost:8545"
+
+[etherscan]
+sepolia = { key = "${ETHERSCAN_API_KEY}" }
+mainnet = { key = "${ETHERSCAN_API_KEY}" }

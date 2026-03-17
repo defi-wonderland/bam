@@ -1,0 +1,312 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Social-Blobs Error Test Vectors",
+  "description": "Test vectors for validating error handling and invalid inputs",
+  "version": "0.1.0",
+  "generated": "2026-01-27",
+  "vectors": [
+    {
+      "name": "content_too_long_chars",
+      "description": "Message exceeds 280 character limit",
+      "input": {
+        "author": "0x1111111111111111111111111111111111111111",
+        "timestamp": 1706400000,
+        "nonce": 0,
+        "content": "This message is intentionally over 280 characters to test the validation. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur.",
+        "signatureType": "bls"
+      },
+      "expectedError": {
+        "code": "CONTENT_TOO_LONG",
+        "type": "ContentTooLongError",
+        "shouldReject": true
+      }
+    },
+    {
+      "name": "content_too_long_bytes",
+      "description": "Message within character limit but exceeds byte limit",
+      "input": {
+        "author": "0x1111111111111111111111111111111111111111",
+        "timestamp": 1706400000,
+        "nonce": 0,
+        "content": "🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍",
+        "signatureType": "bls",
+        "note": "280 emoji = 1120 bytes (4 bytes each), exceeds 1120 byte limit"
+      },
+      "expectedError": {
+        "code": "CONTENT_TOO_LONG",
+        "type": "ContentTooLongError",
+        "shouldReject": true
+      }
+    },
+    {
+      "name": "invalid_address_format",
+      "description": "Author address is not a valid Ethereum address",
+      "input": {
+        "author": "not_an_address",
+        "timestamp": 1706400000,
+        "nonce": 0,
+        "content": "Valid content",
+        "signatureType": "bls"
+      },
+      "expectedError": {
+        "code": "INVALID_ADDRESS",
+        "shouldReject": true
+      }
+    },
+    {
+      "name": "invalid_address_length",
+      "description": "Address is hex but wrong length",
+      "input": {
+        "author": "0x1234",
+        "timestamp": 1706400000,
+        "nonce": 0,
+        "content": "Valid content",
+        "signatureType": "bls"
+      },
+      "expectedError": {
+        "code": "INVALID_ADDRESS",
+        "shouldReject": true
+      }
+    },
+    {
+      "name": "negative_timestamp",
+      "description": "Timestamp is negative",
+      "input": {
+        "author": "0x1111111111111111111111111111111111111111",
+        "timestamp": -1,
+        "nonce": 0,
+        "content": "Valid content",
+        "signatureType": "bls"
+      },
+      "expectedError": {
+        "code": "INVALID_TIMESTAMP",
+        "shouldReject": true
+      }
+    },
+    {
+      "name": "future_timestamp",
+      "description": "Timestamp is too far in the future",
+      "input": {
+        "author": "0x1111111111111111111111111111111111111111",
+        "timestamp": 9999999999,
+        "nonce": 0,
+        "content": "Valid content",
+        "signatureType": "bls"
+      },
+      "expectedError": {
+        "code": "TIMESTAMP_TOO_FAR_FUTURE",
+        "shouldReject": true,
+        "note": "Exact threshold depends on implementation"
+      }
+    },
+    {
+      "name": "nonce_too_large",
+      "description": "Nonce exceeds uint16 maximum (65535)",
+      "input": {
+        "author": "0x1111111111111111111111111111111111111111",
+        "timestamp": 1706400000,
+        "nonce": 65536,
+        "content": "Valid content",
+        "signatureType": "bls"
+      },
+      "expectedError": {
+        "code": "NONCE_OVERFLOW",
+        "shouldReject": true
+      }
+    },
+    {
+      "name": "negative_nonce",
+      "description": "Negative nonce value",
+      "input": {
+        "author": "0x1111111111111111111111111111111111111111",
+        "timestamp": 1706400000,
+        "nonce": -1,
+        "content": "Valid content",
+        "signatureType": "bls"
+      },
+      "expectedError": {
+        "code": "INVALID_NONCE",
+        "shouldReject": true
+      }
+    },
+    {
+      "name": "invalid_signature_type",
+      "description": "Signature type is not 'bls' or 'ecdsa'",
+      "input": {
+        "author": "0x1111111111111111111111111111111111111111",
+        "timestamp": 1706400000,
+        "nonce": 0,
+        "content": "Valid content",
+        "signatureType": "rsa"
+      },
+      "expectedError": {
+        "code": "INVALID_SIGNATURE_TYPE",
+        "shouldReject": true
+      }
+    },
+    {
+      "name": "invalid_replyTo_format",
+      "description": "replyTo is not a valid bytes32 hash",
+      "input": {
+        "author": "0x1111111111111111111111111111111111111111",
+        "timestamp": 1706400000,
+        "nonce": 0,
+        "content": "Valid content",
+        "signatureType": "bls",
+        "replyTo": "not_a_hash"
+      },
+      "expectedError": {
+        "code": "INVALID_REPLY_TO",
+        "shouldReject": true
+      }
+    },
+    {
+      "name": "invalid_utf8",
+      "description": "Content contains invalid UTF-8 sequences",
+      "input": {
+        "author": "0x1111111111111111111111111111111111111111",
+        "timestamp": 1706400000,
+        "nonce": 0,
+        "contentBytes": "0x48656c6c6fffc280776f726c64",
+        "signatureType": "bls",
+        "note": "Contains invalid UTF-8 byte sequence 0xff"
+      },
+      "expectedError": {
+        "code": "INVALID_UTF8",
+        "type": "InvalidUtf8Error",
+        "shouldReject": true
+      }
+    },
+    {
+      "name": "batch_too_many_authors",
+      "description": "Batch exceeds 256 author limit",
+      "input": {
+        "baseTimestamp": 1706400000,
+        "authorCount": 257,
+        "messageCount": 257
+      },
+      "expectedError": {
+        "code": "TOO_MANY_AUTHORS",
+        "shouldReject": true
+      }
+    },
+    {
+      "name": "batch_author_index_oob",
+      "description": "Message references author index beyond author table",
+      "binaryInput": {
+        "note": "Binary batch with authorCount=2 but message references index 3",
+        "shouldFailOnDecode": true
+      },
+      "expectedError": {
+        "code": "AUTHOR_INDEX_OOB",
+        "type": "AuthorIndexError",
+        "shouldReject": true
+      }
+    },
+    {
+      "name": "batch_timestamp_delta_overflow",
+      "description": "Timestamp delta exceeds uint16 maximum",
+      "input": {
+        "baseTimestamp": 1706400000,
+        "messages": [
+          {
+            "author": "0x1111111111111111111111111111111111111111",
+            "timestamp": 1706400000,
+            "nonce": 0,
+            "content": "First message",
+            "signatureType": "bls"
+          },
+          {
+            "author": "0x1111111111111111111111111111111111111111",
+            "timestamp": 1706465536,
+            "nonce": 1,
+            "content": "Second message >18.2 hours later",
+            "signatureType": "bls",
+            "note": "Delta = 65536 seconds, exceeds uint16 max of 65535"
+          }
+        ]
+      },
+      "expectedError": {
+        "code": "TIMESTAMP_OVERFLOW",
+        "type": "TimestampOverflowError",
+        "shouldReject": true
+      }
+    },
+    {
+      "name": "batch_exceeds_blob_size",
+      "description": "Batch size exceeds 128KB blob limit",
+      "input": {
+        "baseTimestamp": 1706400000,
+        "messageCount": 20000,
+        "note": "20,000 messages would exceed blob capacity even with compression"
+      },
+      "expectedError": {
+        "code": "BATCH_OVERFLOW",
+        "type": "BatchOverflowError",
+        "shouldReject": true
+      }
+    },
+    {
+      "name": "invalid_magic_number",
+      "description": "Binary data has wrong magic number",
+      "binaryInput": {
+        "magic": "0x12345678",
+        "note": "Should be 0x534F424D for message or 0x534F4231 for batch"
+      },
+      "expectedError": {
+        "code": "INVALID_MAGIC",
+        "type": "InvalidMagicError",
+        "shouldReject": true
+      }
+    },
+    {
+      "name": "unsupported_version",
+      "description": "Binary data has unsupported protocol version",
+      "binaryInput": {
+        "magic": "0x534F424D",
+        "version": 255,
+        "note": "Version 255 not supported (current version is 1)"
+      },
+      "expectedError": {
+        "code": "UNSUPPORTED_VERSION",
+        "type": "UnsupportedVersionError",
+        "shouldReject": true
+      }
+    },
+    {
+      "name": "truncated_message",
+      "description": "Binary message is truncated (incomplete)",
+      "binaryInput": {
+        "note": "Message header indicates 100 bytes of content but only 50 bytes present"
+      },
+      "expectedError": {
+        "code": "TRUNCATED_DATA",
+        "shouldReject": true
+      }
+    },
+    {
+      "name": "decompression_failed",
+      "description": "Compressed batch data cannot be decompressed",
+      "binaryInput": {
+        "note": "Batch has compression flag set but data is invalid Zstd"
+      },
+      "expectedError": {
+        "code": "DECOMPRESSION_FAILED",
+        "type": "DecompressionError",
+        "shouldReject": true
+      }
+    },
+    {
+      "name": "signature_verification_failed",
+      "description": "Signature does not verify against message hash",
+      "binaryInput": {
+        "note": "Valid format but signature does not match message content"
+      },
+      "expectedError": {
+        "code": "SIGNATURE_INVALID",
+        "type": "SignatureError",
+        "shouldReject": true
+      }
+    }
+  ]
+}

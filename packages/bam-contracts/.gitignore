@@ -1,0 +1,33 @@
+# Environment files (NEVER commit)
+.env
+.env.*
+!.env.example
+
+# Foundry build artifacts
+cache/
+out/
+
+# Broadcast files (deployment records - optional to commit)
+# Uncomment if you want to track deployments
+# broadcast/
+
+# Coverage reports
+lcov.info
+coverage/
+
+# Gas snapshots
+.gas-snapshot
+
+# Node modules (if using npm for tooling)
+node_modules/
+
+# IDE
+.idea/
+.vscode/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Claude Code
+.claude/

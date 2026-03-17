@@ -1,0 +1,23 @@
+{
+  "test_corpus_size": 2000,
+  "results": [
+    {
+      "batch_size": 10,
+      "ratio_with_dict": 7.511627906976744,
+      "ratio_without_dict": 1.516431924882629,
+      "improvement_pct": 395.3488372093023
+    },
+    {
+      "batch_size": 100,
+      "ratio_with_dict": 9.786914235190098,
+      "ratio_without_dict": 4.617855652899458,
+      "improvement_pct": 111.93633952254642
+    },
+    {
+      "batch_size": 1000,
+      "ratio_with_dict": 11.312534389787608,
+      "ratio_without_dict": 8.923350694444444,
+      "improvement_pct": 26.774513040607452
+    }
+  ]
+}

@@ -1,0 +1,3 @@
+export const SOCIAL_BLOBS_CORE_ADDRESS = '0x11a825a0774d0471292eab4706743bffcdd5d137' as const;
+export const SEPOLIA_CHAIN_ID = 11155111;
+export const MAX_MESSAGE_CHARS = 280;

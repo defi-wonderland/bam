@@ -1,0 +1,31 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-gradient-to-b from-ocean-200 via-ocean-100 to-sand-100 min-h-screen;
+    @apply font-island text-ocean-900;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply bg-ocean-600 hover:bg-ocean-700 text-white font-bold py-2 px-6 rounded-lg
+           transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-danger {
+    @apply bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded-lg
+           transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .card {
+    @apply bg-white/80 backdrop-blur-sm rounded-xl shadow-lg border border-sand-200 p-6;
+  }
+
+  .message-card {
+    @apply bg-sand-50/90 backdrop-blur-sm rounded-lg border border-sand-200 p-4
+           transition-all duration-200 hover:shadow-md;
+  }
+}
