@@ -11,7 +11,7 @@ import { insertMessage, getMessages } from '@/db/queries';
 
 export async function GET(request: NextRequest) {
   const status = request.nextUrl.searchParams.get('status') || undefined;
-  const messages = getMessages(status);
+  const messages = await getMessages(status);
   return NextResponse.json({ messages });
 }
 
@@ -41,7 +41,7 @@ export async function POST(request: NextRequest) {
 
     const messageId = computeMessageId(msg);
 
-    const stored = insertMessage({
+    const stored = await insertMessage({
       message_id: messageId,
       author,
       timestamp,
@@ -53,7 +53,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ message: stored }, { status: 201 });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';
-    if (message.includes('UNIQUE constraint')) {
+    if (message.includes('UNIQUE constraint') || message.includes('duplicate key')) {
       return NextResponse.json({ error: 'Message already exists' }, { status: 409 });
     }
     return NextResponse.json({ error: message }, { status: 500 });

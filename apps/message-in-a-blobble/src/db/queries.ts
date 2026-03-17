@@ -1,92 +1,53 @@
-import { getDb } from './index';
+import type { DbMessage, DbBlobble } from './types';
+export type { DbMessage, DbBlobble } from './types';
 
-export interface DbMessage {
-  id: number;
-  message_id: string;
-  author: string;
-  timestamp: number;
-  nonce: number;
-  content: string;
-  signature: string;
-  status: 'pending' | 'posted';
-  blobble_id: string | null;
-  created_at: string;
-}
+const usePostgres = !!process.env.POSTGRES_URL;
 
-export interface DbBlobble {
-  id: string;
-  status: 'pending' | 'confirmed' | 'failed';
-  tx_hash: string | null;
-  block_number: number | null;
-  message_count: number;
-  created_at: string;
-}
-
-export function insertMessage(msg: {
-  message_id: string;
-  author: string;
-  timestamp: number;
-  nonce: number;
-  content: string;
-  signature: string;
-}): DbMessage {
-  const db = getDb();
-  const stmt = db.prepare(`
-    INSERT INTO messages (message_id, author, timestamp, nonce, content, signature)
-    VALUES (@message_id, @author, @timestamp, @nonce, @content, @signature)
-  `);
-  stmt.run(msg);
-  return db
-    .prepare('SELECT * FROM messages WHERE message_id = ?')
-    .get(msg.message_id) as DbMessage;
-}
-
-export function getMessages(status?: string): DbMessage[] {
-  const db = getDb();
-  if (status) {
-    return db
-      .prepare('SELECT * FROM messages WHERE status = ? ORDER BY created_at DESC')
-      .all(status) as DbMessage[];
+async function getImpl() {
+  if (usePostgres) {
+    return await import('./postgres');
   }
-  return db
-    .prepare('SELECT * FROM messages ORDER BY created_at DESC')
-    .all() as DbMessage[];
+  return await import('./sqlite');
 }
 
-export function getPendingMessages(): DbMessage[] {
-  return getMessages('pending');
+export async function insertMessage(msg: {
+  message_id: string;
+  author: string;
+  timestamp: number;
+  nonce: number;
+  content: string;
+  signature: string;
+}): Promise<DbMessage> {
+  const impl = await getImpl();
+  return impl.insertMessage(msg);
 }
 
-export function createBlobble(id: string, messageCount: number): DbBlobble {
-  const db = getDb();
-  db.prepare(
-    'INSERT INTO blobbles (id, message_count) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET message_count = excluded.message_count, status = \'pending\''
-  ).run(id, messageCount);
-  return db.prepare('SELECT * FROM blobbles WHERE id = ?').get(id) as DbBlobble;
+export async function getMessages(status?: string): Promise<DbMessage[]> {
+  const impl = await getImpl();
+  return impl.getMessages(status);
 }
 
-export function updateBlobbleStatus(
+export async function getPendingMessages(): Promise<DbMessage[]> {
+  const impl = await getImpl();
+  return impl.getPendingMessages();
+}
+
+export async function createBlobble(id: string, messageCount: number): Promise<DbBlobble> {
+  const impl = await getImpl();
+  return impl.createBlobble(id, messageCount);
+}
+
+export async function updateBlobbleStatus(
   id: string,
   status: 'pending' | 'confirmed' | 'failed',
   txHash?: string,
   blockNumber?: number
-): void {
-  const db = getDb();
-  db.prepare(
-    'UPDATE blobbles SET status = ?, tx_hash = ?, block_number = ? WHERE id = ?'
-  ).run(status, txHash ?? null, blockNumber ?? null, id);
+): Promise<void> {
+  const impl = await getImpl();
+  return impl.updateBlobbleStatus(id, status, txHash, blockNumber);
 }
 
-export function markMessagesPosted(messageIds: string[], blobbleId: string): void {
-  const db = getDb();
-  const stmt = db.prepare(
-    'UPDATE messages SET status = ?, blobble_id = ? WHERE message_id = ?'
-  );
-  const tx = db.transaction(() => {
-    for (const id of messageIds) {
-      stmt.run('posted', blobbleId, id);
-    }
-  });
-  tx();
+export async function markMessagesPosted(messageIds: string[], blobbleId: string): Promise<void> {
+  const impl = await getImpl();
+  return impl.markMessagesPosted(messageIds, blobbleId);
 }
-

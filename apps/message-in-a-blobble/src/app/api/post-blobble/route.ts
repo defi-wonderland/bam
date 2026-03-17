@@ -39,7 +39,7 @@ const SOCIAL_BLOBS_CORE_ABI = [
 
 export async function POST() {
   try {
-    const pending = getPendingMessages();
+    const pending = await getPendingMessages();
     if (pending.length === 0) {
       return NextResponse.json(
         { error: 'No pending messages' },
@@ -113,14 +113,14 @@ export async function POST() {
 
     const receipt = await publicClient.waitForTransactionReceipt({ hash });
 
-    createBlobble(blobbleId, pending.length);
-    updateBlobbleStatus(
+    await createBlobble(blobbleId, pending.length);
+    await updateBlobbleStatus(
       blobbleId,
       'confirmed',
       receipt.transactionHash,
       Number(receipt.blockNumber)
     );
-    markMessagesPosted(
+    await markMessagesPosted(
       pending.map((m) => m.message_id),
       blobbleId
     );
