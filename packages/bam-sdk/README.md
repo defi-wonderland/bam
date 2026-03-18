@@ -43,8 +43,11 @@ const encoded = encodeMessage({
   signatureType: 'ecdsa',
 });
 
-// Batch multiple messages (with 9x+ Zstd compression)
-const batch = encodeBatch(signedMessages, { compress: true });
+// Batch multiple messages with BPE compression
+const batch = encodeBatch(signedMessages, {
+  codec: 'bpe',
+  dictionary: bpeDictionaryBytes,
+});
 ```
 
 ### Contract Client
@@ -96,7 +99,8 @@ This works in Next.js client components, Vite, and other browser bundlers withou
 |--------|---------|
 | **Message** | `encodeMessage`, `decodeMessage`, `computeMessageHash`, `computeMessageId` |
 | **Batch** | `encodeBatch`, `decodeBatch`, `estimateBatchSize`, `validateBatch`, `buildAuthorTable` |
-| **Compression** | `compress`, `decompress`, `loadDictionary`, `isCompressed`, `compressionRatio` |
+| **BPE Codec** | `bpeEncode`, `bpeDecode`, `buildBPEDictionary`, `serializeBPEDictionary`, `deserializeBPEDictionary` |
+| **Compression (Zstd)** | `compress`, `decompress`, `loadDictionary`, `isCompressed`, `compressionRatio` |
 | **Compression (Node)** | `loadBundledDictionary`, `loadDictionaryFromFile` — requires `node:fs`, `node:crypto` |
 | **Signatures** | `signBLS`, `verifyBLS`, `aggregateBLS`, `signECDSA`, `verifyECDSA`, `recoverAddress` |
 | **Key Management** | `generateBLSPrivateKey`, `deriveBLSPublicKey`, `generateECDSAPrivateKey`, `deriveAddress` |
@@ -118,16 +122,44 @@ This works in Next.js client components, Vite, and other browser bundlers withou
 
 ## Compression
 
-The SDK bundles a trained Zstd dictionary (`data/dictionaries/v1.dict`) that achieves 9.17x
-compression on social media text at batch size 100. Load it with:
+The SDK supports two compression codecs, specified via the `codec` option on `encodeBatch`:
+
+| Codec | ID | Status | Ratio | Dependencies |
+|-------|----|--------|-------|-------------|
+| **BPE** | `0x01` | Working | ~30-40% reduction | None (pure TypeScript) |
+| **Zstd** | `0x02` | Decompression only | 9.17x (benchmarked) | `fzstd` (decompression-only) |
+
+The codec ID is stored in the batch header so `decodeBatch` automatically routes to the correct
+decompressor — no configuration needed on the read side.
+
+### BPE (recommended)
+
+BPE (Byte-Pair Encoding) is a pure TypeScript codec with zero dependencies. Build a dictionary
+from a corpus, serialize it, and pass it to `encodeBatch`:
 
 ```typescript
-import { loadBundledDictionary, compress, decompress } from 'bam-sdk';
+import { buildBPEDictionary, serializeBPEDictionary, encodeBatch, decodeBatch } from 'bam-sdk';
 
-const dict = await loadBundledDictionary(); // Node.js only
-const compressed = compress(data, dict);
-const original = decompress(compressed, dict);
+// Build dictionary from training corpus (do this once)
+const dict = buildBPEDictionary(corpusBytes);
+const serialized = serializeBPEDictionary(dict);
+
+// Encode with BPE compression
+const batch = encodeBatch(messages, { codec: 'bpe', dictionary: serialized });
+
+// Decode — reads codec byte from header, no codec option needed
+const decoded = decodeBatch(batch.data, { data: serialized, id: 0 });
 ```
+
+The dictionary is identified by its keccak hash in the `dictionaryRef` header field. Different
+dictionaries can be used for different batches — the decoder just needs access to the matching
+dictionary.
+
+### Zstd (future)
+
+The SDK bundles a trained Zstd dictionary (`data/dictionaries/v1.dict`) and supports Zstd
+decompression via `fzstd`. Zstd compression is not yet implemented (requires a WASM or native
+Zstd library). See `ISSUE_COMPRESSION_CODEC.md` at the repo root for the plan.
 
 > **Note:** `loadBundledDictionary` and `loadDictionaryFromFile` are Node-only (they use `node:fs`
 > and `node:crypto`). In the browser, use `loadDictionary(bytes)` with dictionary bytes fetched
@@ -139,7 +171,7 @@ const original = decompress(compressed, dict);
 # Build
 pnpm build
 
-# Unit tests (88)
+# Unit tests (109)
 pnpm test:run
 
 # Integration tests (37, requires Anvil)

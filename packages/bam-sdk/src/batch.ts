@@ -8,6 +8,7 @@ import type {
   BatchHeader,
   BatchOptions,
   Bytes32,
+  CompressionCodec,
   DecodeBatchOptions,
   DecodedBatch,
   EncodedBatch,
@@ -21,6 +22,9 @@ import {
   BLS_SIGNATURE_SIZE,
   BLOB_SIZE_LIMIT,
   BYTES32_SIZE,
+  CODEC_BPE,
+  CODEC_NONE,
+  CODEC_ZSTD,
   MAGIC_BATCH,
   MAX_AUTHORS_PER_BATCH,
   MAX_TIMESTAMP_DELTA,
@@ -40,6 +44,7 @@ import {
   UnsupportedVersionError,
 } from './errors.js';
 import { compress, decompress, loadDictionary, type ZstdDictionary } from './compression.js';
+import { bpeEncode, bpeDecode, deserializeDictionary } from './bpe.js';
 import { hexToBytes, bytesToHex } from './message.js';
 import { keccak_256 } from '@noble/hashes/sha3';
 
@@ -122,6 +127,10 @@ function encodeBatchHeader(header: BatchHeader): Uint8Array {
 
   // Flags (1 byte) - will be set by caller
   view.setUint8(offset, 0); // Placeholder
+  offset += 1;
+
+  // Codec ID (1 byte) - will be set by caller
+  view.setUint8(offset, CODEC_NONE); // Placeholder
   offset += 1;
 
   // Dictionary reference (32 bytes)
@@ -290,13 +299,16 @@ export function encodeBatch(messages: SignedMessage[], options?: BatchOptions): 
     offset += msgBytes.length;
   }
 
-  // Compress if requested
-  const shouldCompress = options?.compress !== false;
+  // Resolve compression codec
+  const codec: CompressionCodec = options?.codec ?? (options?.compress === false ? 'none' : 'none');
   let compressedData: Uint8Array;
   let compressionRatio: number;
 
-  if (shouldCompress && options?.dictionary) {
-    // Convert Uint8Array to ZstdDictionary
+  if (codec === 'bpe' && options?.dictionary) {
+    const bpeDict = deserializeDictionary(options.dictionary);
+    compressedData = bpeEncode(uncompressedMessages, bpeDict);
+    compressionRatio = uncompressedSize / compressedData.length;
+  } else if (codec === 'zstd' && options?.dictionary) {
     const dict = loadDictionary(options.dictionary);
     compressedData = compress(uncompressedMessages, dict, options.compressionLevel);
     compressionRatio = uncompressedSize / compressedData.length;
@@ -323,14 +335,18 @@ export function encodeBatch(messages: SignedMessage[], options?: BatchOptions): 
 
   // Update flags in header
   let flags = SIG_TYPE_BLS; // BLS aggregate signature
-  if (shouldCompress && options?.dictionary) {
+  if (codec !== 'none') {
     flags |= BATCH_FLAG_COMPRESSED;
   }
   batchBuffer[5] = flags; // Flags byte at offset 5
 
+  // Write codec ID byte at offset 6
+  const codecId = codec === 'bpe' ? CODEC_BPE : codec === 'zstd' ? CODEC_ZSTD : CODEC_NONE;
+  batchBuffer[6] = codecId;
+
   // Update message count in header
-  // Offset: 4 magic + 1 version + 1 flags + 32 dict + 4 timestamp + 2 authorCount + (N * 20) authors
-  const msgCountOffset = 44 + authorTable.length * ADDRESS_SIZE;
+  // Offset: 4 magic + 1 version + 1 flags + 1 codec + 32 dict + 4 timestamp + 2 authorCount + (N * 20) authors
+  const msgCountOffset = 45 + authorTable.length * ADDRESS_SIZE;
   batchView.setUint16(msgCountOffset, messages.length, false);
 
   offset = headerBytes.length;
@@ -361,6 +377,7 @@ export function encodeBatch(messages: SignedMessage[], options?: BatchOptions): 
 function decodeBatchHeader(data: Uint8Array): {
   header: BatchHeader;
   offset: number;
+  codecId: number;
 } {
   const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
   let offset = 0;
@@ -387,6 +404,10 @@ function decodeBatchHeader(data: Uint8Array): {
   if (flags & 0b11100000) {
     throw new InvalidFlagsError(flags, 'Reserved bits must be zero');
   }
+
+  // Codec ID (1 byte)
+  const codecId = view.getUint8(offset);
+  offset += 1;
 
   // Dictionary reference (32 bytes)
   const dictionaryRef = bytesToHex(data.slice(offset, offset + BYTES32_SIZE)) as `0x${string}`;
@@ -429,7 +450,7 @@ function decodeBatchHeader(data: Uint8Array): {
     aggregateSignature,
   };
 
-  return { header, offset };
+  return { header, offset, codecId };
 }
 
 /**
@@ -537,7 +558,7 @@ export function decodeBatch(
 
   const batchStartOffset = decodeOptions?.batchStartOffset ?? 0;
   // Decode header
-  const { header, offset: headerEndOffset } = decodeBatchHeader(data);
+  const { header, offset: headerEndOffset, codecId } = decodeBatchHeader(data);
 
   let offset = headerEndOffset;
   const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
@@ -549,12 +570,17 @@ export function decodeBatch(
   // Compressed data
   const compressedData = data.slice(offset, offset + compressedLength);
 
-  // Decompress if needed
+  // Decompress based on codec ID
   const flags = data[5]; // Flags at offset 5
-  const isCompressed = (flags & BATCH_FLAG_COMPRESSED) !== 0;
+  const isCompressedFlag = (flags & BATCH_FLAG_COMPRESSED) !== 0;
 
   let messageData: Uint8Array;
-  if (isCompressed && dictionary) {
+  if (isCompressedFlag && codecId === CODEC_BPE && dictionary) {
+    // For BPE, the dictionary's raw data is the serialized BPE dict
+    const rawBytes = dictionary.data;
+    const bpeDict = deserializeDictionary(rawBytes);
+    messageData = bpeDecode(compressedData, bpeDict);
+  } else if (isCompressedFlag && codecId === CODEC_ZSTD && dictionary) {
     messageData = decompress(compressedData, dictionary);
   } else {
     messageData = compressedData;
@@ -566,8 +592,8 @@ export function decodeBatch(
 
   // We need to know how many messages to decode
   // This is in the header at a specific offset
-  // Offset: 4 (magic) + 1 (version) + 1 (flags) + 32 (dict) + 4 (timestamp) + 2 (author count) + (N * 20) (authors)
-  const msgCountOffset = 44 + header.authors.length * ADDRESS_SIZE;
+  // Offset: 4 (magic) + 1 (version) + 1 (flags) + 1 (codec) + 32 (dict) + 4 (timestamp) + 2 (author count) + (N * 20) (authors)
+  const msgCountOffset = 45 + header.authors.length * ADDRESS_SIZE;
   const messageCount = new DataView(data.buffer, data.byteOffset + msgCountOffset, 2).getUint16(
     0,
     false

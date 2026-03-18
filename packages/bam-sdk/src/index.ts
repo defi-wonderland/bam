@@ -14,6 +14,7 @@ export type {
   BatchOptions,
   Bytes32,
   ClientOptions,
+  CompressionCodec,
   DecodeBatchOptions,
   DecodedBatch,
   DictionaryInfo,
@@ -47,6 +48,9 @@ export {
   BLOB_SIZE_LIMIT,
   BLOB_USABLE_CAPACITY,
   BYTES32_SIZE,
+  CODEC_BPE,
+  CODEC_NONE,
+  CODEC_ZSTD,
   DEFAULT_COMPRESSION_LEVEL,
   DICTIONARY_V1_ID,
   ECDSA_SIGNATURE_SIZE,
@@ -123,6 +127,18 @@ export {
 } from './compression.js';
 
 export type { ZstdDictionary } from './compression.js';
+
+// BPE codec
+export {
+  bpeDecode,
+  bpeEncode,
+  buildDictionary as buildBPEDictionary,
+  deserializeDictionary as deserializeBPEDictionary,
+  serializeDictionary as serializeBPEDictionary,
+  BPE_SERIALIZED_SIZE,
+} from './bpe.js';
+
+export type { BPEDictionary } from './bpe.js';
 
 // Node-only compression functions (loadBundledDictionary, loadDictionaryFromFile)
 export { loadBundledDictionary, loadDictionaryFromFile } from './compression-node.js';

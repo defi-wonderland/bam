@@ -216,15 +216,20 @@ export interface Batch {
   messages: BatchedMessage[];
 }
 
+/** Compression codec type */
+export type CompressionCodec = 'none' | 'bpe' | 'zstd';
+
 /**
  * Batch encoding options
  */
 export interface BatchOptions {
-  /** Compression dictionary bytes */
+  /** Compression codec to use (default 'none') */
+  codec?: CompressionCodec;
+  /** Compression dictionary bytes (Zstd raw dict for 'zstd', serialized BPE dict for 'bpe') */
   dictionary?: Uint8Array;
-  /** Compression level (1-22, default 12) */
+  /** Compression level (1-22, default 12) — only used with 'zstd' codec */
   compressionLevel?: number;
-  /** Whether to compress (default true) */
+  /** @deprecated Use codec instead. Whether to compress (default true) */
   compress?: boolean;
 }
 

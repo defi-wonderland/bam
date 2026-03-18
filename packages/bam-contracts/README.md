@@ -114,6 +114,10 @@ forge fmt
 | BLSExposer | `0x0136454b435fE6cCa5F7b8A6a8cFB5B549afB717` |
 | SimpleBoolVerifier | `0x5163647B0057C5d07e568220AdD45D36C6b86C1b` |
 
+## Future Work
+
+- **On-chain BPE Decoder**: Deploy a contract with an embedded compression dictionary that can decompress BPE-encoded batch payloads on-chain. This would enable fully on-chain message extraction without relying on off-chain decompression. See SocialBlobs' `decoder.vy` for a reference Vyper implementation using 12-bit codes and a 10KB dictionary injected at deploy time.
+
 ## License
 
 MIT

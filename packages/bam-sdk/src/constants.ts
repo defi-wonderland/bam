@@ -49,7 +49,7 @@ export const BYTES32_SIZE = 32;
 export const MESSAGE_HEADER_SIZE = 33;
 
 /** Batch header fixed size (excluding author table) */
-export const BATCH_HEADER_FIXED_SIZE = 94;
+export const BATCH_HEADER_FIXED_SIZE = 95;
 
 /** Blob size limit in bytes */
 export const BLOB_SIZE_LIMIT = 131072; // 128 KB
@@ -88,6 +88,15 @@ export const FLAG_PK_REGISTRY = 0b00000010;
 export const BATCH_FLAG_SIGNATURE_MASK = 0b00000011;
 export const BATCH_FLAG_COMPRESSED = 0b00000100;
 export const BATCH_FLAG_PK_REGISTRY = 0b00010000;
+
+/**
+ * Compression codec identifiers.
+ * Stored as a 1-byte field after the batch flags to identify the codec used.
+ * The decoder reads this byte to determine how to decompress the payload.
+ */
+export const CODEC_NONE = 0x00;
+export const CODEC_BPE = 0x01;
+export const CODEC_ZSTD = 0x02;
 
 /** BLS domain separator for message signing */
 export const BLS_DOMAIN_PREFIX = 'SocialBlobs-v1';
