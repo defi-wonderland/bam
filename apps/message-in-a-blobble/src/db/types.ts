@@ -8,6 +8,8 @@ export interface DbMessage {
   signature: string;
   status: 'pending' | 'posted';
   blobble_id: string | null;
+  tx_hash: string | null;
+  block_number: number | null;
   created_at: string;
 }
 

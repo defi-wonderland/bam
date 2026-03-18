@@ -47,6 +47,28 @@ export async function updateBlobbleStatus(
   return impl.updateBlobbleStatus(id, status, txHash, blockNumber);
 }
 
+export async function getAllBlobbleTxHashes(): Promise<string[]> {
+  const impl = await getImpl();
+  return impl.getAllBlobbleTxHashes();
+}
+
+export async function getLastConfirmedBlobble(): Promise<DbBlobble | null> {
+  const impl = await getImpl();
+  return impl.getLastConfirmedBlobble();
+}
+
+export async function insertSyncedMessage(msg: {
+  message_id: string;
+  author: string;
+  timestamp: number;
+  nonce: number;
+  content: string;
+  blobble_id: string;
+}): Promise<void> {
+  const impl = await getImpl();
+  return impl.insertSyncedMessage(msg);
+}
+
 export async function markMessagesPosted(messageIds: string[], blobbleId: string): Promise<void> {
   const impl = await getImpl();
   return impl.markMessagesPosted(messageIds, blobbleId);

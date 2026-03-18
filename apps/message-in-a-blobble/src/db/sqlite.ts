@@ -57,14 +57,18 @@ export function insertMessage(msg: {
 
 export function getMessages(status?: string): DbMessage[] {
   const db = getDb();
-  if (status) {
-    return db
-      .prepare('SELECT * FROM messages WHERE status = ? ORDER BY created_at DESC')
-      .all(status) as DbMessage[];
-  }
-  return db
-    .prepare('SELECT * FROM messages ORDER BY created_at DESC')
-    .all() as DbMessage[];
+  const query = status
+    ? db.prepare(`
+        SELECT m.*, b.tx_hash, b.block_number
+        FROM messages m LEFT JOIN blobbles b ON m.blobble_id = b.id
+        WHERE m.status = ? ORDER BY m.created_at DESC
+      `)
+    : db.prepare(`
+        SELECT m.*, b.tx_hash, b.block_number
+        FROM messages m LEFT JOIN blobbles b ON m.blobble_id = b.id
+        ORDER BY m.created_at DESC
+      `);
+  return (status ? query.all(status) : query.all()) as DbMessage[];
 }
 
 export function getPendingMessages(): DbMessage[] {
@@ -89,6 +93,37 @@ export function updateBlobbleStatus(
   db.prepare(
     'UPDATE blobbles SET status = ?, tx_hash = ?, block_number = ? WHERE id = ?'
   ).run(status, txHash ?? null, blockNumber ?? null, id);
+}
+
+export function getAllBlobbleTxHashes(): string[] {
+  const db = getDb();
+  const rows = db
+    .prepare("SELECT tx_hash FROM blobbles WHERE tx_hash IS NOT NULL")
+    .all() as { tx_hash: string }[];
+  return rows.map((r) => r.tx_hash);
+}
+
+export function getLastConfirmedBlobble(): DbBlobble | null {
+  const db = getDb();
+  const row = db
+    .prepare("SELECT * FROM blobbles WHERE status = 'confirmed' ORDER BY created_at DESC LIMIT 1")
+    .get();
+  return (row as DbBlobble) ?? null;
+}
+
+export function insertSyncedMessage(msg: {
+  message_id: string;
+  author: string;
+  timestamp: number;
+  nonce: number;
+  content: string;
+  blobble_id: string;
+}): void {
+  const db = getDb();
+  db.prepare(`
+    INSERT OR IGNORE INTO messages (message_id, author, timestamp, nonce, content, signature, status, blobble_id)
+    VALUES (@message_id, @author, @timestamp, @nonce, @content, '', 'posted', @blobble_id)
+  `).run(msg);
 }
 
 export function markMessagesPosted(messageIds: string[], blobbleId: string): void {

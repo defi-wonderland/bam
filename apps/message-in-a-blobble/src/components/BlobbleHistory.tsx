@@ -39,30 +39,40 @@ async function fetchBlobbleDetail(txHash: string): Promise<BlobbleDetail> {
   return res.json();
 }
 
-export function BlobbleHistory() {
+export function OnChainBlobbles() {
+  const [expanded, setExpanded] = useState(true);
   const { data: blobbles = [], isLoading } = useQuery({
     queryKey: ['blobbles'],
     queryFn: fetchBlobbles,
   });
 
-  if (isLoading) {
-    return <div className="text-center text-ocean-400 py-4">Loading on-chain blobbles...</div>;
-  }
-
-  if (blobbles.length === 0) {
-    return null;
-  }
-
   return (
     <div className="mt-8">
-      <h3 className="text-lg font-bold text-ocean-700 mb-3">
-        On-Chain Blobbles ({blobbles.length})
-      </h3>
-      <div className="space-y-3">
-        {blobbles.map((b) => (
-          <BlobbleCard key={b.txHash} blobble={b} />
-        ))}
-      </div>
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="flex items-center justify-between w-full text-left"
+      >
+        <h3 className="text-lg font-bold text-ocean-700">
+          On-Chain Blobbles {!isLoading && `(${blobbles.length})`}
+        </h3>
+        <span className="text-ocean-500 text-sm">
+          {expanded ? 'Hide' : 'Show'}
+        </span>
+      </button>
+
+      {expanded && (
+        <div className="mt-3 space-y-3">
+          {isLoading && (
+            <div className="text-center text-ocean-400 py-4">Loading on-chain blobbles...</div>
+          )}
+          {blobbles.map((b) => (
+            <BlobbleCard key={b.txHash} blobble={b} />
+          ))}
+          {!isLoading && blobbles.length === 0 && (
+            <p className="text-sm text-ocean-400">No on-chain blobbles found</p>
+          )}
+        </div>
+      )}
     </div>
   );
 }

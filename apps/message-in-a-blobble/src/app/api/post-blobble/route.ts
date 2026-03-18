@@ -26,6 +26,7 @@ import {
   markMessagesPosted,
 } from '@/db/queries';
 import { SOCIAL_BLOBS_CORE_ADDRESS } from '@/lib/constants';
+import { COOLDOWN_MS, getLastPostTime } from '@/lib/poster-state';
 
 const SOCIAL_BLOBS_CORE_ABI = [
   {
@@ -39,6 +40,17 @@ const SOCIAL_BLOBS_CORE_ABI = [
 
 export async function POST() {
   try {
+    // Rate-limit: max once per minute
+    const now = Date.now();
+    const lastPostTime = await getLastPostTime();
+    if (lastPostTime && now - lastPostTime < COOLDOWN_MS) {
+      const remainingMs = COOLDOWN_MS - (now - lastPostTime);
+      return NextResponse.json(
+        { error: `Rate limited. Try again in ${Math.ceil(remainingMs / 1000)} seconds.` },
+        { status: 429 }
+      );
+    }
+
     const pending = await getPendingMessages();
     if (pending.length === 0) {
       return NextResponse.json(

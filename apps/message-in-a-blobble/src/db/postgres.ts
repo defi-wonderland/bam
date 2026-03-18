@@ -53,11 +53,17 @@ export async function getMessages(status?: string): Promise<DbMessage[]> {
   await ensureTables();
   if (status) {
     const { rows } = await sql`
-      SELECT * FROM messages WHERE status = ${status} ORDER BY created_at DESC
+      SELECT m.*, b.tx_hash, b.block_number
+      FROM messages m LEFT JOIN blobbles b ON m.blobble_id = b.id
+      WHERE m.status = ${status} ORDER BY m.created_at DESC
     `;
     return rows as DbMessage[];
   }
-  const { rows } = await sql`SELECT * FROM messages ORDER BY created_at DESC`;
+  const { rows } = await sql`
+    SELECT m.*, b.tx_hash, b.block_number
+    FROM messages m LEFT JOIN blobbles b ON m.blobble_id = b.id
+    ORDER BY m.created_at DESC
+  `;
   return rows as DbMessage[];
 }
 
@@ -85,6 +91,38 @@ export async function updateBlobbleStatus(
   await sql`
     UPDATE blobbles SET status = ${status}, tx_hash = ${txHash ?? null}, block_number = ${blockNumber ?? null}
     WHERE id = ${id}
+  `;
+}
+
+export async function getAllBlobbleTxHashes(): Promise<string[]> {
+  await ensureTables();
+  const { rows } = await sql`
+    SELECT tx_hash FROM blobbles WHERE tx_hash IS NOT NULL
+  `;
+  return rows.map((r) => r.tx_hash as string);
+}
+
+export async function getLastConfirmedBlobble(): Promise<DbBlobble | null> {
+  await ensureTables();
+  const { rows } = await sql`
+    SELECT * FROM blobbles WHERE status = 'confirmed' ORDER BY created_at DESC LIMIT 1
+  `;
+  return (rows[0] as DbBlobble) ?? null;
+}
+
+export async function insertSyncedMessage(msg: {
+  message_id: string;
+  author: string;
+  timestamp: number;
+  nonce: number;
+  content: string;
+  blobble_id: string;
+}): Promise<void> {
+  await ensureTables();
+  await sql`
+    INSERT INTO messages (message_id, author, timestamp, nonce, content, signature, status, blobble_id)
+    VALUES (${msg.message_id}, ${msg.author}, ${msg.timestamp}, ${msg.nonce}, ${msg.content}, '', 'posted', ${msg.blobble_id})
+    ON CONFLICT (message_id) DO NOTHING
   `;
 }
 
