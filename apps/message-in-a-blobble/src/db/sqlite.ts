@@ -95,10 +95,10 @@ export function updateBlobbleStatus(
   ).run(status, txHash ?? null, blockNumber ?? null, id);
 }
 
-export function getAllBlobbleTxHashes(): string[] {
+export function getSyncedBlobbleTxHashes(): string[] {
   const db = getDb();
   const rows = db
-    .prepare("SELECT tx_hash FROM blobbles WHERE tx_hash IS NOT NULL")
+    .prepare("SELECT tx_hash FROM blobbles WHERE tx_hash IS NOT NULL AND message_count > 0")
     .all() as { tx_hash: string }[];
   return rows.map((r) => r.tx_hash);
 }

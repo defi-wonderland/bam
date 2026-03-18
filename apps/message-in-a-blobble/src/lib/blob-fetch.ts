@@ -30,10 +30,21 @@ export async function fetchBlobForTx(txHash: string): Promise<Uint8Array | null>
       ? (block as { parentBeaconBlockRoot?: string }).parentBeaconBlockRoot ?? null
       : null;
 
-  return (
-    (await fetchFromBeaconApi(parentBeaconBlockRoot, blobVersionedHashes[0])) ??
-    (await fetchFromBlobscan(blobVersionedHashes[0]))
-  );
+  const beaconResult = await fetchFromBeaconApi(parentBeaconBlockRoot, blobVersionedHashes[0]);
+  if (beaconResult) {
+    console.log(`[blob-fetch] Fetched blob via Beacon API for tx ${txHash}`);
+    return beaconResult;
+  }
+
+  console.log(`[blob-fetch] Beacon API miss for tx ${txHash}, trying Blobscan`);
+  const blobscanResult = await fetchFromBlobscan(blobVersionedHashes[0]);
+  if (blobscanResult) {
+    console.log(`[blob-fetch] Fetched blob via Blobscan for tx ${txHash}`);
+    return blobscanResult;
+  }
+
+  console.warn(`[blob-fetch] No blob data found for tx ${txHash}`);
+  return null;
 }
 
 /**

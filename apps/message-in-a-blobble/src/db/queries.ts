@@ -47,9 +47,9 @@ export async function updateBlobbleStatus(
   return impl.updateBlobbleStatus(id, status, txHash, blockNumber);
 }
 
-export async function getAllBlobbleTxHashes(): Promise<string[]> {
+export async function getSyncedBlobbleTxHashes(): Promise<string[]> {
   const impl = await getImpl();
-  return impl.getAllBlobbleTxHashes();
+  return impl.getSyncedBlobbleTxHashes();
 }
 
 export async function getLastConfirmedBlobble(): Promise<DbBlobble | null> {

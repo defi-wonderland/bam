@@ -5,7 +5,7 @@ import { decodeBatch, computeMessageId } from 'bam-sdk';
 import { SOCIAL_BLOBS_CORE_ADDRESS } from '@/lib/constants';
 import { fetchBlobForTx, extractUsableBytes } from '@/lib/blob-fetch';
 import {
-  getAllBlobbleTxHashes,
+  getSyncedBlobbleTxHashes,
   createBlobble,
   updateBlobbleStatus,
   insertSyncedMessage,
@@ -50,7 +50,7 @@ async function fetchOnChainBlobbles(): Promise<OnChainBlobble[]> {
 export async function GET() {
   try {
     const onChain = await fetchOnChainBlobbles();
-    const knownTxHashes = new Set(await getAllBlobbleTxHashes());
+    const knownTxHashes = new Set(await getSyncedBlobbleTxHashes());
 
     const missing = onChain.filter((b) => !knownTxHashes.has(b.txHash));
 
@@ -73,7 +73,7 @@ export async function GET() {
 export async function POST() {
   try {
     const onChain = await fetchOnChainBlobbles();
-    const knownTxHashes = new Set(await getAllBlobbleTxHashes());
+    const knownTxHashes = new Set(await getSyncedBlobbleTxHashes());
 
     const missing = onChain.filter((b) => !knownTxHashes.has(b.txHash));
 
@@ -90,15 +90,26 @@ export async function POST() {
 
     for (const blobble of missing) {
       try {
+        console.log(`[sync] Processing tx ${blobble.txHash} (block ${blobble.blockNumber})`);
+
         const blobData = await fetchBlobForTx(blobble.txHash);
 
         if (!blobData) {
+          console.warn(`[sync] No blob data available for tx ${blobble.txHash}`);
           results.push({ txHash: blobble.txHash, status: 'blob_unavailable' });
           continue;
         }
 
+        console.log(`[sync] Fetched blob data: ${blobData.length} bytes`);
+
         const usableBytes = extractUsableBytes(blobData);
         const decoded = decodeBatch(usableBytes);
+
+        console.log(`[sync] Decoded ${decoded.messages.length} messages from tx ${blobble.txHash}`);
+
+        if (decoded.messages.length === 0) {
+          console.warn(`[sync] 0 messages decoded from tx ${blobble.txHash} — blob may be corrupt or not a BAM batch`);
+        }
 
         // Use versionedHash prefix as blobble ID (consistent with post-blobble which uses commitment prefix)
         const blobbleId = blobble.versionedHash.slice(0, 18);
@@ -123,6 +134,8 @@ export async function POST() {
           });
         }
 
+        console.log(`[sync] Stored blobble ${blobbleId} with ${decoded.messages.length} messages`);
+
         results.push({
           txHash: blobble.txHash,
           status: 'synced',
@@ -130,6 +143,7 @@ export async function POST() {
         });
       } catch (error) {
         const errMsg = error instanceof Error ? error.message : 'Unknown error';
+        console.error(`[sync] Failed to sync tx ${blobble.txHash}:`, errMsg);
         results.push({ txHash: blobble.txHash, status: 'error', error: errMsg });
       }
     }

@@ -94,10 +94,10 @@ export async function updateBlobbleStatus(
   `;
 }
 
-export async function getAllBlobbleTxHashes(): Promise<string[]> {
+export async function getSyncedBlobbleTxHashes(): Promise<string[]> {
   await ensureTables();
   const { rows } = await sql`
-    SELECT tx_hash FROM blobbles WHERE tx_hash IS NOT NULL
+    SELECT tx_hash FROM blobbles WHERE tx_hash IS NOT NULL AND message_count > 0
   `;
   return rows.map((r) => r.tx_hash as string);
 }
