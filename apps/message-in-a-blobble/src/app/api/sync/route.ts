@@ -1,9 +1,9 @@
 import { NextResponse } from 'next/server';
 import { createPublicClient, http, parseAbiItem } from 'viem';
 import { sepolia } from 'viem/chains';
-import { decodeBatch, computeMessageId } from 'bam-sdk';
+import { computeMessageId } from 'bam-sdk';
 import { SOCIAL_BLOBS_CORE_ADDRESS } from '@/lib/constants';
-import { fetchBlobForTx, extractUsableBytes } from '@/lib/blob-fetch';
+import { fetchBlobForTx, extractUsableBytes, decodeBlobBatch } from '@/lib/blob-fetch';
 import {
   getSyncedBlobbleTxHashes,
   createBlobble,
@@ -103,7 +103,7 @@ export async function POST() {
         console.log(`[sync] Fetched blob data: ${blobData.length} bytes`);
 
         const usableBytes = extractUsableBytes(blobData);
-        const decoded = decodeBatch(usableBytes);
+        const decoded = decodeBlobBatch(usableBytes);
 
         console.log(`[sync] Decoded ${decoded.messages.length} messages from tx ${blobble.txHash}`);
 

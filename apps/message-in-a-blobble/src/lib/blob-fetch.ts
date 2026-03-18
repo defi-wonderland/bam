@@ -1,5 +1,37 @@
 import { createPublicClient, http, commitmentsToVersionedHashes } from 'viem';
 import { sepolia } from 'viem/chains';
+import { decodeBatch as sdkDecodeBatch } from 'bam-sdk';
+
+/**
+ * Decode a batch from usable blob bytes, handling both old (v1, no codec byte)
+ * and new (v2, with codec byte at offset 6) formats.
+ *
+ * If the new SDK's decodeBatch returns 0 messages, we try inserting a 0x00
+ * codec byte at offset 6 (upgrading a v1 blob to v2 layout) and retry.
+ */
+export function decodeBlobBatch(usableBytes: Uint8Array) {
+  const decoded = sdkDecodeBatch(usableBytes);
+  if (decoded.messages.length > 0) {
+    return decoded;
+  }
+
+  // Try patching as a v1 blob: insert a 0x00 codec byte at offset 6
+  const patched = new Uint8Array(usableBytes.length + 1);
+  patched.set(usableBytes.slice(0, 6), 0);   // magic(4) + version(1) + flags(1)
+  patched[6] = 0x00;                          // codec = NONE
+  patched.set(usableBytes.slice(6), 7);       // rest of the data
+
+  try {
+    const retried = sdkDecodeBatch(patched);
+    if (retried.messages.length > 0) {
+      return retried;
+    }
+  } catch {
+    // patching didn't help, return original result
+  }
+
+  return decoded;
+}
 
 /**
  * Fetch blob data for a transaction, trying Beacon API first, then Blobscan.

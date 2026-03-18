@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createPublicClient, http } from 'viem';
 import { sepolia } from 'viem/chains';
-import { decodeBatch } from 'bam-sdk';
-import { fetchBlobForTx, extractUsableBytes } from '@/lib/blob-fetch';
+import { fetchBlobForTx, extractUsableBytes, decodeBlobBatch } from '@/lib/blob-fetch';
 
 export async function GET(
   _request: NextRequest,
@@ -46,7 +45,7 @@ export async function GET(
     }
 
     const usableBytes = extractUsableBytes(blobData);
-    const decoded = decodeBatch(usableBytes);
+    const decoded = decodeBlobBatch(usableBytes);
 
     const messages = decoded.messages.map((m) => ({
       author: m.author,
