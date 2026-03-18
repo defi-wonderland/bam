@@ -23,7 +23,7 @@ The blob transaction is registered with the `SocialBlobsCore` contract on Sepoli
 - **React Query** for data fetching and cache invalidation
 - **bam-sdk/browser** for client-side message hashing
 - **bam-sdk** (full) for server-side signature verification, batch encoding, and KZG
-- **better-sqlite3** for persistent message storage
+- **better-sqlite3** (local) / **Vercel Postgres** (deployed) for persistent message storage
 - **viem** for EIP-4844 blob transactions
 - **Tailwind CSS** with a desert island theme
 
@@ -47,6 +47,7 @@ cp apps/message-in-a-blobble/.env.local.example apps/message-in-a-blobble/.env.l
 | `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` | WalletConnect project ID for RainbowKit |
 | `POSTER_PRIVATE_KEY` | Private key for the server wallet that pays for blob transactions (fund with Sepolia ETH) |
 | `BEACON_API_URL` | Beacon chain API for blob retrieval (e.g. `https://eth-sepoliabeacon.g.alchemy.com/v2/KEY`) |
+| `POSTGRES_URL` | Postgres connection string (auto-set by Vercel Postgres — uses SQLite locally when unset) |
 
 ### Run
 
