@@ -82,7 +82,7 @@ export function MessageComposer() {
       <textarea
         value={content}
         onChange={(e) => setContent(e.target.value)}
-        placeholder="Write your message to cast into the blockchain sea..."
+        placeholder="Write your message to cast into Ethereum blobspace..."
         className="w-full p-3 border border-sand-300 rounded-lg bg-sand-50 text-ocean-900
                    placeholder:text-sand-400 focus:outline-none focus:ring-2 focus:ring-ocean-400
                    resize-none h-24 font-island"
