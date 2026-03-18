@@ -33,7 +33,7 @@ export function IslandScene() {
         Message in a Blobble
       </h1>
       <p className="text-ocean-600 mb-6 text-lg">
-        Cast your message into Ethereum blobspace via EIP-4844 blobs
+        Cast your message into Sepolia blobspace via EIP-4844 blobs
       </p>
 
       <div className="flex justify-center">
