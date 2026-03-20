@@ -17,7 +17,6 @@ export type SignatureType = 'bls' | 'ecdsa' | 'extended';
 
 /**
  * Signature scheme identifiers for extended mode (SigType 11)
- * @see docs/specs/008-signature-extensibility
  */
 export enum SignatureScheme {
   /** ECDSA secp256k1 (Ethereum native) */

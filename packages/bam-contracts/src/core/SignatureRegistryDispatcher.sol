@@ -8,7 +8,6 @@ import { ISignatureRegistry } from "../interfaces/ISignatureRegistry.sol";
 /// @dev Permissionless signature extensibility system (SigType 11).
 ///      Anyone can register a scheme (first-come-first-served).
 ///      Schemes are immutable once registered (no removal).
-/// @custom:spec docs/specs/008-signature-extensibility, docs/specs/009-core-refactor
 contract SignatureRegistryDispatcher {
     // ═══════════════════════════════════════════════════════════════════════════════
     // EVENTS

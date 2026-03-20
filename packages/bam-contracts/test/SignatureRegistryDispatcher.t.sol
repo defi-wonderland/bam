@@ -130,7 +130,6 @@ contract MockECDSARegistry is ISignatureRegistry {
 /// @title SignatureRegistryDispatcherTest
 /// @notice Tests for SignatureRegistryDispatcher contract
 /// @dev Updated for permissionless design - no owner, no removeScheme
-/// @custom:spec docs/specs/009-core-refactor
 contract SignatureRegistryDispatcherTest is Test {
     SignatureRegistryDispatcher public dispatcher;
     MockBLSRegistry public blsRegistry;
