@@ -9,7 +9,7 @@ import { ReentrancyGuard } from "@openzeppelin/contracts/utils/ReentrancyGuard.s
 /// @notice Manages stakes for exposure claims
 /// @dev Standalone peripheral contract for staking. Can be queried by exposer wrappers.
 ///      No longer implements IExposureHook - use StakedExposer wrapper instead.
-/// @custom:spec specs/009-core-refactor
+/// @custom:spec docs/specs/009-core-refactor
 contract StakeManager is IStakeManager, Ownable, ReentrancyGuard {
     // ═══════════════════════════════════════════════════════════════════════════════
     // CONSTANTS

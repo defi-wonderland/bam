@@ -21,7 +21,7 @@
  * - Messages per blob: 11,543 (empirical, 98-char messages, 200 authors)
  * - Daily throughput: 498.7M messages/day (6 blobs/block)
  *
- * See specs/003-compression-research/results.md for full benchmark data.
+ * See docs/specs/003-compression-research/results.md for full benchmark data.
  *
  * @example
  * ```typescript

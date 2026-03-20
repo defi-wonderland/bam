@@ -4,7 +4,7 @@
  * Tests for calldata self-publication functionality in the SDK.
  * These tests require a local testnet (Anvil) and deployed contracts.
  *
- * @custom:spec specs/006-onchain-exposure/calldata-extension.md
+ * @custom:spec docs/specs/006-onchain-exposure/calldata-extension.md
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createPublicClient, http, parseAbi, decodeErrorResult, toHex } from 'viem';

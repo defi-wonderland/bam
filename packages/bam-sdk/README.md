@@ -192,7 +192,7 @@ pnpm sync:abis
 
 ## About
 
-This is a reference implementation — see the [BAM protocol specs](../../specs/) for the full
+This is a reference implementation — see the [BAM protocol specs](../../docs/specs/) for the full
 specification. Built by [Wonderland](https://wonderland.xyz).
 
 ## License

@@ -80,8 +80,8 @@ const sepolia = getDeployment(11155111);
 
 ## Specs
 
-- [ERC-8180: Blob Authenticated Messaging](specs/erc-blob-authenticated-messaging/erc-draft.md)
-- [ERC-8179: Blob Space Segments](specs/erc-shared-blob-segments/erc-draft.md)
+- [ERC-8180: Blob Authenticated Messaging](docs/specs/erc-8180.md)
+- [ERC-8179: Blob Space Segments](docs/specs/erc-8179.md)
 
 ## Key Features
 

@@ -10,7 +10,7 @@ import { BLSVerifier } from "../libraries/BLSVerifier.sol";
 /// @notice Registry for BLS public keys with proof of possession
 /// @dev Maps Ethereum addresses to BLS12-381 public keys with proof of possession.
 ///      Implements IERC_BAM_SignatureRegistry via IBLSRegistry -> ISignatureRegistry chain.
-/// @custom:spec specs/008-signature-extensibility
+/// @custom:spec docs/specs/008-signature-extensibility
 contract BLSRegistry is IBLSRegistry {
     // ═══════════════════════════════════════════════════════════════════════════════
     // ERRORS

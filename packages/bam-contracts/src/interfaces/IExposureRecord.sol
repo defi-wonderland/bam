@@ -7,7 +7,7 @@ import { SocialBlobsTypes } from "../libraries/SocialBlobsTypes.sol";
 /// @notice Interface for storing exposed tweet records
 /// @dev Permissionless peripheral contract that records exposure metadata.
 ///      Can be called by any exposer contract (BLSExposer, STARKExposer, etc.)
-/// @custom:spec specs/009-core-refactor
+/// @custom:spec docs/specs/009-core-refactor
 interface IExposureRecord {
     // ═══════════════════════════════════════════════════════════════════════════════
     // EVENTS

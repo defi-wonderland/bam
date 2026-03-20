@@ -116,7 +116,7 @@ export const DICTIONARY_V1_HASH =
 
 /**
  * Empirical compression metrics from Phase 003 benchmarking
- * Source: specs/003-compression-research/results.md
+ * Source: docs/specs/003-compression-research/results.md
  * Date: 2026-01-27
  * Corpus: 10,000 synthetic messages (98 chars average)
  */
@@ -154,7 +154,7 @@ export const COMPRESSION_METRICS = {
 
 /**
  * Empirical capacity metrics from Phase 003 capacity analysis
- * Source: specs/003-compression-research/capacity-analysis.md
+ * Source: docs/specs/003-compression-research/capacity-analysis.md
  * Date: 2026-01-27
  */
 export const CAPACITY_METRICS = {

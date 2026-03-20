@@ -8,7 +8,7 @@ import { IStakeManager } from "../src/interfaces/IStakeManager.sol";
 /// @title StakeManagerTest
 /// @notice Tests for StakeManager contract
 /// @dev Updated for permissionless architecture - no hooks, use hasValidStake()
-/// @custom:spec specs/009-core-refactor
+/// @custom:spec docs/specs/009-core-refactor
 contract StakeManagerTest is Test {
     StakeManager public stakeManager;
 
