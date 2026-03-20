@@ -1,6 +1,5 @@
 /**
  * Integration tests for extended signature mode (SigType 11)
- * @see specs/008-signature-extensibility
  */
 
 import { describe, it, expect } from 'vitest';
