@@ -40,6 +40,13 @@ contract SimpleBoolVerifierTest is Test {
         verifier.setCore(address(0x999));
     }
 
+    function test_setCore_revertsIfNotDeployer() public {
+        SimpleBoolVerifier fresh = new SimpleBoolVerifier();
+        vm.prank(attacker);
+        vm.expectRevert(SimpleBoolVerifier.OnlyDeployer.selector);
+        fresh.setCore(coreAddr);
+    }
+
     // ═══════════════════════════════════════════════════════════════════════════
     // onRegistered (access control)
     // ═══════════════════════════════════════════════════════════════════════════

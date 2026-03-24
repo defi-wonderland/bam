@@ -11,6 +11,9 @@ import { IRegistrationHook } from "../interfaces/IRegistrationHook.sol";
 ///      The real security comes from KZG/BLS proofs at exposure time. The boolean
 ///      is defense-in-depth.
 contract SimpleBoolVerifier is IRegistrationVerifier, IRegistrationHook {
+    /// @dev The deployer, authorized to call setCore once
+    address private immutable _deployer;
+
     /// @dev The core contract allowed to call onRegistered
     address public core;
 
@@ -31,10 +34,18 @@ contract SimpleBoolVerifier is IRegistrationVerifier, IRegistrationHook {
     /// @notice Thrown when core has already been set
     error CoreAlreadySet();
 
-    /// @notice Set the core contract address (one-time only)
+    /// @notice Thrown when caller is not the deployer
+    error OnlyDeployer();
+
+    constructor() {
+        _deployer = msg.sender;
+    }
+
+    /// @notice Set the core contract address (one-time, deployer only)
     /// @dev Must be called after deploying both contracts. Cannot be changed once set.
     /// @param core_ Address of the SocialBlobsCore contract
     function setCore(address core_) external {
+        if (msg.sender != _deployer) revert OnlyDeployer();
         if (core != address(0)) revert CoreAlreadySet();
         core = core_;
         emit CoreSet(core_);
