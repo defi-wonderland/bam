@@ -25,11 +25,12 @@ application layer.
 │  - registerBlob(blobIndex)           │  - register(pubKey, popSig)  │
 │  - registerCalldata(batchData)       │  - rotate(newPubKey, popSig) │
 │  - Emits events only, no storage     │  - revoke()                  │
+│  - Optional IRegistrationHook        │                              │
 ├───────────────────────────────────────────────────────────────────────┤
 │                        VERIFICATION LAYER                            │
 ├───────────────────────────────────────────────────────────────────────┤
 │  SimpleBoolVerifier (V1)             │  Future: ZK/Receipt Verifiers│
-│  - Permissionless registration       │  - STARK proofs              │
+│  - IRegistrationHook (from Core)     │  - STARK proofs              │
 │  - Boolean mapping                   │  - Transaction receipts      │
 ├───────────────────────────────────────────────────────────────────────┤
 │                           LIBRARIES                                  │
@@ -46,7 +47,7 @@ application layer.
 
 | Contract | Description |
 |----------|-------------|
-| `SocialBlobsCore` | Zero-storage registrar — emits `BlobRegistered` / `CalldataRegistered` events |
+| `SocialBlobsCore` | Zero-storage registrar — emits `BlobRegistered` / `CalldataRegistered` events. Optional `IRegistrationHook` for atomic verifier registration |
 | `BlobAuthenticatedMessagingCore` | ERC-BAM compliant wrapper — blob segment declaration + batch registration |
 | `BLSRegistry` | BLS12-381 public key registry with Proof of Possession |
 | `BlobSpaceSegments` | ERC-BSS implementation for field element sub-ranges |
@@ -56,7 +57,8 @@ application layer.
 | Contract | Description |
 |----------|-------------|
 | `BLSExposer` | On-chain message exposure with KZG proofs + BLS verification |
-| `SimpleBoolVerifier` | V1 registration verifier (permissionless boolean mapping) |
+| `SimpleBoolVerifier` | V1 registration verifier — implements `IRegistrationHook` for atomic registration from Core. Access-controlled: only the linked Core can register hashes |
+| `IRegistrationHook` | Callback interface for Core to notify verifiers atomically on registration |
 | `ABIDecoder` | Untrusted batch decoder for message extraction |
 
 ### Libraries
@@ -76,6 +78,35 @@ application layer.
 | `ExposureRecord` | Optional exposure metadata storage |
 | `DisputeManager` | Challenge/dispute resolution |
 | `StakeManager` | Aggregator staking and slashing |
+
+## Registration Hook
+
+`SocialBlobsCore` accepts an optional `IRegistrationHook` at deploy time. When set, the hook is
+called atomically after each `registerBlob` / `registerCalldata`, allowing a verifier to record
+the content hash in the same transaction. When set to `address(0)`, no external call is made
+and the core operates at zero overhead (the default for the demo app).
+
+This solves a trust gap: without the hook, the `SimpleBoolVerifier` was permissionless — anyone
+could call `register()` with an arbitrary hash, undermining the exposer's registration check.
+With the hook, only the core contract can register hashes in the verifier.
+
+### Deployment patterns
+
+**Demo app (no on-chain exposure needed):**
+```solidity
+SocialBlobsCore core = new SocialBlobsCore(address(0));  // no hook
+```
+
+**Full deployment (on-chain exposure via BLSExposer):**
+```solidity
+SimpleBoolVerifier verifier = new SimpleBoolVerifier();
+SocialBlobsCore core = new SocialBlobsCore(address(verifier));
+verifier.setCore(address(core));  // one-time link, cannot be changed
+```
+
+`setCore()` resolves the chicken-and-egg problem: the core needs the verifier address at deploy,
+and the verifier needs the core address to restrict `onRegistered()`. The call can only be made
+once — after that, the link is permanent.
 
 ## Development
 

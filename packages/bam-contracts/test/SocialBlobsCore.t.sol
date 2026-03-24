@@ -4,6 +4,7 @@ pragma solidity ^0.8.24;
 import { Test } from "forge-std/Test.sol";
 import { SocialBlobsCore } from "../src/core/SocialBlobsCore.sol";
 import { ISocialBlobsCore } from "../src/interfaces/ISocialBlobsCore.sol";
+import { SimpleBoolVerifier } from "../src/verifiers/SimpleBoolVerifier.sol";
 
 /// @title SocialBlobsCoreTest
 /// @notice Tests for stateless SocialBlobsCore contract
@@ -15,7 +16,7 @@ contract SocialBlobsCoreTest is Test {
     address public bob = address(0x2);
 
     function setUp() public {
-        core = new SocialBlobsCore();
+        core = new SocialBlobsCore(address(0));
     }
 
     // ═══════════════════════════════════════════════════════════════════════════════
@@ -112,5 +113,59 @@ contract SocialBlobsCoreTest is Test {
         bytes32 contentHash = core.registerCalldata(emptyData);
 
         assertEq(contentHash, keccak256(emptyData));
+    }
+}
+
+/// @title SocialBlobsCoreHookTest
+/// @notice Tests for SocialBlobsCore with a registration hook
+contract SocialBlobsCoreHookTest is Test {
+    SocialBlobsCore public core;
+    SimpleBoolVerifier public verifier;
+
+    address public alice = address(0x1);
+
+    function setUp() public {
+        verifier = new SimpleBoolVerifier();
+        core = new SocialBlobsCore(address(verifier));
+        verifier.setCore(address(core));
+    }
+
+    function test_registerCalldata_atomicallyRegistersInVerifier() public {
+        bytes memory batchData = hex"0102030405060708";
+
+        vm.prank(alice);
+        bytes32 contentHash = core.registerCalldata(batchData);
+
+        assertTrue(verifier.isRegistered(contentHash));
+        assertTrue(verifier.verifyRegistration(address(core), contentHash, ""));
+    }
+
+    function test_registerCalldata_multipleRegistrations() public {
+        bytes memory data1 = hex"aabb";
+        bytes memory data2 = hex"ccdd";
+
+        vm.prank(alice);
+        bytes32 hash1 = core.registerCalldata(data1);
+        vm.prank(alice);
+        bytes32 hash2 = core.registerCalldata(data2);
+
+        assertTrue(verifier.isRegistered(hash1));
+        assertTrue(verifier.isRegistered(hash2));
+    }
+
+    function test_hook_cannotBeCalledDirectly() public {
+        vm.prank(alice);
+        vm.expectRevert(SimpleBoolVerifier.OnlyCore.selector);
+        verifier.onRegistered(keccak256("fake"), alice);
+    }
+
+    function test_noHook_calldataStillWorks() public {
+        SocialBlobsCore noHookCore = new SocialBlobsCore(address(0));
+        bytes memory batchData = hex"0102030405060708";
+
+        vm.prank(alice);
+        bytes32 contentHash = noHookCore.registerCalldata(batchData);
+
+        assertEq(contentHash, keccak256(batchData));
     }
 }
