@@ -2,13 +2,21 @@
 pragma solidity ^0.8.24;
 
 import { IRegistrationVerifier } from "../interfaces/IRegistrationVerifier.sol";
+import { IRegistrationHook } from "../interfaces/IRegistrationHook.sol";
 
 /// @title SimpleBoolVerifier
 /// @notice V1 registration verifier using a boolean mapping
-/// @dev Permissionless — anyone can register a hash. The real security comes from
-///      KZG/BLS proofs at exposure time. The boolean is defense-in-depth.
-///      When receipt proofs or ZK proofs replace this, the register() step goes away.
-contract SimpleBoolVerifier is IRegistrationVerifier {
+/// @dev Implements IRegistrationHook so SocialBlobsCore can call it atomically
+///      during registration. Only the configured core contract can register hashes.
+///      The real security comes from KZG/BLS proofs at exposure time. The boolean
+///      is defense-in-depth.
+contract SimpleBoolVerifier is IRegistrationVerifier, IRegistrationHook {
+    /// @dev The deployer, authorized to call setCore once
+    address private immutable _deployer;
+
+    /// @dev The core contract allowed to call onRegistered
+    address public core;
+
     /// @dev Mapping from content hash to registration status
     mapping(bytes32 => bool) private _registered;
 
@@ -16,11 +24,40 @@ contract SimpleBoolVerifier is IRegistrationVerifier {
     /// @param contentHash The registered content hash
     event Registered(bytes32 indexed contentHash);
 
-    /// @notice Register a content hash as verified
-    /// @dev Permissionless. Typically called by aggregators after
-    ///      Core.registerBlob/registerCalldata.
-    /// @param contentHash Versioned hash (blob) or keccak256 hash (calldata)
-    function register(bytes32 contentHash) external {
+    /// @notice Emitted when the core address is set
+    /// @param core The core contract address
+    event CoreSet(address indexed core);
+
+    /// @notice Thrown when caller is not the core contract
+    error OnlyCore();
+
+    /// @notice Thrown when core has already been set
+    error CoreAlreadySet();
+
+    /// @notice Thrown when caller is not the deployer
+    error OnlyDeployer();
+
+    /// @notice Thrown when core address is zero
+    error ZeroCoreAddress();
+
+    constructor() {
+        _deployer = msg.sender;
+    }
+
+    /// @notice Set the core contract address (one-time, deployer only)
+    /// @dev Must be called after deploying both contracts. Cannot be changed once set.
+    /// @param core_ Address of the SocialBlobsCore contract
+    function setCore(address core_) external {
+        if (msg.sender != _deployer) revert OnlyDeployer();
+        if (core != address(0)) revert CoreAlreadySet();
+        if (core_ == address(0)) revert ZeroCoreAddress();
+        core = core_;
+        emit CoreSet(core_);
+    }
+
+    /// @inheritdoc IRegistrationHook
+    function onRegistered(bytes32 contentHash, address) external {
+        if (msg.sender != core) revert OnlyCore();
         _registered[contentHash] = true;
         emit Registered(contentHash);
     }

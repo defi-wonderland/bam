@@ -33,19 +33,23 @@ contract DeploySocialBlobs is Script {
 
         vm.startBroadcast(deployerPrivateKey);
 
-        // 1. Deploy Core (stateless, no constructor args — permissionless)
-        core = new SocialBlobsCore();
-        console2.log("SocialBlobsCore deployed at:", address(core));
-
-        // 2. Deploy SimpleBoolVerifier (v1 registration verifier)
+        // 1. Deploy SimpleBoolVerifier (v1 registration verifier)
         verifier = new SimpleBoolVerifier();
         console2.log("SimpleBoolVerifier deployed at:", address(verifier));
 
-        // 3. Deploy BLS Registry (permissionless)
+        // 2. Deploy Core with verifier as hook (atomic registration)
+        core = new SocialBlobsCore(address(verifier));
+        console2.log("SocialBlobsCore deployed at:", address(core));
+
+        // 3. Link verifier to core (one-time setup)
+        verifier.setCore(address(core));
+        console2.log("SimpleBoolVerifier linked to core");
+
+        // 4. Deploy BLS Registry (permissionless)
         blsRegistry = new BLSRegistry();
         console2.log("BLSRegistry deployed at:", address(blsRegistry));
 
-        // 4. Deploy BLSExposer (4 args: core, blsRegistry, registrationVerifier, exposureRecord)
+        // 5. Deploy BLSExposer (4 args: core, blsRegistry, registrationVerifier, exposureRecord)
         blsExposer =
             new BLSExposer(address(core), address(blsRegistry), address(verifier), address(0));
         console2.log("BLSExposer deployed at:", address(blsExposer));
@@ -73,9 +77,10 @@ contract DeploySocialBlobs is Script {
 
         vm.startBroadcast(deployerPrivateKey);
 
-        // Deploy contracts
-        core = new SocialBlobsCore();
+        // Deploy contracts (verifier first so core can hook into it)
         verifier = new SimpleBoolVerifier();
+        core = new SocialBlobsCore(address(verifier));
+        verifier.setCore(address(core));
         blsRegistry = new BLSRegistry();
         blsExposer =
             new BLSExposer(address(core), address(blsRegistry), address(verifier), address(0));
@@ -109,9 +114,10 @@ contract DeployTestnet is Script {
 
         vm.startBroadcast(deployerPrivateKey);
 
-        // Deploy all contracts (all permissionless)
-        SocialBlobsCore core = new SocialBlobsCore();
+        // Deploy all contracts (all permissionless, verifier first for hook)
         SimpleBoolVerifier verifier = new SimpleBoolVerifier();
+        SocialBlobsCore core = new SocialBlobsCore(address(verifier));
+        verifier.setCore(address(core));
         BLSRegistry blsRegistry = new BLSRegistry();
         BLSExposer blsExposer =
             new BLSExposer(address(core), address(blsRegistry), address(verifier), address(0));
@@ -154,9 +160,10 @@ contract DeployFull is Script {
 
         vm.startBroadcast(deployerPrivateKey);
 
-        // Core contracts (all permissionless)
-        SocialBlobsCore core = new SocialBlobsCore();
+        // Core contracts (all permissionless, verifier first for hook)
         SimpleBoolVerifier verifier = new SimpleBoolVerifier();
+        SocialBlobsCore core = new SocialBlobsCore(address(verifier));
+        verifier.setCore(address(core));
         BLSRegistry blsRegistry = new BLSRegistry();
         SignatureRegistryDispatcher sigDispatcher = new SignatureRegistryDispatcher();
 
