@@ -47,6 +47,12 @@ contract SimpleBoolVerifierTest is Test {
         fresh.setCore(coreAddr);
     }
 
+    function test_setCore_revertsIfZeroAddress() public {
+        SimpleBoolVerifier fresh = new SimpleBoolVerifier();
+        vm.expectRevert(SimpleBoolVerifier.ZeroCoreAddress.selector);
+        fresh.setCore(address(0));
+    }
+
     // ═══════════════════════════════════════════════════════════════════════════
     // onRegistered (access control)
     // ═══════════════════════════════════════════════════════════════════════════

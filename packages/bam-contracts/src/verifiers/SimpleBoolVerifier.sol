@@ -37,6 +37,9 @@ contract SimpleBoolVerifier is IRegistrationVerifier, IRegistrationHook {
     /// @notice Thrown when caller is not the deployer
     error OnlyDeployer();
 
+    /// @notice Thrown when core address is zero
+    error ZeroCoreAddress();
+
     constructor() {
         _deployer = msg.sender;
     }
@@ -47,6 +50,7 @@ contract SimpleBoolVerifier is IRegistrationVerifier, IRegistrationHook {
     function setCore(address core_) external {
         if (msg.sender != _deployer) revert OnlyDeployer();
         if (core != address(0)) revert CoreAlreadySet();
+        if (core_ == address(0)) revert ZeroCoreAddress();
         core = core_;
         emit CoreSet(core_);
     }
