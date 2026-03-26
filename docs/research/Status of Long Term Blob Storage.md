@@ -2,7 +2,9 @@
 
 ## Context
 
-Currently Ethereum blob data (EIP-4844) is pruned after approximately 18 days. This raises a direct question for any application that depends on blobs as a data layer.
+Currently Ethereum blob data (EIP-4844) is pruned after approximately 18 days by default. Accessing blob data after that point therefore depends on an out-of-protocol archival mechanism. Long-term availability of blobs is required for many blob use-cases.
+
+The goal of this document is to summarise the currently avilable solutions for long-term blob storage.
 
 This initial research aims to answer the following questions:
 What happens to that data after the prune, who is storing it today and why?
