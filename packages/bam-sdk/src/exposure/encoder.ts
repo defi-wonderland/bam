@@ -132,7 +132,14 @@ export function encodeExposureBatch(
   const messageOffsets: number[] = [];
   const messageLengths: number[] = [];
 
-  for (const rawBytes of rawBytesList) {
+  for (let i = 0; i < rawBytesList.length; i++) {
+    const rawBytes = rawBytesList[i];
+    if (rawBytes.length > 0xffff) {
+      throw new Error(
+        `Message ${i} too large for uint16 length prefix: ${rawBytes.length} bytes (max 65535)`
+      );
+    }
+
     // Length prefix (2 bytes)
     view.setUint16(offset, rawBytes.length, false);
     offset += EXPOSURE_MSG_PREFIX_SIZE;
@@ -226,7 +233,7 @@ export function decodeExposureBatch(data: Uint8Array): DecodedExposureBatch {
         .join('')) as Address;
 
     const timestamp =
-      (rawBytes[20] << 24) | (rawBytes[21] << 16) | (rawBytes[22] << 8) | rawBytes[23];
+      ((rawBytes[20] << 24) | (rawBytes[21] << 16) | (rawBytes[22] << 8) | rawBytes[23]) >>> 0;
 
     const nonce = (rawBytes[24] << 8) | rawBytes[25];
 

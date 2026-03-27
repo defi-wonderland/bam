@@ -85,13 +85,22 @@ export function parseBlob(
   let offset = EXPOSURE_HEADER_SIZE;
 
   for (let i = 0; i < messageCount; i++) {
-    if (offset + EXPOSURE_MSG_PREFIX_SIZE > usableData.length) break;
+    if (offset + EXPOSURE_MSG_PREFIX_SIZE > usableData.length) {
+      throw new Error(`Truncated exposure batch at message ${i}: no length prefix`);
+    }
 
     // Length prefix (2 bytes)
     const rawLen = (usableData[offset] << 8) | usableData[offset + 1];
     offset += EXPOSURE_MSG_PREFIX_SIZE;
 
-    if (rawLen === 0 || offset + rawLen > usableData.length) break;
+    if (rawLen === 0) {
+      throw new Error(`Message ${i} has zero length`);
+    }
+    if (offset + rawLen > usableData.length) {
+      throw new Error(
+        `Truncated exposure batch at message ${i}: need ${rawLen} bytes, have ${usableData.length - offset}`
+      );
+    }
     if (rawLen < 26) {
       throw new Error(`Message ${i} too short: ${rawLen} bytes (min 26)`);
     }
@@ -105,7 +114,7 @@ export function parseBlob(
     const author = bytesToHex(rawBytes.slice(0, ADDRESS_SIZE)) as Address;
 
     const timestamp =
-      (rawBytes[20] << 24) | (rawBytes[21] << 16) | (rawBytes[22] << 8) | rawBytes[23];
+      ((rawBytes[20] << 24) | (rawBytes[21] << 16) | (rawBytes[22] << 8) | rawBytes[23]) >>> 0;
 
     const nonce = (rawBytes[24] << 8) | rawBytes[25];
 
