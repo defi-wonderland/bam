@@ -20,6 +20,7 @@ import {
   ADDRESS_SIZE,
   EXPOSURE_HEADER_SIZE,
   EXPOSURE_MSG_PREFIX_SIZE,
+  BLOB_USABLE_CAPACITY,
 } from '../constants.js';
 
 /** Flag: aggregate BLS signature present */
@@ -100,6 +101,12 @@ export function encodeExposureBatch(
     0
   );
   const totalSize = EXPOSURE_HEADER_SIZE + messagesSize;
+
+  if (totalSize > BLOB_USABLE_CAPACITY) {
+    throw new Error(
+      `Exposure batch too large: ${totalSize} bytes (max ${BLOB_USABLE_CAPACITY} for EIP-4844 blob)`
+    );
+  }
 
   // Allocate buffer
   const buffer = new Uint8Array(totalSize);
