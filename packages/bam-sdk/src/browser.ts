@@ -63,6 +63,9 @@ export {
   FLAG_REPLY,
   FLAG_SIGNATURE_MASK,
   MAGIC_BATCH,
+  MAGIC_EXPOSURE,
+  EXPOSURE_HEADER_SIZE,
+  EXPOSURE_MSG_PREFIX_SIZE,
   MAGIC_MESSAGE,
   MAX_AUTHORS_PER_BATCH,
   MAX_CONTENT_BYTES,
@@ -179,17 +182,28 @@ export { AggregatorClient, AggregatorClientError } from './aggregator-client.js'
 
 export type { AggregatorClientOptions } from './aggregator-client.js';
 
-// Exposure types only (no blob-parser or builder — they depend on kzg)
+// Exposure types (no blob-parser or builder — they depend on kzg)
 export type {
   ParsedBlob,
   ParsedMessage,
   ParseBlobOptions,
   ExposureParams,
   ExposureResult,
+  ExposureBatch,
+  DecodedExposureBatch,
   BlobRegistrationResult,
   CalldataRegistrationResult,
   CalldataExposureParams,
 } from './exposure/types.js';
+
+// Exposure encoder (browser-safe — no native deps)
+export {
+  encodeExposureBatch,
+  decodeExposureBatch,
+  buildRawMessageBytes,
+} from './exposure/encoder.js';
+
+export type { ExposureMessage } from './exposure/encoder.js';
 
 // Contract client (uses viem, browser-safe)
 export * from './contracts/index.js';

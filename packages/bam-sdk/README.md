@@ -98,7 +98,8 @@ This works in Next.js client components, Vite, and other browser bundlers withou
 | Module | Exports |
 |--------|---------|
 | **Message** | `encodeMessage`, `decodeMessage`, `computeMessageHash`, `computeMessageId` |
-| **Batch** | `encodeBatch`, `decodeBatch`, `estimateBatchSize`, `validateBatch`, `buildAuthorTable` |
+| **Batch (Compact)** | `encodeBatch`, `decodeBatch`, `estimateBatchSize`, `validateBatch`, `buildAuthorTable` |
+| **Batch (Exposure)** | `encodeExposureBatch`, `decodeExposureBatch`, `buildRawMessageBytes` |
 | **BPE Codec** | `bpeEncode`, `bpeDecode`, `buildBPEDictionary`, `serializeBPEDictionary`, `deserializeBPEDictionary` |
 | **Compression (Zstd)** | `compress`, `decompress`, `loadDictionary`, `isCompressed`, `compressionRatio` |
 | **Compression (Node)** | `loadBundledDictionary`, `loadDictionaryFromFile` — requires `node:fs`, `node:crypto` |
@@ -119,6 +120,50 @@ This works in Next.js client components, Vite, and other browser bundlers withou
 | Module | Exports |
 |--------|---------|
 | **AggregatorClient** | `AggregatorClient` — HTTP client for aggregator nodes (submit, status, health) |
+
+## Batch Encoding
+
+The SDK provides two batch encoding paths for different use cases:
+
+### Compact Batch (`encodeBatch` / `decodeBatch`)
+
+Space-efficient encoding using author tables and timestamp deltas. Supports BPE and Zstd
+compression. Messages are NOT individually KZG-addressable — use this for aggregator-mediated
+messaging where on-chain exposure is not needed.
+
+```typescript
+import { encodeBatch, decodeBatch } from 'bam-sdk';
+
+const batch = encodeBatch(signedMessages, { codec: 'bpe', dictionary });
+const decoded = decodeBatch(batch.data, { data: dictionary, id: 0 });
+```
+
+### Exposure Batch (`encodeExposureBatch` / `decodeExposureBatch`)
+
+Each message is stored in on-chain raw format `[author(20)][timestamp(4)][nonce(2)][content]`,
+making it directly verifiable via KZG proofs and `BLSExposer.expose()`. Use this when you need
+per-message on-chain exposure.
+
+```typescript
+import { encodeExposureBatch, decodeExposureBatch } from 'bam-sdk';
+
+const batch = encodeExposureBatch(messages);
+// batch.messageOffsets[i] points to rawBytes in the batch data
+// batch.messageLengths[i] is the rawBytes length
+// These are the exact values needed for KZG proof generation
+
+const decoded = decodeExposureBatch(batch.data);
+```
+
+The exposure format uses a different magic (`SOB2`) and stores messages with 2-byte length
+prefixes followed by raw bytes. KZG proofs target the raw bytes directly (past the length
+prefix), so extracted bytes match exactly what the BLSExposer contract verifies.
+
+**Full exposure flow:**
+```
+encodeExposureBatch() → createBlob() → registerBlob()
+                                     → parseBlob() → buildExposureParams() → BLSExposer.expose()
+```
 
 ## Compression
 
@@ -171,7 +216,7 @@ Zstd library). See `ISSUE_COMPRESSION_CODEC.md` at the repo root for the plan.
 # Build
 pnpm build
 
-# Unit tests (109)
+# Unit tests (122)
 pnpm test:run
 
 # Integration tests (37, requires Anvil)
