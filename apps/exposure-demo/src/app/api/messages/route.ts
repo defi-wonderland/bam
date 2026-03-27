@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { insertMessage, getMessages, getNextNonce } from '@/db';
+import { insertMessage, getMessages } from '@/db';
 
 export async function GET() {
   try {
@@ -14,15 +14,28 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { author, content, blsSignature } = body as {
+    const { author, content, blsSignature, nonce, timestamp } = body as {
       author: string;
       content: string;
       blsSignature: string;
+      nonce: number;
+      timestamp: number;
     };
 
-    if (!author || !content || !blsSignature) {
+    if (
+      typeof author !== 'string' || !author ||
+      typeof content !== 'string' || !content ||
+      typeof blsSignature !== 'string' || !blsSignature
+    ) {
       return NextResponse.json(
         { error: 'Missing required fields: author, content, blsSignature' },
+        { status: 400 }
+      );
+    }
+
+    if (typeof nonce !== 'number' || typeof timestamp !== 'number') {
+      return NextResponse.json(
+        { error: 'Missing required fields: nonce, timestamp' },
         { status: 400 }
       );
     }
@@ -33,9 +46,6 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
-
-    const timestamp = Math.floor(Date.now() / 1000);
-    const nonce = getNextNonce(author);
 
     // Compute a deterministic message ID
     const messageId = `${author.toLowerCase()}-${nonce}-${timestamp}`;

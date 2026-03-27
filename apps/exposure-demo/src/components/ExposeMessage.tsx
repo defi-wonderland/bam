@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAccount, useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
-import { keccak256, encodePacked, toHex } from 'viem';
+import { toHex } from 'viem';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   deserializeBLSPrivateKey,
@@ -10,6 +10,7 @@ import {
 } from 'bam-sdk/browser';
 import { BLS_EXPOSER_ADDRESS, SEPOLIA_CHAIN_ID } from '@/lib/constants';
 import { BLS_EXPOSER_ABI } from '@/lib/contracts';
+import { computeSignedHash } from '@/lib/bam-crypto';
 import { useBLSKey } from './BLSKeyManager';
 
 interface ExposureParamsResponse {
@@ -42,17 +43,25 @@ interface Props {
   timestamp: number;
 }
 
-export function ExposeMessage({ txHash, messageIndex, author, nonce, content, timestamp }: Props) {
+export function ExposeMessage({ txHash, messageIndex, author, nonce, content, timestamp }: Props): React.ReactNode {
   const { address } = useAccount();
   const { privateKeyHex } = useBLSKey();
   const [step, setStep] = useState<'idle' | 'building' | 'signing' | 'submitting' | 'done' | 'error'>('idle');
   const [error, setError] = useState<string | null>(null);
   const queryClient = useQueryClient();
 
-  const { writeContract, data: exposeTxHash, isPending } = useWriteContract();
+  const { writeContract, data: exposeTxHash, isPending, error: writeError } = useWriteContract();
   const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({
     hash: exposeTxHash,
   });
+
+  // Handle wallet rejection / writeContract errors (issue #3)
+  useEffect(() => {
+    if (writeError) {
+      setError(writeError.message);
+      setStep('error');
+    }
+  }, [writeError]);
 
   // Only show expose button for messages from the connected user
   const isOwnMessage = address?.toLowerCase() === author.toLowerCase();
@@ -82,28 +91,7 @@ export function ExposeMessage({ txHash, messageIndex, author, nonce, content, ti
       const pk = deserializeBLSPrivateKey(privateKeyHex);
 
       // Compute signedHash matching the contract
-      const domain = keccak256(
-        encodePacked(
-          ['string', 'uint256'],
-          ['ERC-BAM.v1', BigInt(SEPOLIA_CHAIN_ID)]
-        )
-      );
-
-      const contentBytes = new TextEncoder().encode(content);
-      const messageHash = keccak256(
-        encodePacked(
-          ['address', 'uint64', 'bytes'],
-          [
-            author as `0x${string}`,
-            BigInt(nonce),
-            `0x${Buffer.from(contentBytes).toString('hex')}` as `0x${string}`,
-          ]
-        )
-      );
-
-      const signedHash = keccak256(
-        encodePacked(['bytes32', 'bytes32'], [domain, messageHash])
-      );
+      const signedHash = computeSignedHash(author, nonce, content, SEPOLIA_CHAIN_ID);
 
       const blsSignature = await signBLS(pk, signedHash);
 

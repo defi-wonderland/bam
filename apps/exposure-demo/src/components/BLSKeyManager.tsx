@@ -2,17 +2,17 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useAccount, useWriteContract, useWaitForTransactionReceipt, useReadContract } from 'wagmi';
-import { keccak256, encodePacked, toHex } from 'viem';
+import { toHex } from 'viem';
 import {
   generateBLSPrivateKey,
   deriveBLSPublicKey,
   serializeBLSPrivateKey,
   serializeBLSPublicKey,
   deserializeBLSPrivateKey,
-  signBLS,
 } from 'bam-sdk/browser';
 import { BLS_REGISTRY_ADDRESS, SEPOLIA_CHAIN_ID } from '@/lib/constants';
 import { BLS_REGISTRY_ABI } from '@/lib/contracts';
+import { computePopSignature } from '@/lib/bam-crypto';
 
 const LS_KEY_PREFIX = 'bam-exposure-demo-bls-key-';
 
@@ -71,7 +71,7 @@ export function BLSKeyManager() {
     query: { enabled: !!address },
   });
 
-  const { writeContract, data: txHash, isPending: isTxPending } = useWriteContract();
+  const { writeContractAsync, data: txHash, isPending: isTxPending } = useWriteContract();
   const { isLoading: isConfirming, isSuccess: isConfirmed } = useWaitForTransactionReceipt({
     hash: txHash,
   });
@@ -92,28 +92,13 @@ export function BLSKeyManager() {
       const pk = deserializeBLSPrivateKey(privateKeyHex);
       const pubKeyBytes = deriveBLSPublicKey(pk);
 
-      // Compute PoP message matching the contract:
-      // domainSep = keccak256("SocialBlobs-BLS-PoP-v1" || chainId || registryAddress)
-      // popMessage = keccak256(domainSep || owner || blsPubKey)
-      const domainSep = keccak256(
-        encodePacked(
-          ['string', 'uint256', 'address'],
-          ['SocialBlobs-BLS-PoP-v1', BigInt(SEPOLIA_CHAIN_ID), BLS_REGISTRY_ADDRESS]
-        )
+      // Compute and sign PoP
+      const popSignature = await computePopSignature(
+        pk, address, pubKeyBytes, SEPOLIA_CHAIN_ID, BLS_REGISTRY_ADDRESS
       );
 
-      const popMessage = keccak256(
-        encodePacked(
-          ['bytes32', 'address', 'bytes'],
-          [domainSep, address, toHex(pubKeyBytes)]
-        )
-      );
-
-      // Sign PoP with BLS key
-      const popSignature = await signBLS(pk, popMessage);
-
-      // Submit registration tx
-      writeContract({
+      // Submit registration tx (await so rejections are caught)
+      await writeContractAsync({
         address: BLS_REGISTRY_ADDRESS,
         abi: BLS_REGISTRY_ABI,
         functionName: 'register',

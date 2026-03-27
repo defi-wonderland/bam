@@ -2,7 +2,6 @@
 
 import { useState } from 'react';
 import { useAccount, useReadContract } from 'wagmi';
-import { keccak256, encodePacked } from 'viem';
 import {
   deserializeBLSPrivateKey,
   signBLS,
@@ -11,6 +10,7 @@ import {
 import { useQueryClient } from '@tanstack/react-query';
 import { BLS_REGISTRY_ADDRESS, SEPOLIA_CHAIN_ID, MAX_MESSAGE_CHARS } from '@/lib/constants';
 import { BLS_REGISTRY_ABI } from '@/lib/contracts';
+import { computeSignedHash } from '@/lib/bam-crypto';
 import { useBLSKey } from './BLSKeyManager';
 
 export function MessageComposer() {
@@ -57,29 +57,8 @@ export function MessageComposer() {
         : 0;
 
       const timestamp = Math.floor(Date.now() / 1000);
-      const contentBytes = new TextEncoder().encode(content.trim());
 
-      // Compute the domain-separated signed hash matching the contract:
-      // domain = keccak256("ERC-BAM.v1" || chainId)
-      // messageHash = keccak256(author || nonce(uint64) || contents)
-      // signedHash = keccak256(domain || messageHash)
-      const domain = keccak256(
-        encodePacked(
-          ['string', 'uint256'],
-          ['ERC-BAM.v1', BigInt(SEPOLIA_CHAIN_ID)]
-        )
-      );
-
-      const messageHash = keccak256(
-        encodePacked(
-          ['address', 'uint64', 'bytes'],
-          [address, BigInt(nonce), `0x${Buffer.from(contentBytes).toString('hex')}` as `0x${string}`]
-        )
-      );
-
-      const signedHash = keccak256(
-        encodePacked(['bytes32', 'bytes32'], [domain, messageHash])
-      );
+      const signedHash = computeSignedHash(address, nonce, content.trim(), SEPOLIA_CHAIN_ID);
 
       // Sign with BLS
       const pk = deserializeBLSPrivateKey(privateKeyHex);
@@ -94,6 +73,8 @@ export function MessageComposer() {
           author: address,
           content: content.trim(),
           blsSignature: blsSigHex,
+          nonce,
+          timestamp,
         }),
       });
 

@@ -1,10 +1,7 @@
 import { NextResponse } from 'next/server';
 import {
   encodeExposureBatch,
-  bytesToHex,
   loadTrustedSetup,
-  createBlob,
-  commitToBlob,
 } from 'bam-sdk';
 import type { ExposureMessage } from 'bam-sdk';
 import {
@@ -28,6 +25,7 @@ import {
 import { SOCIAL_BLOBS_CORE_ADDRESS } from '@/lib/constants';
 
 const COOLDOWN_MS = 60_000;
+let isPosting = false;
 
 const REGISTER_BLOB_ABI = [
   {
@@ -40,6 +38,14 @@ const REGISTER_BLOB_ABI = [
 ] as const;
 
 export async function POST() {
+  if (isPosting) {
+    return NextResponse.json(
+      { error: 'A blob post is already in progress. Please wait.' },
+      { status: 429 }
+    );
+  }
+
+  isPosting = true;
   try {
     // Rate limit
     const lastBlob = getLastConfirmedBlob();
@@ -85,10 +91,6 @@ export async function POST() {
     const batchData = batch.data;
 
     loadTrustedSetup();
-    const blob = createBlob(batchData);
-    const { commitment } = commitToBlob(blob);
-
-    const blobId = bytesToHex(commitment).slice(0, 18);
 
     const account = privateKeyToAccount(posterKey as `0x${string}`);
     const walletClient = createWalletClient({
@@ -120,9 +122,10 @@ export async function POST() {
 
     const receipt = await publicClient.waitForTransactionReceipt({ hash });
 
-    // Extract versioned hash from tx
+    // Extract versioned hash from tx and derive blobId from it
     const tx = await publicClient.getTransaction({ hash });
     const versionedHash = tx.blobVersionedHashes?.[0] ?? null;
+    const blobId = versionedHash ? versionedHash.slice(0, 18) : receipt.transactionHash.slice(0, 18);
 
     await createBlobRecord(blobId, pending.length);
     await updateBlobStatus(
@@ -148,6 +151,8 @@ export async function POST() {
     const message = error instanceof Error ? error.message : 'Unknown error';
     console.error('Post blob failed:', message);
     return NextResponse.json({ error: message }, { status: 500 });
+  } finally {
+    isPosting = false;
   }
 }
 

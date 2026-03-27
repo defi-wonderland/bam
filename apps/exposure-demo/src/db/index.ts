@@ -105,7 +105,7 @@ export function getMessagesByBlobId(blobId: string): DbMessage[] {
 export function createBlob(id: string, messageCount: number): DbBlob {
   const d = getDb();
   d.prepare(
-    "INSERT INTO blobs (id, message_count) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET message_count = excluded.message_count, status = 'pending'"
+    "INSERT INTO blobs (id, message_count) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET message_count = excluded.message_count, status = 'pending', tx_hash = NULL, block_number = NULL, versioned_hash = NULL"
   ).run(id, messageCount);
   return d.prepare('SELECT * FROM blobs WHERE id = ?').get(id) as DbBlob;
 }
