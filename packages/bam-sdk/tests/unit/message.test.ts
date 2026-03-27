@@ -115,6 +115,43 @@ describe('Message Module', () => {
       expect(() => encodeMessage(msg)).toThrow(ContentTooLongError);
     });
 
+    it('should accept longer content with custom maxContentChars', () => {
+      const longContent = 'x'.repeat(500);
+      const msg: SignedMessage = {
+        author: testAuthor,
+        timestamp: testTimestamp,
+        nonce: testNonce,
+        content: longContent,
+        signature: fakeBLSSignature,
+        signatureType: 'bls',
+      };
+
+      // Fails with default limit
+      expect(() => encodeMessage(msg)).toThrow(ContentTooLongError);
+
+      // Succeeds with raised limit
+      const encoded = encodeMessage(msg, { maxContentChars: 1000, maxContentBytes: 4000 });
+      expect(encoded.length).toBeGreaterThan(0);
+    });
+
+    it('should reject content exceeding custom maxContentChars', () => {
+      const content = 'x'.repeat(100);
+      const msg: SignedMessage = {
+        author: testAuthor,
+        timestamp: testTimestamp,
+        nonce: testNonce,
+        content,
+        signature: fakeBLSSignature,
+        signatureType: 'bls',
+      };
+
+      // Succeeds with default limit
+      expect(() => encodeMessage(msg)).not.toThrow();
+
+      // Fails with stricter limit
+      expect(() => encodeMessage(msg, { maxContentChars: 50 })).toThrow(ContentTooLongError);
+    });
+
     it('should handle empty content', () => {
       const msg: SignedMessage = {
         author: testAuthor,
