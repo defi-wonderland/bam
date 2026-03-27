@@ -49,21 +49,33 @@ import {
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder('utf-8', { fatal: true });
 
+/** Options for encoding a message */
+export interface EncodeMessageOptions {
+  /** Maximum content length in characters (default: 280) */
+  maxContentChars?: number;
+  /** Maximum content length in bytes (default: 1120) */
+  maxContentBytes?: number;
+}
+
 /**
  * Encode a message to binary format
  * @param msg Message to encode
+ * @param options Optional encoding options (content length limits)
  * @returns Encoded binary data
  */
-export function encodeMessage(msg: SignedMessage): Uint8Array {
+export function encodeMessage(msg: SignedMessage, options?: EncodeMessageOptions): Uint8Array {
+  const maxChars = options?.maxContentChars ?? MAX_CONTENT_CHARS;
+  const maxBytes = options?.maxContentBytes ?? MAX_CONTENT_BYTES;
+
   // Validate content
   const contentChars = [...msg.content].length;
-  if (contentChars > MAX_CONTENT_CHARS) {
-    throw new ContentTooLongError(contentChars, MAX_CONTENT_CHARS, 'characters');
+  if (contentChars > maxChars) {
+    throw new ContentTooLongError(contentChars, maxChars, 'characters');
   }
 
   const contentBytes = textEncoder.encode(msg.content);
-  if (contentBytes.length > MAX_CONTENT_BYTES) {
-    throw new ContentTooLongError(contentBytes.length, MAX_CONTENT_BYTES, 'bytes');
+  if (contentBytes.length > maxBytes) {
+    throw new ContentTooLongError(contentBytes.length, maxBytes, 'bytes');
   }
 
   // Calculate sizes
@@ -321,10 +333,11 @@ export function computeMessageHash(msg: Message): Uint8Array {
 /**
  * Encode a message and compute its ID
  * @param msg Message to encode
+ * @param options Optional encoding options (content length limits)
  * @returns Encoded message with ID and size
  */
-export function encodeMessageWithId(msg: SignedMessage): EncodedMessage {
-  const data = encodeMessage(msg);
+export function encodeMessageWithId(msg: SignedMessage, options?: EncodeMessageOptions): EncodedMessage {
+  const data = encodeMessage(msg, options);
   const messageId = computeMessageId(msg);
   return {
     data,
