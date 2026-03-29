@@ -46,6 +46,13 @@ export function parseBlob(
     options = optionsOrVersionedHash ?? {};
   }
 
+  const EXPECTED_BLOB_SIZE = 131072; // 4096 field elements * 32 bytes
+  if (blob.length !== EXPECTED_BLOB_SIZE) {
+    throw new Error(
+      `Invalid blob size: ${blob.length} (expected ${EXPECTED_BLOB_SIZE})`
+    );
+  }
+
   const batchStartOffset = options.batchStartOffset ?? 0;
   let { versionedHash } = options;
 

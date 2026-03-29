@@ -63,8 +63,9 @@ export const EXPOSURE_MSG_PREFIX_SIZE = 2;
 /** Blob size limit in bytes */
 export const BLOB_SIZE_LIMIT = 131072; // 128 KB
 
-/** Usable blob capacity with 31-byte packing */
-export const BLOB_USABLE_CAPACITY = 126976; // ~124 KB
+/** Usable blob capacity with 31-byte packing (4096 field elements * 31 usable bytes each).
+ *  Must match KZG_CONSTANTS.MAX_USABLE_BYTES in kzg/proof-generator.ts. */
+export const BLOB_USABLE_CAPACITY = 126976; // 4096 * 31
 
 /** Zero bytes32 (no dictionary) */
 export const ZERO_BYTES32 =
