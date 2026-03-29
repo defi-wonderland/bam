@@ -121,12 +121,12 @@ export function encodeExposureBatch(
   buffer[offset++] = PROTOCOL_VERSION;
 
   // Header: flags (1 byte)
-  const hasAggSig = !!aggregateSignature;
-  if (hasAggSig && aggregateSignature.length !== BLS_SIGNATURE_SIZE) {
+  if (aggregateSignature && aggregateSignature.length !== BLS_SIGNATURE_SIZE) {
     throw new Error(
       `Invalid aggregate signature length: ${aggregateSignature.length} (expected ${BLS_SIGNATURE_SIZE})`
     );
   }
+  const hasAggSig = !!aggregateSignature;
   buffer[offset++] = hasAggSig ? FLAG_HAS_AGGREGATE_SIG : 0;
 
   // Header: message count (2 bytes)
