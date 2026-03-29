@@ -38,6 +38,5 @@ dist/
 .claude/context-snapshots/
 .claude/settings.local.json
 
-# Serie KB (local)
 .serie/
 .mcp.json
