@@ -37,3 +37,6 @@ dist/
 # Claude Code
 .claude/context-snapshots/
 .claude/settings.local.json
+
+.serie/
+.mcp.json
