@@ -141,6 +141,44 @@ export interface CalldataExposureParams {
 }
 
 /**
+ * Encoded exposure batch result
+ */
+export interface ExposureBatch {
+  /** Encoded batch data (header + length-prefixed raw messages) */
+  data: Uint8Array;
+  /** Header size in bytes */
+  headerSize: number;
+  /** Total size in bytes */
+  totalSize: number;
+  /** Number of messages */
+  messageCount: number;
+  /** Per-message byte offsets relative to batch start (pointing to rawBytes, past length prefix) */
+  messageOffsets: number[];
+  /** Per-message rawBytes lengths */
+  messageLengths: number[];
+}
+
+/**
+ * Decoded exposure batch
+ */
+export interface DecodedExposureBatch {
+  /** Decoded messages */
+  messages: Array<{
+    author: Address;
+    timestamp: number;
+    nonce: number;
+    content: string;
+    rawBytes: Uint8Array;
+  }>;
+  /** Message count */
+  messageCount: number;
+  /** Aggregate BLS signature (48 bytes, or zeros if not present) */
+  aggregateSignature: Uint8Array;
+  /** Whether aggregate signature is present */
+  hasAggregateSignature: boolean;
+}
+
+/**
  * Exposure builder options
  */
 export interface ExposureBuilderOptions {

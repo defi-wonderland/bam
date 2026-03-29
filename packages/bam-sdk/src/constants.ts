@@ -6,8 +6,11 @@
 /** Magic number for individual messages: "SOBM" */
 export const MAGIC_MESSAGE = 0x534f424d;
 
-/** Magic number for batches: "SOB1" */
+/** Magic number for compact batches: "SOB1" */
 export const MAGIC_BATCH = 0x534f4231;
+
+/** Magic number for exposure batches: "SOB2" */
+export const MAGIC_EXPOSURE = 0x534f4232;
 
 /** Current protocol version */
 export const PROTOCOL_VERSION = 0x01;
@@ -48,14 +51,21 @@ export const BYTES32_SIZE = 32;
 /** Individual message header size (fixed portion) */
 export const MESSAGE_HEADER_SIZE = 33;
 
-/** Batch header fixed size (excluding author table) */
+/** Compact batch header fixed size (excluding author table) */
 export const BATCH_HEADER_FIXED_SIZE = 95;
+
+/** Exposure batch header fixed size: magic(4) + version(1) + flags(1) + msgCount(2) + blsSig(48) */
+export const EXPOSURE_HEADER_SIZE = 56;
+
+/** Exposure message length prefix size */
+export const EXPOSURE_MSG_PREFIX_SIZE = 2;
 
 /** Blob size limit in bytes */
 export const BLOB_SIZE_LIMIT = 131072; // 128 KB
 
-/** Usable blob capacity with 31-byte packing */
-export const BLOB_USABLE_CAPACITY = 126976; // ~124 KB
+/** Usable blob capacity with 31-byte packing (4096 field elements * 31 usable bytes each).
+ *  Must match KZG_CONSTANTS.MAX_USABLE_BYTES in kzg/proof-generator.ts. */
+export const BLOB_USABLE_CAPACITY = 126976; // 4096 * 31
 
 /** Zero bytes32 (no dictionary) */
 export const ZERO_BYTES32 =
