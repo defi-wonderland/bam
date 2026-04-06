@@ -115,6 +115,77 @@ describe('Message Module', () => {
       expect(() => encodeMessage(msg)).toThrow(ContentTooLongError);
     });
 
+    it('should accept longer content with custom maxContentChars', () => {
+      const longContent = 'x'.repeat(500);
+      const msg: SignedMessage = {
+        author: testAuthor,
+        timestamp: testTimestamp,
+        nonce: testNonce,
+        content: longContent,
+        signature: fakeBLSSignature,
+        signatureType: 'bls',
+      };
+
+      // Fails with default limit
+      expect(() => encodeMessage(msg)).toThrow(ContentTooLongError);
+
+      // Succeeds with raised limit and roundtrips correctly
+      const encoded = encodeMessage(msg, { maxContentChars: 1000, maxContentBytes: 4000 });
+      expect(encoded.length).toBeGreaterThan(0);
+
+      const decoded = decodeMessage(encoded);
+      expect(decoded.content).toBe(longContent);
+    });
+
+    it('should reject content exceeding custom maxContentChars', () => {
+      const content = 'x'.repeat(100);
+      const msg: SignedMessage = {
+        author: testAuthor,
+        timestamp: testTimestamp,
+        nonce: testNonce,
+        content,
+        signature: fakeBLSSignature,
+        signatureType: 'bls',
+      };
+
+      // Succeeds with default limit
+      expect(() => encodeMessage(msg)).not.toThrow();
+
+      // Fails with stricter limit
+      expect(() => encodeMessage(msg, { maxContentChars: 50 })).toThrow(ContentTooLongError);
+    });
+
+    it('should reject NaN/Infinity/negative option values', () => {
+      const msg: SignedMessage = {
+        author: testAuthor,
+        timestamp: testTimestamp,
+        nonce: testNonce,
+        content: 'hello',
+        signature: fakeBLSSignature,
+        signatureType: 'bls',
+      };
+
+      expect(() => encodeMessage(msg, { maxContentChars: NaN })).toThrow(RangeError);
+      expect(() => encodeMessage(msg, { maxContentChars: Infinity })).toThrow(RangeError);
+      expect(() => encodeMessage(msg, { maxContentChars: -1 })).toThrow(RangeError);
+      expect(() => encodeMessage(msg, { maxContentBytes: NaN })).toThrow(RangeError);
+      expect(() => encodeMessage(msg, { maxContentBytes: Infinity })).toThrow(RangeError);
+      expect(() => encodeMessage(msg, { maxContentBytes: -1 })).toThrow(RangeError);
+    });
+
+    it('should reject maxContentBytes exceeding uint16 limit', () => {
+      const msg: SignedMessage = {
+        author: testAuthor,
+        timestamp: testTimestamp,
+        nonce: testNonce,
+        content: 'hello',
+        signature: fakeBLSSignature,
+        signatureType: 'bls',
+      };
+
+      expect(() => encodeMessage(msg, { maxContentBytes: 65536 })).toThrow(RangeError);
+    });
+
     it('should handle empty content', () => {
       const msg: SignedMessage = {
         author: testAuthor,
