@@ -67,6 +67,17 @@ export function encodeMessage(msg: SignedMessage, options?: EncodeMessageOptions
   const maxChars = options?.maxContentChars ?? MAX_CONTENT_CHARS;
   const maxBytes = options?.maxContentBytes ?? MAX_CONTENT_BYTES;
 
+  // Validate option values
+  if (!Number.isFinite(maxChars) || maxChars < 0 || !Number.isSafeInteger(maxChars)) {
+    throw new RangeError(`maxContentChars must be a finite non-negative integer, got ${maxChars}`);
+  }
+  if (!Number.isFinite(maxBytes) || maxBytes < 0 || !Number.isSafeInteger(maxBytes)) {
+    throw new RangeError(`maxContentBytes must be a finite non-negative integer, got ${maxBytes}`);
+  }
+  if (maxBytes > 65535) {
+    throw new RangeError(`maxContentBytes must not exceed 65535 (uint16 protocol limit), got ${maxBytes}`);
+  }
+
   // Validate content
   const contentChars = [...msg.content].length;
   if (contentChars > maxChars) {
@@ -117,7 +128,10 @@ export function encodeMessage(msg: SignedMessage, options?: EncodeMessageOptions
   offset += 1;
 
   // Flags (1 byte)
-  const flags = buildMessageFlags(msg);
+  let flags = buildMessageFlags(msg);
+  if (contentBytes.length > 255) {
+    flags |= FLAG_COMPRESSED;
+  }
   view.setUint8(offset, flags);
   offset += 1;
 

@@ -129,9 +129,12 @@ describe('Message Module', () => {
       // Fails with default limit
       expect(() => encodeMessage(msg)).toThrow(ContentTooLongError);
 
-      // Succeeds with raised limit
+      // Succeeds with raised limit and roundtrips correctly
       const encoded = encodeMessage(msg, { maxContentChars: 1000, maxContentBytes: 4000 });
       expect(encoded.length).toBeGreaterThan(0);
+
+      const decoded = decodeMessage(encoded);
+      expect(decoded.content).toBe(longContent);
     });
 
     it('should reject content exceeding custom maxContentChars', () => {
@@ -150,6 +153,37 @@ describe('Message Module', () => {
 
       // Fails with stricter limit
       expect(() => encodeMessage(msg, { maxContentChars: 50 })).toThrow(ContentTooLongError);
+    });
+
+    it('should reject NaN/Infinity/negative option values', () => {
+      const msg: SignedMessage = {
+        author: testAuthor,
+        timestamp: testTimestamp,
+        nonce: testNonce,
+        content: 'hello',
+        signature: fakeBLSSignature,
+        signatureType: 'bls',
+      };
+
+      expect(() => encodeMessage(msg, { maxContentChars: NaN })).toThrow(RangeError);
+      expect(() => encodeMessage(msg, { maxContentChars: Infinity })).toThrow(RangeError);
+      expect(() => encodeMessage(msg, { maxContentChars: -1 })).toThrow(RangeError);
+      expect(() => encodeMessage(msg, { maxContentBytes: NaN })).toThrow(RangeError);
+      expect(() => encodeMessage(msg, { maxContentBytes: Infinity })).toThrow(RangeError);
+      expect(() => encodeMessage(msg, { maxContentBytes: -1 })).toThrow(RangeError);
+    });
+
+    it('should reject maxContentBytes exceeding uint16 limit', () => {
+      const msg: SignedMessage = {
+        author: testAuthor,
+        timestamp: testTimestamp,
+        nonce: testNonce,
+        content: 'hello',
+        signature: fakeBLSSignature,
+        signatureType: 'bls',
+      };
+
+      expect(() => encodeMessage(msg, { maxContentBytes: 65536 })).toThrow(RangeError);
     });
 
     it('should handle empty content', () => {
