@@ -149,10 +149,16 @@ export function parseBlob(
     });
   }
 
+  if (messages.length !== messageCount) {
+    throw new Error(
+      `Message count mismatch: header declares ${messageCount}, but parsed ${messages.length}`
+    );
+  }
+
   return {
     versionedHash,
     messages,
-    messageCount: messages.length,
+    messageCount,
     compressed: false,
     batchStartOffset,
   };
