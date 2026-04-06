@@ -18,7 +18,8 @@ Built by [Wonderland](https://wonderland.xyz).
 
 | App | Description |
 |-----|-------------|
-| [`message-in-a-blobble`](apps/message-in-a-blobble) | Demo app — sign messages with ECDSA, batch-encode, and post as EIP-4844 blobs on Sepolia |
+| [`message-in-a-blobble`](apps/message-in-a-blobble) | Demo — sign messages with ECDSA, batch-encode, and post as EIP-4844 blobs on Sepolia |
+| [`exposure-demo`](apps/exposure-demo) | Demo — full on-chain exposure lifecycle: BLS key registration, blob posting, KZG proof generation, and message exposure via BLSExposer |
 
 ## Getting Started
 
