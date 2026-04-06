@@ -54,9 +54,9 @@ export function parseBlob(
   }
 
   const batchStartOffset = options.batchStartOffset ?? 0;
-  if (!Number.isInteger(batchStartOffset) || batchStartOffset < 0 || batchStartOffset > KZG_CONSTANTS.MAX_USABLE_BYTES) {
+  if (!Number.isInteger(batchStartOffset) || batchStartOffset < 0 || batchStartOffset >= KZG_CONSTANTS.MAX_USABLE_BYTES) {
     throw new Error(
-      `Invalid batchStartOffset: ${batchStartOffset} (must be integer in [0, ${KZG_CONSTANTS.MAX_USABLE_BYTES}])`
+      `Invalid batchStartOffset: ${batchStartOffset} (must be integer in [0, ${KZG_CONSTANTS.MAX_USABLE_BYTES}))`
     );
   }
 

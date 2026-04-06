@@ -47,6 +47,12 @@ export function buildRawMessageBytes(
   if (!/^[0-9a-fA-F]{40}$/.test(authorHex)) {
     throw new Error(`Invalid address: ${author} (expected 20-byte hex string)`);
   }
+  if (!Number.isInteger(timestamp) || timestamp < 0 || timestamp > 0xffffffff) {
+    throw new Error(`Invalid timestamp: ${timestamp} (must be uint32)`);
+  }
+  if (!Number.isInteger(nonce) || nonce < 0 || nonce > 0xffff) {
+    throw new Error(`Invalid nonce: ${nonce} (must be uint16)`);
+  }
 
   const contentBytes = new TextEncoder().encode(content);
   const result = new Uint8Array(ADDRESS_SIZE + 4 + 2 + contentBytes.length);
@@ -183,6 +189,12 @@ export function encodeExposureBatch(
  * @returns Decoded messages
  */
 export function decodeExposureBatch(data: Uint8Array): DecodedExposureBatch {
+  if (data.length < EXPOSURE_HEADER_SIZE) {
+    throw new Error(
+      `Data too short for exposure batch header: ${data.length} bytes (minimum ${EXPOSURE_HEADER_SIZE})`
+    );
+  }
+
   const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
   let offset = 0;
 
@@ -212,6 +224,11 @@ export function decodeExposureBatch(data: Uint8Array): DecodedExposureBatch {
   // Aggregate signature (48 bytes)
   const aggregateSignature = data.slice(offset, offset + BLS_SIGNATURE_SIZE);
   offset += BLS_SIGNATURE_SIZE;
+
+  // Validate: if flag says sig is present, ensure it's not all zeros
+  if (hasAggregateSignature && aggregateSignature.every((b) => b === 0)) {
+    throw new Error('Aggregate signature flag is set but signature bytes are all zeros');
+  }
 
   // Parse messages
   const textDecoder = new TextDecoder('utf-8', { fatal: true });
