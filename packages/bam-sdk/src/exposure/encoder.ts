@@ -129,10 +129,15 @@ export function encodeExposureBatch(
   buffer[offset++] = PROTOCOL_VERSION;
 
   // Header: flags (1 byte)
-  if (aggregateSignature !== undefined && aggregateSignature.length !== BLS_SIGNATURE_SIZE) {
-    throw new Error(
-      `Invalid aggregate signature length: ${aggregateSignature.length} (expected ${BLS_SIGNATURE_SIZE})`
-    );
+  if (aggregateSignature !== undefined) {
+    if (aggregateSignature.length !== BLS_SIGNATURE_SIZE) {
+      throw new Error(
+        `Invalid aggregate signature length: ${aggregateSignature.length} (expected ${BLS_SIGNATURE_SIZE})`
+      );
+    }
+    if (aggregateSignature.every((b) => b === 0)) {
+      throw new Error('Aggregate signature must not be all zeros');
+    }
   }
   buffer[offset++] = aggregateSignature ? FLAG_HAS_AGGREGATE_SIG : 0;
 
@@ -224,11 +229,6 @@ export function decodeExposureBatch(data: Uint8Array): DecodedExposureBatch {
   // Aggregate signature (48 bytes)
   const aggregateSignature = data.slice(offset, offset + BLS_SIGNATURE_SIZE);
   offset += BLS_SIGNATURE_SIZE;
-
-  // Validate: if flag says sig is present, ensure it's not all zeros
-  if (hasAggregateSignature && aggregateSignature.every((b) => b === 0)) {
-    throw new Error('Aggregate signature flag is set but signature bytes are all zeros');
-  }
 
   // Parse messages
   const textDecoder = new TextDecoder('utf-8', { fatal: true });
