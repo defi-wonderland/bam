@@ -118,6 +118,7 @@ export {
   hexToBytes,
   parseExtendedHeader,
 } from './message.js';
+export type { EncodeMessageOptions } from './message.js';
 
 // Compression functions
 export {
