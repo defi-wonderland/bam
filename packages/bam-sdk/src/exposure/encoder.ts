@@ -43,11 +43,13 @@ export function buildRawMessageBytes(
   nonce: number,
   content: string
 ): Uint8Array {
+  const authorHex = author.startsWith('0x') ? author.slice(2) : author;
+  if (!/^[0-9a-fA-F]{40}$/.test(authorHex)) {
+    throw new Error(`Invalid address: ${author} (expected 20-byte hex string)`);
+  }
+
   const contentBytes = new TextEncoder().encode(content);
   const result = new Uint8Array(ADDRESS_SIZE + 4 + 2 + contentBytes.length);
-
-  // Author (20 bytes)
-  const authorHex = author.startsWith('0x') ? author.slice(2) : author;
   for (let i = 0; i < ADDRESS_SIZE; i++) {
     result[i] = parseInt(authorHex.slice(i * 2, i * 2 + 2), 16);
   }
