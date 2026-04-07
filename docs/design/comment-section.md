@@ -34,8 +34,8 @@ sequenceDiagram
     C->>R: submit signed message
     R->>F: serve as "pending"
     R->>L1: batch + blob tx (registerBlobBatch w/ contentTag)
-    L1-->>I: BlobSegmentDeclared event
-    I->>I: fetch blob, decode
+    L1-->>I: BlobSegmentDeclared + BlobBatchRegistered
+    I->>I: fetch blob, decode via registered decoder
     F->>I: query confirmed comments
     F->>R: query pending comments
 ```
@@ -49,8 +49,8 @@ sequenceDiagram
     participant F as Frontend
 
     C->>C: personal_sign(message + topicTag)
-    C->>L1: post blob directly (1 comment per blob)
-    F->>L1: scan BlobSegmentDeclared events
+    C->>L1: post blob + registerBlobBatch(contentTag)
+    L1-->>F: BlobSegmentDeclared + BlobBatchRegistered
     F->>F: fetch blobs, decode, display
 ```
 
@@ -58,7 +58,7 @@ sequenceDiagram
 
 - **Commenter** signs messages (including the topic tag) with their wallet via `personal_sign` (ECDSA) using the ERC-8180 signing domain. No key registration needed. The topic is bound to the signature, so a relay cannot repost a comment under a different blog post.
 - **Relay** accepts signed messages, batches them into blobs, posts to L1 via `registerBlobBatch()` with a `contentTag` matching the topic. Untrusted: it can censor or delay, but can't forge anything because messages are pre-signed and topic-bound. Anyone can run one.
-- **Indexer** watches `BlobSegmentDeclared` events, filters by `contentTag`, fetches and decodes blobs, serves comment history via API. Can be the same service as the relay. Also untrusted: it can omit comments but can't forge them.
+- **Indexer** watches `BlobSegmentDeclared` events (filtered by `contentTag`) and joins with `BlobBatchRegistered` events (by `versionedHash`) to discover the batch's `decoder` and `signatureRegistry`. Fetches blobs, decodes, verifies signatures, and serves comment history via API. Can be the same service as the relay. Also untrusted: it can omit comments but can't forge them.
 - **Blog frontend** displays comments. Two modes: query the server (fast) or self-index from chain (slow, expensive, but works without any infrastructure).
 
 ### Operating modes
@@ -70,13 +70,13 @@ The server is the fast path. The frontend fallback exists so the system doesn't 
 2. Submits to a relay
 3. Relay serves the message immediately as "pending" via API
 4. Relay batches pending messages, posts a blob, calls `registerBlobBatch()` with `contentTag = keccak256(topicId)`
-5. Indexer (can be the same service) watches `BlobSegmentDeclared` events filtered by `contentTag`, fetches/decodes blobs, serves comment history
+5. Indexer (can be the same service) watches `BlobSegmentDeclared` events filtered by `contentTag`, joins with `BlobBatchRegistered` for decoder/registry lookup, fetches/decodes blobs, serves comment history
 6. Frontend queries the indexer for confirmed comments and the relay for pending ones
 
 **Without server (escape hatch, not a primary UX):**
 1. Commenter signs a message with their wallet, including the topic tag
-2. Frontend posts a blob directly (one comment per blob, roughly $1-5 at current blob gas prices)
-3. Frontend scans `BlobSegmentDeclared` events by `contentTag` and fetches blobs from the Beacon API or archivers
+2. Commenter posts a blob and calls `registerBlobBatch()` with the `contentTag` directly (one comment per blob, roughly $1-5 at current blob gas prices)
+3. Frontend scans `BlobSegmentDeclared` events by `contentTag`, joins with `BlobBatchRegistered` for decoder lookup, and fetches blobs from the Beacon API or archivers
 4. Works, but too expensive for regular use
 
 ### On-chain exposure
