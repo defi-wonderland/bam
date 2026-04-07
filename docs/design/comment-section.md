@@ -6,14 +6,14 @@ This doc covers the reading and writing infrastructure: how comments get authore
 
 ## Architecture
 
-Built on BAM (Blob Authenticated Messaging), reusing the `SocialBlobsCore` contract. Comments are signed with `personal_sign` (ECDSA) so users can just use their existing wallet. BLS aggregation could be added later if volume justifies the UX cost.
+Built on BAM (Blob Authenticated Messaging), using the `BlobAuthenticatedMessagingCore` contract (ERC-8179/8180). Comments are signed with `personal_sign` (ECDSA) using the ERC-8180 signing domain (`keccak256(abi.encodePacked("ERC-BAM.v1", chainId))`) so users can just use their existing wallet. BLS aggregation could be added later if volume justifies the UX cost.
 
 ### System overview
 
 ```mermaid
 graph LR
     C[Commenter<br/>wallet] -->|signed msg| R[Relay]
-    R -->|blob tx + registerBlob| E[Ethereum L1]
+    R -->|blob tx + registerBlobBatch| E[Ethereum L1]
     R -->|pending msgs| F[Blog Frontend]
     E -->|events + blobs| I[Indexer]
     I -->|comments API| F
@@ -30,11 +30,11 @@ sequenceDiagram
     participant I as Indexer
     participant F as Frontend
 
-    C->>C: personal_sign(message)
+    C->>C: personal_sign(message + topicTag)
     C->>R: submit signed message
     R->>F: serve as "pending"
-    R->>L1: batch + blob tx (registerBlob)
-    L1-->>I: SocialBlobsCore event
+    R->>L1: batch + blob tx (registerBlobBatch w/ contentTag)
+    L1-->>I: BlobSegmentDeclared event
     I->>I: fetch blob, decode
     F->>I: query confirmed comments
     F->>R: query pending comments
@@ -48,17 +48,17 @@ sequenceDiagram
     participant L1 as Ethereum L1
     participant F as Frontend
 
-    C->>C: personal_sign(message)
+    C->>C: personal_sign(message + topicTag)
     C->>L1: post blob directly (1 comment per blob)
-    F->>L1: scan SocialBlobsCore events
+    F->>L1: scan BlobSegmentDeclared events
     F->>F: fetch blobs, decode, display
 ```
 
 ### Actors
 
-- **Commenter** signs messages with their wallet via `personal_sign` (ECDSA). No key registration needed.
-- **Relay** accepts signed messages, batches them into blobs, posts to L1. Untrusted: it can censor or delay, but can't forge anything because messages are pre-signed. Anyone can run one.
-- **Indexer** watches `SocialBlobsCore` events, fetches and decodes blobs, serves comment history via API. Can be the same service as the relay. Also untrusted: it can omit comments but can't forge them.
+- **Commenter** signs messages (including the topic tag) with their wallet via `personal_sign` (ECDSA) using the ERC-8180 signing domain. No key registration needed. The topic is bound to the signature, so a relay cannot repost a comment under a different blog post.
+- **Relay** accepts signed messages, batches them into blobs, posts to L1 via `registerBlobBatch()` with a `contentTag` matching the topic. Untrusted: it can censor or delay, but can't forge anything because messages are pre-signed and topic-bound. Anyone can run one.
+- **Indexer** watches `BlobSegmentDeclared` events, filters by `contentTag`, fetches and decodes blobs, serves comment history via API. Can be the same service as the relay. Also untrusted: it can omit comments but can't forge them.
 - **Blog frontend** displays comments. Two modes: query the server (fast) or self-index from chain (slow, expensive, but works without any infrastructure).
 
 ### Operating modes
@@ -66,17 +66,17 @@ sequenceDiagram
 The server is the fast path. The frontend fallback exists so the system doesn't hard-depend on anyone's infrastructure.
 
 **With server (fast path):**
-1. Commenter signs a message with `personal_sign`, referencing a blog post topic ID
+1. Commenter signs a message with `personal_sign`, including the blog post topic tag in the signed payload
 2. Submits to a relay
 3. Relay serves the message immediately as "pending" via API
-4. Relay batches pending messages, posts a blob, calls `SocialBlobsCore.registerBlob()` with the blog post topic in calldata
-5. Indexer (can be the same service) watches events, fetches/decodes blobs, serves comment history
+4. Relay batches pending messages, posts a blob, calls `registerBlobBatch()` with `contentTag = keccak256(topicId)`
+5. Indexer (can be the same service) watches `BlobSegmentDeclared` events filtered by `contentTag`, fetches/decodes blobs, serves comment history
 6. Frontend queries the indexer for confirmed comments and the relay for pending ones
 
 **Without server (escape hatch, not a primary UX):**
-1. Commenter signs a message with their wallet
+1. Commenter signs a message with their wallet, including the topic tag
 2. Frontend posts a blob directly (one comment per blob, roughly $1-5 at current blob gas prices)
-3. Frontend scans `SocialBlobsCore` events and fetches blobs from the Beacon API or archivers
+3. Frontend scans `BlobSegmentDeclared` events by `contentTag` and fetches blobs from the Beacon API or archivers
 4. Works, but too expensive for regular use
 
 ### On-chain exposure
@@ -95,7 +95,10 @@ Optionally, relays can gossip pending messages to each other so any relay can ba
 
 ### Topic routing
 
-Relays tag blobs via `SocialBlobsCore.registerBlob()` calldata with a topic identifier (blog post URL or hash). The frontend filters events by topic to find relevant blobs.
+Topics are identified by a `bytes32 contentTag` (e.g., `keccak256(blogPostUrl)`). This tag appears in two places:
+
+1. **In the signed message**: the topic is included in the commenter's signed payload, binding the comment to a specific blog post. A relay cannot reattribute a comment to a different topic without invalidating the signature.
+2. **On-chain**: relays pass the same `contentTag` to `registerBlobBatch()`, which emits it as an indexed field in `BlobSegmentDeclared`. Indexers filter events by `contentTag` to find relevant blobs efficiently via indexed logs.
 
 ### Blob archival
 
@@ -107,11 +110,20 @@ Blobs get pruned from the Beacon chain after ~18 days. A few ways to keep them a
 
 Multiple relays means multiple archives.
 
+### Nonce enforcement and deduplication
+
+Per ERC-8180 nonce semantics, indexers and frontends MUST:
+
+- Track `lastAcceptedNonce[author]` per sender and reject messages where `nonce <= lastAcceptedNonce`
+- De-duplicate by `messageId` (`keccak256(abi.encodePacked(author, nonce, contentHash))`)
+
+This ensures independent indexers converge on the same state and prevents relay replay attacks.
+
 ### Pending message edge cases
 
 - Message stays pending too long: frontend flags it, commenter can resubmit to another relay
 - Relay goes down before batching: commenter still has their signed message, resubmits elsewhere
-- Duplicate submission across relays: dedup by message hash (author + nonce + content)
+- Duplicate submission across relays: dedup by `messageId`
 
 ## Content moderation
 
@@ -121,8 +133,8 @@ TBD. The requirements: decentralized (blog author doesn't want to moderate), hig
 
 | Component | Role |
 |---|---|
-| `SocialBlobsCore` | Blob registration + topic tagging (event indexing) |
-| `bam-sdk` | Message encoding, blob construction |
+| `BlobAuthenticatedMessagingCore` | Blob registration with indexed `contentTag` for topic routing (ERC-8179/8180) |
+| `bam-sdk` | Message encoding, signing, blob construction |
 
 ## Assumptions
 
@@ -132,9 +144,10 @@ Infrastructure:
 - 280-character default message limit works for blog comments (configurable, wire format supports up to 65535 bytes)
 
 Trust model:
-- Nonce in message format prevents relay replay attacks
-- Dedup by `author + nonce + content` is sufficient, and independent indexers will converge on the same state
-- Topic tags in `registerBlob()` calldata need no access control (anyone can tag any topic)
+- Nonce in message format prevents relay replay attacks (indexers enforce per-sender monotonic nonces per ERC-8180)
+- Dedup by `messageId` is sufficient, and independent indexers will converge on the same state
+- Topic tag is included in the signed payload, so relays cannot misattribute comments across topics
+- `contentTag` in `registerBlobBatch()` needs no access control (anyone can tag any topic, but the signed topic in the message is authoritative)
 
 Lifecycle:
 - 18-day blob pruning window is long enough for at least one archiver to grab the data
@@ -146,8 +159,9 @@ Moderation:
 ## Open questions
 
 Upstream (impacts BAM SDK):
-- The 280-character message limit (`MAX_CONTENT_CHARS`) is now configurable via `encodeMessage()` options. But the wire format only uses a 2-byte content length when the compressed flag is set. `FLAG_EXTENDED_CONTENT` exists but isn't wired up, so uncompressed messages >255 bytes need a wire format fix.
-- Topic routing has no spam protection. Anyone can tag junk blobs for any topic via `registerBlob()`. Should filtering happen at the contract level or application level?
+- The 280-character message limit (`MAX_CONTENT_CHARS`) is now configurable via `encodeMessage()` options. The SDK already supports >255-byte content by auto-setting `FLAG_COMPRESSED` and switching to a uint16 length encoding. Note: `FLAG_COMPRESSED` is overloaded — it currently signals "extended content length" rather than actual compression. This naming should be cleaned up.
+- The message hash (`computeMessageHash`) does not currently include a topic field. A new field (e.g., `bytes32 topicTag`) needs to be added to the signed payload so that comments are cryptographically bound to a specific blog post.
+- Topic routing has no spam protection. Anyone can tag junk blobs for any topic via `registerBlobBatch()`. Should filtering happen at the contract level or application level?
 
 This spec:
 - Topic ID format: blog post URL hash vs. sequential ID vs. something else
