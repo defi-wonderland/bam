@@ -49,7 +49,7 @@ sequenceDiagram
     participant F as Frontend
 
     C->>C: personal_sign(message + topicTag)
-    C->>L1: post blob + registerBlobBatch(contentTag)
+    C->>L1: post blob + registerBlobBatch
     L1-->>F: BlobSegmentDeclared + BlobBatchRegistered
     F->>F: fetch blobs, decode, display
 ```
@@ -69,13 +69,22 @@ The server is the fast path. The frontend fallback exists so the system doesn't 
 1. Commenter signs a message with `personal_sign`, including the blog post topic tag in the signed payload
 2. Submits to a relay
 3. Relay serves the message immediately as "pending" via API
-4. Relay batches pending messages, posts a blob, calls `registerBlobBatch()` with `contentTag = keccak256(topicId)`
+4. Relay batches pending messages, posts a blob tx, and calls
+   `registerBlobBatch(blobIndex, startFE, endFE, contentTag, decoder, signatureRegistry)` where
+   `contentTag = keccak256(topicId)`, `decoder` is the BAM message decoder deployed for this
+   protocol, `signatureRegistry` is the ECDSA registry (per ERC-8180), and
+   `(blobIndex, startFE, endFE)` addresses the segment inside the posted blob (for a relay that
+   fills a whole blob per batch, `(0, 0, 4096)`; for partial blobs the relay tracks its own
+   segment cursor)
 5. Indexer (can be the same service) watches `BlobSegmentDeclared` events filtered by `contentTag`, joins with `BlobBatchRegistered` for decoder/registry lookup, fetches/decodes blobs, serves comment history
 6. Frontend queries the indexer for confirmed comments and the relay for pending ones
 
 **Without server (escape hatch, not a primary UX):**
 1. Commenter signs a message with their wallet, including the topic tag
-2. Commenter posts a blob and calls `registerBlobBatch()` with the `contentTag` directly (one comment per blob, roughly $1-5 at current blob gas prices)
+2. Commenter posts a blob and calls
+   `registerBlobBatch(0, 0, 4096, contentTag, decoder, signatureRegistry)` directly — one comment
+   per blob (full-blob segment), with the same `decoder` and `signatureRegistry` the indexers
+   expect for this protocol (roughly $1-5 at current blob gas prices)
 3. Frontend scans `BlobSegmentDeclared` events by `contentTag`, joins with `BlobBatchRegistered` for decoder lookup, and fetches blobs from the Beacon API or archivers
 4. Works, but too expensive for regular use
 
