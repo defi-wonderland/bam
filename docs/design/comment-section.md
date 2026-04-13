@@ -58,7 +58,7 @@ sequenceDiagram
 
 - **Commenter** signs messages (including the topic tag) with their wallet via `personal_sign` (ECDSA) using the ERC-8180 signing domain. No key registration needed. The topic is bound to the signature, so a relay cannot repost a comment under a different blog post.
 - **Relay** accepts signed messages, batches them into blobs, posts to L1 via `registerBlobBatch()` with a `contentTag` matching the topic. Untrusted: it can censor or delay, but can't forge anything because messages are pre-signed and topic-bound. Anyone can run one.
-- **Indexer** watches `BlobSegmentDeclared` events (filtered by `contentTag`) and joins with `BlobBatchRegistered` events (by `versionedHash`) to discover the batch's `decoder` and `signatureRegistry`. Fetches blobs, decodes, verifies signatures, and serves comment history via API. Can be the same service as the relay. Also untrusted: it can omit comments but can't forge them.
+- **Indexer** watches `BlobSegmentDeclared` events (filtered by `contentTag`) and joins with `BlobBatchRegistered` events (by `versionedHash`) to discover the batch's `decoder` and `signatureRegistry`. Fetches blobs, decodes, verifies signatures, and serves comment history via API. Can be the same service as the relay. Also untrusted: it can omit comments but can't forge them. ERC-8180 permits `decoder=address(0)` (no on-chain decoder) and `signatureRegistry=address(0)` (unsigned batch); this comment system requires both to be non-zero — indexers MUST ignore batches where either is zero, since a comment without verifiable authorship isn't useful here.
 - **Blog frontend** displays comments. Two modes: query the server (fast) or self-index from chain (slow, expensive, but works without any infrastructure).
 
 ### Operating modes
@@ -124,7 +124,15 @@ Multiple relays means multiple archives.
 Per ERC-8180 nonce semantics, indexers and frontends MUST:
 
 - Track `lastAcceptedNonce[author]` per sender and reject messages where `nonce <= lastAcceptedNonce`
-- De-duplicate by `messageId` (`keccak256(abi.encodePacked(author, nonce, contentHash))`)
+- De-duplicate by the per-message hash (`keccak256(author, nonce, content, ...)` — the same hash
+  the commenter signed over, as produced by `bam-sdk`'s `computeMessageHash`). This key is stable
+  across pending (relay-served) and confirmed (on-chain) views, so the same comment doesn't appear
+  twice when a pending message later lands in a blob.
+
+Note: ERC-8180 also defines `messageId = keccak256(author, nonce, contentHash)` where
+`contentHash` is the *batch* identifier (blob versioned hash). That form only exists after
+confirmation and is not suitable for pending-vs-confirmed dedup, which is why this system uses the
+message-level hash. See "Open questions" for the SDK naming discrepancy.
 
 This ensures independent indexers converge on the same state and prevents relay replay attacks.
 
@@ -132,7 +140,7 @@ This ensures independent indexers converge on the same state and prevents relay 
 
 - Message stays pending too long: frontend flags it, commenter can resubmit to another relay
 - Relay goes down before batching: commenter still has their signed message, resubmits elsewhere
-- Duplicate submission across relays: dedup by `messageId`
+- Duplicate submission across relays: dedup by the per-message hash (see above)
 
 ## Content moderation
 
@@ -154,7 +162,7 @@ Infrastructure:
 
 Trust model:
 - Nonce in message format prevents relay replay attacks (indexers enforce per-sender monotonic nonces per ERC-8180)
-- Dedup by `messageId` is sufficient, and independent indexers will converge on the same state
+- Dedup by the per-message hash is sufficient, and independent indexers will converge on the same state
 - Topic tag is included in the signed payload, so relays cannot misattribute comments across topics
 - `contentTag` in `registerBlobBatch()` needs no access control (anyone can tag any topic, but the signed topic in the message is authoritative)
 
@@ -171,6 +179,7 @@ Upstream (impacts BAM SDK):
 - The 280-character message limit (`MAX_CONTENT_CHARS`) is now configurable via `encodeMessage()` options. The SDK already supports >255-byte content by auto-setting `FLAG_COMPRESSED` and switching to a uint16 length encoding. Note: `FLAG_COMPRESSED` is overloaded — it currently signals "extended content length" rather than actual compression. This naming should be cleaned up.
 - The message hash (`computeMessageHash`) does not currently include a topic field. A new field (e.g., `bytes32 topicTag`) needs to be added to the signed payload so that comments are cryptographically bound to a specific blog post.
 - Topic routing has no spam protection. Anyone can tag junk blobs for any topic via `registerBlobBatch()`. Should filtering happen at the contract level or application level?
+- `bam-sdk`'s `computeMessageId()` currently returns the hex of `computeMessageHash()` (per-message: author, nonce, content, ...), which does **not** match ERC-8180's `messageId = keccak256(author, nonce, contentHash)` where `contentHash` is the batch identifier (versioned hash). The helper name is misleading. Options: rename the SDK helper to `computeMessageHashHex` (or just remove it and have callers use `computeMessageHash` directly), and/or add a separate `computeMessageId(msg, batchContentHash)` that implements the ERC-8180 form. This comment system dedups by the per-message hash (see Nonce section), so the discrepancy isn't blocking, but the SDK API should be disambiguated before other consumers adopt it.
 
 This spec:
 - Topic ID format: blog post URL hash vs. sequential ID vs. something else
