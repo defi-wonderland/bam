@@ -8,7 +8,7 @@ This is a design sketch, not a spec. Several primitives the design assumes are n
 
 ## Architecture
 
-Comments are signed with `personal_sign` (ECDSA) using the ERC-8180 signing domain (`keccak256(abi.encodePacked("ERC-BAM.v1", chainId))`) so commenters can use their existing wallet. BLS aggregation could be added later if volume justifies the UX cost.
+The intended signing flow is `personal_sign` (ECDSA) over the ERC-8180 domain-separated message hash (`keccak256(domain || messageHash)` where `domain = keccak256("ERC-BAM.v1" || chainId)`), so commenters can use their existing wallet and signatures aren't replayable across chains. The current SDK applies EIP-191 `personal_sign` directly to the message hash without the domain wrap, so domain separation needs to land in the SDK first — see Prerequisites #5. BLS aggregation could be added later if volume justifies the UX cost.
 
 ### System overview
 
@@ -105,7 +105,7 @@ With multiple relays, there are multiple archives by default.
 
 **Deduplication.** The natural dedup key is the hash the commenter signed over — any two views of the same signed message produce the same hash, whether the message is pending or confirmed. This key is also stable across indexers, so independent indexers converge on the same comment set regardless of the order in which messages arrive.
 
-Until the SDK includes the topic in `computeMessageHash` (Prerequisites #1), identical `(author, nonce, content)` posted under different posts would collide on the hash alone. Indexers must therefore scope the dedup key by topic externally — e.g., `(topicTag, computeMessageHash(msg))` — as an interim convention. Once the upstream change lands, the external scoping becomes redundant.
+Until the SDK includes the topic in `computeMessageHash` (Prerequisites #1), a signed message's hash is independent of the topic it's submitted under. An adversary — or a malfunctioning relay — could take a valid signed comment and re-submit the identical bytes under a different `contentTag`; both submissions would share the same hash, so a hash-only dedup key would count the duplicate as the original. Indexers therefore scope the dedup key by topic externally — e.g., `(topicTag, computeMessageHash(msg))` — as an interim convention. Once the upstream change lands and the topic is part of the signed hash, the external scoping becomes redundant.
 
 **Ordering.** Confirmed comments are ordered by their on-chain event order: `(block number, log index)` of the `BlobBatchRegistered` event that registered the containing batch, plus intra-batch position from the decoder. Two indexers with the same chain view and the same decoder agree on this order. Pending comments are ordered by whatever the relay served them in; this is advisory, not authoritative — when a pending message confirms, it takes its place in the confirmed order.
 
@@ -143,6 +143,8 @@ The design above relies on a few things that don't exist in this repo as of writ
 
 4. **Confirmed-order source that isn't author-controlled.** The design orders confirmed comments by event-log position (`(block number, log index, intra-batch index)`), which is already achievable against the current core contract and decoder interface. Listed here to make the non-use of the author-signed `timestamp` field explicit: relying on `timestamp` for ordering would let commenters reorder their own comments by choosing the timestamp they sign over.
 
+5. **Domain-separated ECDSA signing in the SDK.** ERC-8180 defines the signed hash as `keccak256(domain || messageHash)` with `domain = keccak256("ERC-BAM.v1" || chainId)`, which prevents cross-chain replay of signatures. The SDK's current ECDSA path (`signECDSA` in `bam-sdk/src/signatures.ts`) applies EIP-191 `personal_sign` directly over a caller-supplied `messageHash` and doesn't wrap it in the ERC-8180 domain. Without this change, a comment signed on one chain could be lifted and re-submitted on another. The SDK needs a helper (e.g., `computeSignedHash(messageHash, chainId)`) and the ECDSA signing call-sites in this system need to route through it.
+
 ## Existing BAM infrastructure used
 
 | Component | Role |
@@ -175,5 +177,6 @@ Upstream (would improve this system and any other built on BAM):
 - Topic binding in `computeMessageHash` — Prerequisites #1.
 - `computeMessageId` alignment with ERC-8180 — Prerequisites #2.
 - A keyless ECDSA signature registry in `bam-contracts`, or a codified convention for how clients should handle `signatureRegistry = address(0)` for ECDSA batches — Prerequisites #3.
+- Domain-separated ECDSA signing in the SDK — Prerequisites #5.
 - Topic spam protection at the contract level vs. application level.
 - `FLAG_COMPRESSED` in the SDK currently signals "extended content length" rather than compression; the naming is overloaded and should be cleaned up.
