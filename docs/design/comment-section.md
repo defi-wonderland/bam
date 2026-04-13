@@ -11,9 +11,9 @@ This is a design sketch, not a spec. Several primitives the design assumes are n
 The intended signing flow is `personal_sign` (ECDSA) over an ERC-8180 domain-separated hash (wrapping the message hash with `domain = keccak256("ERC-BAM.v1" || chainId)`), so commenters can use their existing wallet and signatures aren't replayable across chains. See Prerequisites #5 for the current SDK gaps around this. BLS aggregation could be added later if volume justifies the UX cost.
 
 Terminology used below:
-- **`contentTag`** — the `bytes32` submitter-supplied identifier passed to `registerBlobBatch` and emitted as an indexed field in `BlobSegmentDeclared` (per ERC-8179/-8180). In this system, `contentTag = keccak256(blogPostUrl)` identifies a blog post. When the mermaid diagrams or prose informally say "topic tag", they mean the same `contentTag` value — the tag isn't a separate field, just a per-post identifier bound to that post.
-- **message hash** — per ERC-8180 this is `keccak256(sender || nonce || contents)`. Note that the SDK's `computeMessageHash` currently hashes a richer wire-format layout (magic, version, flags, timestamp, etc.) rather than the canonical 3-field form, so "the SDK's message hash" and "ERC-8180's message hash" are not the same bytes today — see Prerequisites #5.
-- **signed hash** — `keccak256(domain || messageHash)`, the value actually signed by the commenter's wallet.
+- **`contentTag`** — the `bytes32` submitter-supplied identifier passed to `registerBlobBatch` and emitted as an indexed field in `BlobSegmentDeclared` (per ERC-8179/-8180). In this system, `contentTag = keccak256(canonicalBlogPostId)` identifies a blog post. The canonicalization rule for `canonicalBlogPostId` (stable post ID vs. normalized URL — lowercase host, trailing slash, stripped query/fragment) is an open question; every relay and indexer must agree on it, or the same logical post will produce different tags and split the comment thread. When the mermaid diagrams or prose informally say "topic tag", they mean the same `contentTag` value — the tag isn't a separate field, just a per-post identifier bound to that post.
+- **message hash** — per ERC-8180 this is `keccak256(sender || nonce || contents)`. Note that the SDK's `computeMessageHash` currently hashes a richer wire-format layout (MAGIC + version + reply-bit flag + author + timestamp + nonce + content-length + content) rather than the canonical 3-field form, so "the SDK's message hash" and "ERC-8180's message hash" are not the same bytes today — see Prerequisites #5.
+- **signed hash** — `keccak256(domain || messageHash)`, the 32-byte value passed into `personal_sign`. `personal_sign` then EIP-191-prefixes it (`"\x19Ethereum Signed Message:\n32" || signedHash`) and signs the resulting digest; verifiers `ecrecover` the same digest to derive the author address.
 
 ### System overview
 
@@ -63,7 +63,7 @@ sequenceDiagram
 
 ### Actors
 
-- **Commenter** signs messages with `personal_sign` (ECDSA). Includes the blog-post topic in the signed payload so a relay can't reattribute the comment to another post. (Topic binding depends on an upstream SDK change — see Prerequisites.)
+- **Commenter** signs messages with `personal_sign` (ECDSA). Includes the blog-post topic in the signed payload so a relay can't reattribute the comment to another post (depends on Prerequisites #1).
 - **Relay** accepts signed messages, batches them into blobs, and submits to L1 via the core contract's `registerBlobBatch`. Untrusted: it can censor or delay, but can't forge — messages are pre-signed. Anyone can run one.
 - **Indexer** watches `BlobSegmentDeclared` events (filtered by `contentTag`) and joins with `BlobBatchRegistered` to discover the batch's `decoder` and `signatureRegistry`. Fetches blobs, decodes via the decoder, verifies signatures, and serves comment history via API. Untrusted: can omit but not forge. Often the same service as the relay.
 - **Blog frontend** displays comments. Queries the indexer for confirmed comments and the relay for pending ones. Can fall back to scanning events directly if no indexer is available.
@@ -73,7 +73,7 @@ sequenceDiagram
 The server (relay + indexer as one service) is the primary path. A self-index fallback exists so the system doesn't hard-depend on third-party infrastructure.
 
 **With a server:**
-1. Commenter signs the message (including topic) and submits to a relay.
+1. Commenter signs the message (including topic — depends on Prerequisites #1) and submits to a relay.
 2. Relay serves it as "pending" while queuing for the next blob.
 3. Relay submits a single EIP-4844 transaction that posts the blob(s) and calls the core's `registerBlobBatch`, tagged with the topic's `contentTag`. See ERC-8180 / `IERC_BAM_Core` for the exact interface. The blob(s) and the register call must be in the same transaction — the core reads blob hashes via `BLOBHASH`, which only returns hashes for blobs attached to the current tx (per ERC-8179).
 4. Indexer sees `BlobSegmentDeclared` (for `contentTag`) and `BlobBatchRegistered` (for decoder/signature-registry), fetches the blob, decodes, verifies, and exposes confirmed comments.
@@ -89,7 +89,7 @@ The relay's trust surface is liveness only. Multiple relays can operate concurre
 
 ### Topic routing
 
-Topics use a `bytes32 contentTag` (e.g., `keccak256(blogPostUrl)`). The tag appears in two places:
+Topics are identified by `contentTag` (see Terminology). The tag appears in two places:
 
 - **In the signed message** — binding the comment to a specific post so it can't be reattributed (depends on Prerequisites #1).
 - **On-chain** — as the indexed `contentTag` field in `BlobSegmentDeclared`, so indexers can filter via indexed logs.
@@ -136,7 +136,7 @@ TBD. Requirements: decentralized (the blog author doesn't want to moderate), qua
 
 The design above relies on a few things that don't exist in this repo as of writing. Each is called out so the doc's concrete claims stay tethered to what needs to change for them to hold.
 
-1. **`contentTag` in the signed message hash.** `bam-sdk`'s `computeMessageHash` currently hashes `(author, timestamp, nonce, content, flags)` with no topic field. A `bytes32 contentTag` needs to be added to the encoding and included in the signed hash so topic binding is enforced by the signature rather than by indexer convention. Until then, topic binding is only an indexer-side rule, and dedup has to scope by `contentTag` externally — see Ordering and deduplication.
+1. **`contentTag` in the signed message hash.** `bam-sdk`'s `computeMessageHash` currently hashes a buffer containing MAGIC, version, a reply-bit flag, author, timestamp, nonce, content length, and content — no topic field. A `bytes32 contentTag` needs to be added to the encoding and included in the signed hash so topic binding is enforced by the signature rather than by indexer convention. Until then, topic binding is only an indexer-side rule, and dedup has to scope by `contentTag` externally — see Ordering and deduplication.
 
 2. **Canonical `messageId` definition.** ERC-8180 defines `messageId = keccak256(author, nonce, contentHash)` where `contentHash` is the *batch* identifier (blob versioned hash or `keccak256(batchData)`). The SDK's `computeMessageId` currently returns the hex of `computeMessageHash` — the per-message hash, no batch identifier — so the SDK helper and the spec disagree. The SDK needs either a rename (to something like `computeMessageHashHex`) or an additional helper of the form `computeMessageId(msg, batchContentHash)`.
 
@@ -150,7 +150,7 @@ The design above relies on a few things that don't exist in this repo as of writ
 
 5. **Domain separation and hash alignment for ECDSA signing.** Two related SDK gaps around what commenters actually sign:
    - **Domain-separation helper.** ERC-8180's signed hash is `keccak256(domain || messageHash)` with `domain = keccak256("ERC-BAM.v1" || chainId)`, which prevents cross-chain replay. The SDK's `signECDSA` takes an arbitrary `Bytes32` and applies EIP-191 `personal_sign`, so call-sites *can* pre-wrap the hash themselves today — the gap is just a missing convenience helper (e.g., `computeSignedHash(messageHash, chainId)`) and a consistent convention so every caller wraps the same way. This is a nice-to-have, not a blocker, but worth landing before shipping comments so wrappers don't diverge.
-   - **Message-hash definition.** ERC-8180 defines `messageHash = keccak256(sender || nonce || contents)` (three fields). `bam-sdk`'s `computeMessageHash` hashes a richer wire-format layout (magic / version / flags / author / timestamp / nonce / content-length / content). The two aren't the same bytes, so "sign the ERC-8180 message hash" and "sign the SDK message hash" give different signatures. The project needs to pick one canonical hash input (spec-aligned vs. SDK-wire-format) and name it unambiguously before third-party tooling can verify these signatures without bespoke knowledge.
+   - **Message-hash definition.** ERC-8180 defines `messageHash = keccak256(sender || nonce || contents)` (three fields). `bam-sdk`'s `computeMessageHash` hashes a richer wire-format layout (MAGIC / version / reply-bit flag / author / timestamp / nonce / content-length / content). The two aren't the same bytes, so "sign the ERC-8180 message hash" and "sign the SDK message hash" give different signatures. The project needs to pick one canonical hash input (spec-aligned vs. SDK-wire-format) and name it unambiguously before third-party tooling can verify these signatures without bespoke knowledge.
 
 ## Existing BAM infrastructure used
 
@@ -172,7 +172,7 @@ The repo ships a v1 ABI decoder (`decoders/ABIDecoder.sol`) and `BLSRegistry.sol
 ## Open questions
 
 In this document's scope:
-- Topic ID format: blog-post URL hash, sequential ID, or something else.
+- Topic ID format and canonicalization: whether `contentTag` preimage is a stable per-post ID, a normalized URL (lowercase host, trailing slash, stripped query/fragment), or something else. Relays and indexers must agree on the rule or a single post's thread will split across differently-hashed tags.
 - Relay incentives: commenter-paid fee, altruistic, self-hosted by the blog author?
 - Archival guarantees: relay-side archival plus opportunistic IPFS pinning, or an explicit DA commitment?
 - Moderation contract design (see Content moderation).
@@ -184,6 +184,6 @@ Upstream (would improve this system and any other built on BAM):
 - Topic binding in `computeMessageHash` — Prerequisites #1.
 - `computeMessageId` alignment with ERC-8180 — Prerequisites #2.
 - A keyless ECDSA signature registry in `bam-contracts`, or a codified convention for how clients should handle `signatureRegistry = address(0)` for ECDSA batches — Prerequisites #3.
-- Domain-separated ECDSA signing in the SDK — Prerequisites #5.
+- Domain-separated ECDSA signing and message-hash definition alignment (spec-aligned vs. SDK-wire-format) in the SDK — Prerequisites #5.
 - Topic spam protection at the contract level vs. application level.
 - `FLAG_COMPRESSED` in the SDK currently signals "extended content length" rather than compression; the naming is overloaded and should be cleaned up.
