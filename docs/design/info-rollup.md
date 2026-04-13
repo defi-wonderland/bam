@@ -17,7 +17,7 @@ Out of scope for v0: tips/fees, staked endorsement, reputation markets, retroact
 - Content-tag: `keccak256("info-rollup.v1")`
 - Messages signed with `personal_sign` under the ERC-8180 domain
 - Batches posted via `BlobAuthenticatedMessagingCore.registerBlobBatch(..., decoder, address(0))`
-- `signatureRegistry = address(0)`; authorship verified keylessly via `ecrecover`
+- `signatureRegistry = address(0)`; authorship verified keylessly via `ecrecover` — ECDSA keyless verification with `signatureRegistry=address(0)` is explicitly sanctioned by ERC-8180 §9.2
 - Exposure-compatible encoding (`encodeExposureBatch` / SOB2) is used so any single message can be KZG-proven against its blob — required by the dispute path
 
 ## Stake
@@ -63,7 +63,7 @@ The stake contract exposes `freeze` / `unfreeze` / `slash` to a single immutable
 
 ## Vouches and trust scores
 
-A vouch is a signed BAM message under a second content-tag (`keccak256("info-rollup.vouches.v1")`) whose payload points at an author address with an optional `revokes` field (a `bytes32` referencing the BAM message hash of a prior vouch from the same sender to nullify it).
+A vouch is a signed BAM message under a second content-tag (`keccak256("info-rollup.vouches.v1")`) whose payload points at an author address with an optional `revokes` field (a `bytes32` equal to the `messageId` — `keccak256(author, nonce, contentHash)` — of a prior vouch from the same sender to nullify it).
 
 No new contract. Vouchers must be staked authors — indexers apply the same `isActive` check to the voucher at the vouch message's batch block and ignore vouches from inactive addresses. Vouches from slashed addresses carry zero weight.
 
@@ -96,12 +96,12 @@ accept iff isActive(author) at batchBlock
 
 where `trustScore` is the seed-anchored score described above and `T` is a reader-configurable threshold. No migration, no contract change — the vouch events are already on-chain by then. `T` and the damping factor are reader-policy knobs rather than protocol constants.
 
-The flip itself is a coordination problem among indexers and frontends, not an on-chain event. Different frontends may flip at different times or choose different `K` values; readers who disagree can run their own indexer. That pluralism is the sovereign-read model working as intended.
+The flip itself is a coordination problem among indexers and frontends, not an on-chain event. Different frontends may flip at different times or choose different `T` values; readers who disagree can run their own indexer. That pluralism is the sovereign-read model working as intended.
 
 ## Sovereign posting and reading
 
 - **Posting without a relay**: author sends one EIP-4844 transaction with the blob and a `registerBlobBatch` call. Requires a prior (or bundled) `deposit()` to the stake contract.
-- **Reading without an indexer service**: frontend scans `BlobBatchRegistered` by `contentTag`, fetches blobs from Beacon/archivers, verifies signatures, and adds one historical `eth_call` per author-per-batch against `InfoRollupStake`. Disputes add a second `eth_call` against `InfoRollupDisputes` when displaying slash badges.
+- **Reading without an indexer service**: frontend scans `BlobSegmentDeclared` filtered by `contentTag` to discover `versionedHash`, joins with `BlobBatchRegistered` by `versionedHash` to obtain the `decoder`, fetches blobs from Beacon/archivers, verifies signatures, and adds one historical `eth_call` per author-per-batch against `InfoRollupStake`. Disputes add a second `eth_call` against `InfoRollupDisputes` when displaying slash badges.
 
 The rollup's identity is the tuple `(contentTag, decoder, stakeAddress, seedSetHash, disputesAddress, policyHash)` — all either immutable or content-addressed, all discoverable on-chain. `disputesAddress` and `policyHash` are `address(0)` / `bytes32(0)` if the optional disputes layer is not deployed.
 
