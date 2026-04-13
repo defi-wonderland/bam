@@ -1,12 +1,14 @@
 # On-chain blog comment section
 
-An on-chain comment system for a blog, with everything on L1 and decentralized moderation.
+An on-chain comment system for a blog, built on BAM (Blob Authenticated Messaging, ERC-8179/8180). This doc sketches the architecture — how comments get authored, batched, posted, indexed, and displayed. Content moderation and cost analysis are deferred.
 
-This doc covers the reading and writing infrastructure: how comments get authored, batched, posted, indexed, and displayed. Content moderation is a separate problem (TBD below).
+## Status
+
+This is a design sketch, not a spec. Several primitives the design assumes are not yet present in this repo — see **Prerequisites** below. Where the doc describes concrete behavior ("the relay does X"), it's describing what the system would do assuming those prerequisites land. Where a decision is deliberately left open, it's called out as an open question.
 
 ## Architecture
 
-Built on BAM (Blob Authenticated Messaging), using the `BlobAuthenticatedMessagingCore` contract (ERC-8179/8180). Comments are signed with `personal_sign` (ECDSA) using the ERC-8180 signing domain (`keccak256(abi.encodePacked("ERC-BAM.v1", chainId))`) so users can just use their existing wallet. BLS aggregation could be added later if volume justifies the UX cost.
+Comments are signed with `personal_sign` (ECDSA) using the ERC-8180 signing domain (`keccak256(abi.encodePacked("ERC-BAM.v1", chainId))`) so commenters can use their existing wallet. BLS aggregation could be added later if volume justifies the UX cost.
 
 ### System overview
 
@@ -35,7 +37,7 @@ sequenceDiagram
     R->>F: serve as "pending"
     R->>L1: batch + blob tx (registerBlobBatch w/ contentTag)
     L1-->>I: BlobSegmentDeclared + BlobBatchRegistered
-    I->>I: fetch blob, decode via registered decoder
+    I->>I: fetch blob, decode, verify signatures
     F->>I: query confirmed comments
     F->>R: query pending comments
 ```
@@ -51,183 +53,127 @@ sequenceDiagram
     C->>C: personal_sign(message + topicTag)
     C->>L1: post blob + registerBlobBatch
     L1-->>F: BlobSegmentDeclared + BlobBatchRegistered
-    F->>F: fetch blobs, decode, display
+    F->>F: fetch blob, decode, display
 ```
 
 ### Actors
 
-- **Commenter** signs messages (including the topic tag) with their wallet via `personal_sign` (ECDSA) using the ERC-8180 signing domain. No key registration needed. The topic is bound to the signature, so a relay cannot repost a comment under a different blog post.
-- **Relay** accepts signed messages, batches them into blobs, posts to L1 via `registerBlobBatch()` with a `contentTag` matching the topic. Relays MUST use a non-zero `decoder` (see "Batch metadata" below; `signatureRegistry` MAY be zero for ECDSA). Untrusted: it can censor or delay, but can't forge anything because messages are pre-signed and topic-bound. Anyone can run one.
-- **Indexer** watches `BlobSegmentDeclared` events (filtered by `contentTag`) and joins with `BlobBatchRegistered` events (by `versionedHash`) to discover the batch's `decoder` and `signatureRegistry` (see "Batch metadata" for required non-zero values). Fetches blobs, decodes, verifies signatures, and serves comment history via API. Can be the same service as the relay. Also untrusted: it can omit comments but can't forge them.
-- **Blog frontend** displays comments. Two modes: query the server (fast) or self-index from chain (slow, expensive, but works without any infrastructure).
+- **Commenter** signs messages with `personal_sign` (ECDSA). Includes the blog-post topic in the signed payload so a relay can't reattribute the comment to another post. (Topic binding depends on an upstream SDK change — see Prerequisites.)
+- **Relay** accepts signed messages, batches them into blobs, and submits to L1 via the core contract's `registerBlobBatch`. Untrusted: it can censor or delay, but can't forge — messages are pre-signed. Anyone can run one.
+- **Indexer** watches `BlobSegmentDeclared` events (filtered by `contentTag`) and joins with `BlobBatchRegistered` to discover the batch's `decoder` and `signatureRegistry`. Fetches blobs, decodes via the decoder, verifies signatures, and serves comment history via API. Untrusted: can omit but not forge. Often the same service as the relay.
+- **Blog frontend** displays comments. Queries the indexer for confirmed comments and the relay for pending ones. Can fall back to scanning events directly if no indexer is available.
 
 ### Operating modes
 
-The server is the fast path. The frontend fallback exists so the system doesn't hard-depend on anyone's infrastructure.
+The server (relay + indexer as one service) is the primary path. A self-index fallback exists so the system doesn't hard-depend on third-party infrastructure.
 
-**With server (fast path):**
-1. Commenter signs a message with `personal_sign`, including the blog post topic tag in the signed payload
-2. Submits to a relay
-3. Relay serves the message immediately as "pending" via API
-4. Relay submits a single EIP-4844 transaction that carries the blob(s) and also calls
-   `registerBlobBatch(blobIndex, startFE, endFE, contentTag, decoder, signatureRegistry)` where
-   `contentTag = keccak256(topicId)`, `decoder` is the BAM message decoder deployed for this
-   protocol, `signatureRegistry` can be `address(0)` for ECDSA (indexers verify via `ecrecover`;
-   see "Batch metadata"), and `(blobIndex, startFE, endFE)` addresses the segment inside the
-   attached blob (for a relay that fills a whole blob per batch, `(0, 0, 4096)`; for partial
-   blobs the relay tracks its own segment cursor). The blob and the `registerBlobBatch` call MUST
-   be in the same transaction — `registerBlobBatch` reads the blob's versioned hash via
-   `BLOBHASH(blobIndex)`, which only returns hashes for blobs attached to the current tx, and
-   `blobIndex` MUST match the blob's 0-based position in that tx (per ERC-8179).
-5. Indexer (can be the same service) watches `BlobSegmentDeclared` events filtered by `contentTag`, joins with `BlobBatchRegistered` for decoder/registry lookup, fetches/decodes blobs, serves comment history
-6. Frontend queries the indexer for confirmed comments and the relay for pending ones
+**With a server:**
+1. Commenter signs the message (including topic) and submits to a relay.
+2. Relay serves it as "pending" while queuing for the next blob.
+3. Relay submits a single EIP-4844 transaction that posts the blob(s) and calls the core's `registerBlobBatch`, tagged with the topic's `contentTag`. See ERC-8180 / `IERC_BAM_Core` for the exact interface. The blob(s) and the register call must be in the same transaction — the core reads blob hashes via `BLOBHASH`, which only returns hashes for blobs attached to the current tx (per ERC-8179).
+4. Indexer sees `BlobSegmentDeclared` (for `contentTag`) and `BlobBatchRegistered` (for decoder/signature-registry), fetches the blob, decodes, verifies, and exposes confirmed comments.
+5. Frontend merges the confirmed (indexer) and pending (relay) views.
 
-**Without server (escape hatch, not a primary UX):**
-1. Commenter signs a message with their wallet, including the topic tag
-2. Commenter submits one EIP-4844 transaction carrying the blob and calling
-   `registerBlobBatch(0, 0, 4096, contentTag, decoder, signatureRegistry)` — one comment per blob
-   (full-blob segment), using the same `decoder` the indexers expect for this protocol
-   (`signatureRegistry` can be `address(0)`; see "Batch metadata"). The blob and the register call
-   MUST be in this single transaction (see happy path step 4 for why). Roughly $1-5 at current
-   blob gas prices.
-3. Frontend scans `BlobSegmentDeclared` events by `contentTag`, joins with `BlobBatchRegistered` for decoder lookup, and fetches blobs from the Beacon API or archivers
-4. Works, but too expensive for regular use
-
-### On-chain exposure
-
-Not needed in the happy path. Comments are read by decoding blobs off-chain.
-
-Whether on-chain exposure is needed depends on the moderation design (TBD). KZG exposure requires per-message field element alignment in the blob, which constrains compression and reduces how many comments fit per blob. If moderation can work without exposure, blobs can be compressed more aggressively.
+**Without a server (escape hatch, expensive — roughly $1–5 per comment at current blob gas):**
+1. Commenter submits a single EIP-4844 tx with a one-comment blob and a `registerBlobBatch` call tagging the topic.
+2. Frontend scans events by `contentTag`, joins with `BlobBatchRegistered` for decoder lookup, and reads the blob from the Beacon API or an archiver.
 
 ### Relay design
 
-The relay's trust model is liveness only. It can't forge signatures, only censor or delay.
-
-Multiple relays can operate for the same blog. If one censors or goes down, commenters resubmit to another. Relays serve queued messages via API before they're batched into a blob. Signatures are verifiable client-side, so pending comments are already authenticated, just not yet committed to chain.
-
-Optionally, relays can gossip pending messages to each other so any relay can batch them.
-
-### Batch metadata
-
-`decoder` MUST be non-zero — it's the deployed BAM message decoder for this protocol (same address
-across all comment batches so indexers can cache its interface). ERC-8180 §10 permits `decoder=0`
-but labels it "NOT RECOMMENDED" because it breaks the "anyone can read" property; for comments
-there's no use case for that mode. Indexers MUST ignore batches whose `BlobBatchRegistered` event
-shows `decoder=0`.
-
-`signatureRegistry` MAY be `address(0)`. ERC-8180 treats `signatureRegistry=0` as "verified off
-chain", and for the ECDSA signatures this system uses (via `personal_sign`) indexers verify
-authorship by `ecrecover` alone — no registry needed in the happy-path read flow. The spec explicitly
-sanctions this at §9.2: "ECDSA-based registries MAY allow keyless verification via ecrecover-style
-key derivation." A non-zero `signatureRegistry` becomes load-bearing only when on-chain message
-exposure is added (e.g., for a moderation contract that verifies a specific message on-chain —
-on-chain code can't reach the off-chain ecrecover results, so it needs a registry or dispatcher).
-Until then, relays MAY pass `address(0)` for `signatureRegistry`; indexers MUST NOT treat
-`signatureRegistry=0` as a reason to drop comments, and MUST verify authorship via `ecrecover`
-using the `author` field in the decoded message.
+The relay's trust surface is liveness only. Multiple relays can operate concurrently for the same blog; if one censors or drops, commenters resubmit elsewhere. Signed messages are client-verifiable, so pending comments are already authenticated — they just aren't committed to chain yet. Relays may optionally gossip pending messages to each other so any relay can batch them.
 
 ### Topic routing
 
-Topics are identified by a `bytes32 contentTag` (e.g., `keccak256(blogPostUrl)`). This tag appears in two places:
+Topics use a `bytes32 contentTag` (e.g., `keccak256(blogPostUrl)`). The tag appears in two places:
 
-1. **In the signed message**: the topic is included in the commenter's signed payload, binding the comment to a specific blog post. A relay cannot reattribute a comment to a different topic without invalidating the signature.
-2. **On-chain**: relays pass the same `contentTag` to `registerBlobBatch()`, which emits it as an indexed field in `BlobSegmentDeclared`. Indexers filter events by `contentTag` to find relevant blobs efficiently via indexed logs.
+- **In the signed message** — binding the comment to a specific post so it can't be reattributed (depends on Prerequisites #1).
+- **On-chain** — as the indexed `contentTag` field in `BlobSegmentDeclared`, so indexers can filter via indexed logs.
+
+Topic spam is currently unprotected: anyone can tag junk blobs for any topic. Whether to filter at the contract level or the application level is an open question.
 
 ### Blob archival
 
-Blobs get pruned from the Beacon chain after ~18 days. A few ways to keep them around:
+Blobs are pruned from the Beacon chain after ~18 days. Archival options:
 
-- Relays archive blobs as a side effect of posting them
-- The blog frontend pins blobs to IPFS as it reads them (readers become archivers)
-- Third-party blob archivers (Blobscan, EthStorage)
+- Relays archive blobs as a side effect of posting them.
+- Frontends pin blobs to IPFS as they read (readers become archivers).
+- Third-party archivers (Blobscan, EthStorage).
 
-Multiple relays means multiple archives.
+With multiple relays, there are multiple archives by default.
 
-### Nonce handling and deduplication
+### Ordering and deduplication
 
-Nonces are included in the signed payload (per ERC-8180 signing rules) so that a signature binds to
-a specific `(author, nonce, content, ...)` tuple — an attacker can't take a signed message and
-re-use the signature under a different nonce.
+**Deduplication.** The natural dedup key is the hash the commenter signed over — any two views of the same signed message produce the same hash, whether the message is pending or confirmed. This key is also stable across indexers, so independent indexers converge on the same comment set regardless of the order in which messages arrive.
 
-Beyond that, indexers and frontends in this system MUST:
+Until the SDK includes the topic in `computeMessageHash` (Prerequisites #1), identical `(author, nonce, content)` posted under different posts would collide on the hash alone. Indexers must therefore scope the dedup key by topic externally — e.g., `(topicTag, computeMessageHash(msg))` — as an interim convention. Once the upstream change lands, the external scoping becomes redundant.
 
-- De-duplicate by a topic-scoped message key: `keccak256(topicTag, computeMessageHash(msg))` (or
-  equivalently `(topicTag, computeMessageHash(msg))` as a tuple). The scoping by `topicTag` is
-  necessary because `bam-sdk`'s `computeMessageHash` does not yet include the topic field (see
-  upstream open question), so identical `(author, nonce, content)` posted under different blog
-  posts would otherwise collide. Once the SDK includes `topicTag` in the signed payload, the
-  explicit scoping becomes redundant and the dedup key collapses to `computeMessageHash(msg)`.
-  This key is stable across pending (relay-served) and confirmed (on-chain) views, so the same
-  comment doesn't appear twice when a pending message later lands in a blob.
-- Accept any message with a valid signature and ignore the order in which nonces arrive. Display
-  ordering uses `(timestamp, nonce)` as the tiebreaker within an author's comments.
+**Ordering.** Confirmed comments are ordered by their on-chain event order: `(block number, log index)` of the `BlobBatchRegistered` event that registered the containing batch, plus intra-batch position from the decoder. Two indexers with the same chain view and the same decoder agree on this order. Pending comments are ordered by whatever the relay served them in; this is advisory, not authoritative — when a pending message confirms, it takes its place in the confirmed order.
 
-Note: ERC-8180 §"Nonce Semantics" says clients SHOULD treat messages whose nonce does not exceed
-the sender's last-accepted nonce as invalid. This system deliberately diverges from that SHOULD,
-because comments arrive asynchronously through multiple relays and chain propagation — indexer A
-seeing `nonce=3` before `nonce=2` while indexer B sees them in order would produce divergent
-comment sets and break the convergence property we care about. Per-message-hash dedup already
-handles exact replay, and signing the nonce into the hash prevents signature reuse across
-different nonces, so the strict rejection rule buys us nothing here.
+The message's `timestamp` field is author-signed and therefore author-controlled; it is **not** used as an ordering source. At most, frontends can surface it to readers as author-declared metadata ("posted on …") distinct from the canonical order.
 
-ERC-8180 also defines `messageId = keccak256(author, nonce, contentHash)` where `contentHash` is
-the *batch* identifier (blob versioned hash). That form only exists after confirmation and is not
-suitable for pending-vs-confirmed dedup, which is why this system uses the message-level hash. See
-"Open questions" for the SDK naming discrepancy.
+**Nonces.** Nonces are part of the signed payload (ERC-8180 binds them into the message hash) so a signature can't be reused under a different nonce. This system does not enforce the "reject messages whose nonce does not exceed the sender's last-accepted nonce" rule that ERC-8180 §"Nonce Semantics" allows clients to apply: comments arrive asynchronously, and an indexer seeing nonce 3 before nonce 2 should not drop nonce 2 when it later arrives. Dedup by message hash already handles replay; enforcing nonce strictness would only produce divergent indexer state.
 
-The combination (signed nonce + per-message-hash dedup + order-independent acceptance) makes
-independent indexers converge on the same comment set and prevents relay replay attacks.
+### On-chain exposure
+
+Not needed in the happy path — comments are read by decoding blobs off-chain. On-chain exposure (e.g., an ERC-8180 exposer) would only become necessary if a downstream moderation contract needs to prove a specific message exists in a batch on-chain. That's a downstream decision, tied to Content moderation.
 
 ### Pending message edge cases
 
-- Message stays pending too long: frontend flags it, commenter can resubmit to another relay
-- Relay goes down before batching: commenter still has their signed message, resubmits elsewhere
-- Duplicate submission across relays: dedup by the per-message hash (see above)
+- Message stays pending too long: frontend flags it; commenter can resubmit to another relay.
+- Relay goes down before batching: the commenter still has their signed message and can resubmit elsewhere.
+- Duplicate submission across relays: dedup by message hash (see Ordering and deduplication).
 
 ## Content moderation
 
-TBD. The requirements: decentralized (blog author doesn't want to moderate), high quality discussion, offense/defense asymmetry favoring defense. Kleros is a candidate. This design will also determine whether on-chain exposure is needed (see above).
+TBD. Requirements: decentralized (the blog author doesn't want to moderate), quality discussion, defense-favored asymmetry. Kleros is one candidate. This design will also determine whether on-chain exposure is needed.
 
-## Existing BAM infrastructure
+## Prerequisites
+
+The design above relies on a few things that don't exist in this repo as of writing. Each is called out so the doc's concrete claims stay tethered to what needs to change for them to hold.
+
+1. **Topic in the signed message hash.** `bam-sdk`'s `computeMessageHash` currently hashes `(author, timestamp, nonce, content, flags)` with no topic field. A `bytes32 topicTag` (or equivalent) needs to be added to the encoding and included in the signed hash so topic binding is enforced by the signature rather than by indexer convention. Until then, topic binding is only an indexer-side rule, and dedup has to scope by topic externally — see Ordering and deduplication.
+
+2. **Canonical `messageId` definition.** ERC-8180 defines `messageId = keccak256(author, nonce, contentHash)` where `contentHash` is the *batch* identifier (blob versioned hash or `keccak256(batchData)`). The SDK's `computeMessageId` currently returns the hex of `computeMessageHash` — the per-message hash, no batch identifier — so the SDK helper and the spec disagree. The SDK needs either a rename (to something like `computeMessageHashHex`) or an additional helper of the form `computeMessageId(msg, batchContentHash)`.
+
+3. **Signature verification story for ECDSA.** ERC-8180 §"Signature Registry Interface" permits ECDSA registries to verify via `ecrecover` without per-address key registration ("keyless verification"). No such registry is deployed in this repo — only `BLSRegistry.sol`. Two options to resolve before deployment:
+   - Deploy a minimal keyless-ECDSA registry so every `registerBlobBatch` call names a real registry, keeping the batches interoperable with generic ERC-8180 tooling.
+   - Pass `signatureRegistry = address(0)` and accept that ERC-8180-conforming readers will label these batches "verified off-chain" / unverified. Indexers built specifically for this comment system can still verify via `ecrecover`, but third-party BAM tooling won't consider the messages verified.
+
+   The first is cleaner; the second saves a deploy. This doc assumes the first unless explicitly noted.
+
+4. **Confirmed-order source that isn't author-controlled.** The design orders confirmed comments by event-log position (`(block number, log index, intra-batch index)`), which is already achievable against the current core contract and decoder interface. Listed here to make the non-use of the author-signed `timestamp` field explicit: relying on `timestamp` for ordering would let commenters reorder their own comments by choosing the timestamp they sign over.
+
+## Existing BAM infrastructure used
 
 | Component | Role |
 |---|---|
-| `BlobAuthenticatedMessagingCore` | Blob registration with indexed `contentTag` for topic routing (ERC-8179/8180) |
+| `BlobAuthenticatedMessagingCore` (ERC-8179/8180) | Blob registration with indexed `contentTag` for topic routing |
 | `bam-sdk` | Message encoding, signing, blob construction |
+
+The repo ships a v1 ABI decoder (`decoders/ABIDecoder.sol`) and `BLSRegistry.sol`. An ECDSA signature registry suitable for `personal_sign` comments is not yet present — see Prerequisites #3.
 
 ## Assumptions
 
-Infrastructure:
-- Blob gas stays cheap enough for comment batching to be viable
-- Beacon API is accessible and reliable enough for the frontend fallback
-- 280-character default message limit works for blog comments (configurable, wire format supports up to 65535 bytes)
-
-Trust model:
-- Signing the nonce into the message hash prevents signature reuse across different nonces; per-message-hash dedup prevents exact replay
-- Dedup by the per-message hash is sufficient, and independent indexers will converge on the same state regardless of the order in which messages arrive
-- Topic tag is included in the signed payload, so relays cannot misattribute comments across topics
-- `contentTag` in `registerBlobBatch()` needs no access control (anyone can tag any topic, but the signed topic in the message is authoritative)
-
-Lifecycle:
-- 18-day blob pruning window is long enough for at least one archiver to grab the data
-- Fallback mode (one comment per blob) is usable as an escape hatch, if expensive
-
-Moderation:
-- Content moderation can be layered on after the base protocol ships, without needing to change the registration flow
+- Blob gas stays cheap enough that batching comments into blobs is economically viable.
+- The Beacon API (or an archiver) is reliable enough to support the self-indexing fallback.
+- A 280-character default content limit is a reasonable first cut (configurable; wire format allows up to 65535 bytes).
+- The 18-day blob pruning window is long enough for at least one archiver to retain each blob.
+- Moderation can be layered on after the base protocol ships without changing the registration flow.
 
 ## Open questions
 
-Upstream (impacts BAM SDK):
-- The 280-character message limit (`MAX_CONTENT_CHARS`) is now configurable via `encodeMessage()` options. The SDK already supports >255-byte content by auto-setting `FLAG_COMPRESSED` and switching to a uint16 length encoding. Note: `FLAG_COMPRESSED` is overloaded — it currently signals "extended content length" rather than actual compression. This naming should be cleaned up.
-- The message hash (`computeMessageHash`) does not currently include a topic field. A new field (e.g., `bytes32 topicTag`) needs to be added to the signed payload so that comments are cryptographically bound to a specific blog post.
-- Topic routing has no spam protection. Anyone can tag junk blobs for any topic via `registerBlobBatch()`. Should filtering happen at the contract level or application level?
-- `bam-sdk`'s `computeMessageId()` currently returns the hex of `computeMessageHash()` (per-message: author, nonce, content, ...), which does **not** match ERC-8180's `messageId = keccak256(author, nonce, contentHash)` where `contentHash` is the batch identifier (versioned hash). The helper name is misleading. Options: rename the SDK helper to `computeMessageHashHex` (or just remove it and have callers use `computeMessageHash` directly), and/or add a separate `computeMessageId(msg, batchContentHash)` that implements the ERC-8180 form. This comment system dedups by the per-message hash (see Nonce section), so the discrepancy isn't blocking, but the SDK API should be disambiguated before other consumers adopt it.
+In this document's scope:
+- Topic ID format: blog-post URL hash, sequential ID, or something else.
+- Relay incentives: commenter-paid fee, altruistic, self-hosted by the blog author?
+- Archival guarantees: relay-side archival plus opportunistic IPFS pinning, or an explicit DA commitment?
+- Moderation contract design (see Content moderation).
+- Identity and reputation: ENS integration? Anything beyond raw addresses?
+- Threading: how the message format should represent replies and parent references.
+- Cost analysis: per-comment cost at different volumes, with a worked example at a specific blob-gas / ETH-price / comments-per-blob snapshot.
 
-This spec:
-- Topic ID format: blog post URL hash vs. sequential ID vs. something else
-- Relay incentives: do commenters pay a small fee, or is relay operation altruistic/self-hosted?
-- Archival guarantees: is relay-side archival enough, or do we need an explicit DA commitment?
-- Moderation contract design (see above)
-- Identity/reputation: ENS integration? Any signal beyond raw addresses?
-- Threading: how does the message format handle replies and parent references?
-- Cost analysis: per-comment cost at different volumes, sensitivity to blob gas prices. Needs a worked example at a specific snapshot (blob gas price, comments per blob, ETH price)
+Upstream (would improve this system and any other built on BAM):
+- Topic binding in `computeMessageHash` — Prerequisites #1.
+- `computeMessageId` alignment with ERC-8180 — Prerequisites #2.
+- A keyless ECDSA signature registry in `bam-contracts`, or a codified convention for how clients should handle `signatureRegistry = address(0)` for ECDSA batches — Prerequisites #3.
+- Topic spam protection at the contract level vs. application level.
+- `FLAG_COMPRESSED` in the SDK currently signals "extended content length" rather than compression; the naming is overloaded and should be cleaned up.
