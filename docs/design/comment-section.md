@@ -108,7 +108,7 @@ With multiple relays, there are multiple archives by default.
 
 ### Ordering and deduplication
 
-**Deduplication.** The dedup key is `(contentTag, messageHash)` — stable across indexers and across pending/confirmed state, so independent indexers converge on the same comment set. Once Prerequisites #1 lands and `contentTag` is included in the signed hash, the external `contentTag` scoping becomes redundant.
+**Deduplication.** The dedup key is `(contentTag, messageHash)`. Once implementations agree on a canonical messageHash definition (Prerequisites #5), this key is stable across indexers and pending/confirmed state, so independent indexers converge on the same comment set. Once Prerequisites #1 lands and the topic is part of the signature, the external `contentTag` scoping becomes redundant.
 
 **Ordering.** Confirmed comments are ordered by on-chain event position: `(block number, log index)` of the `BlobBatchRegistered` event, plus intra-batch position from the decoder. Two indexers with the same chain view and decoder agree on this order. Pending comments are ordered by relay arrival — advisory only; when a pending message confirms it takes its place in the chain-derived order.
 
@@ -134,7 +134,7 @@ TBD. Requirements: decentralized (the blog author doesn't want to moderate), qua
 
 The design above relies on a few things that don't exist in this repo as of writing. Each is called out so the doc's concrete claims stay tethered to what needs to change for them to hold.
 
-1. **`contentTag` in the signed message hash.** The signed hash must include `contentTag` so topic binding is enforced by the signature rather than by indexer convention. Without it, a relay could reattribute a valid comment to a different post, and dedup must scope externally by `(contentTag, messageHash)` as an interim measure.
+1. **Topic binding in the signature.** The author's signature must commit to a specific topic so a relay can't reattribute a comment to a different post. Without it, topic binding is only an indexer-side convention, and dedup must scope externally by `(contentTag, messageHash)` as an interim measure.
 
 2. **Canonical `messageId` definition.** ERC-8180 defines `messageId = keccak256(author, nonce, contentHash)` where `contentHash` is a batch identifier. The SDK needs a helper that matches this spec form, distinct from the per-message hash used today.
 
@@ -142,7 +142,7 @@ The design above relies on a few things that don't exist in this repo as of writ
 
 4. **Confirmed-order source that isn't author-controlled.** Confirmed comments are ordered by event-log position (`block number, log index, intra-batch index`), not by the author-signed `timestamp`. This is achievable today; it's listed here to make the non-use of `timestamp` for ordering explicit.
 
-5. **Domain-separated ECDSA signing.** The signed hash should be `keccak256(domain || messageHash)` with `domain = keccak256("ERC-BAM.v1" || chainId)` to prevent cross-chain replay. The SDK needs a consistent helper so all callers wrap the hash the same way, and the message-hash definition needs to be pinned (spec-aligned vs. SDK wire format) so third-party tooling can verify signatures without bespoke knowledge.
+5. **Domain-separated ECDSA signing.** Signatures should be domain-separated by chain ID to prevent cross-chain replay. The SDK needs a consistent signing helper so all callers use the same domain, and the message-hash input needs to be pinned (spec-aligned vs. SDK wire format) so third-party tooling can verify signatures without bespoke knowledge.
 
 ## Existing BAM infrastructure used
 
@@ -171,7 +171,7 @@ In this document's scope:
 - Cost analysis: per-comment cost at different volumes, with a worked example at a specific blob-gas / ETH-price / comments-per-blob snapshot.
 
 Upstream (would improve this system and any other built on BAM):
-- Topic binding in `computeMessageHash` — Prerequisites #1.
+- Topic binding in the signature — Prerequisites #1.
 - `computeMessageId` alignment with ERC-8180 — Prerequisites #2.
 - A keyless ECDSA signature registry in `bam-contracts`, or a codified convention for how clients should handle `signatureRegistry = address(0)` for ECDSA batches — Prerequisites #3.
 - Domain-separated ECDSA signing and message-hash definition alignment (spec-aligned vs. SDK-wire-format) in the SDK — Prerequisites #5.
