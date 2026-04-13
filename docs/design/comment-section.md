@@ -8,7 +8,12 @@ This is a design sketch, not a spec. Several primitives the design assumes are n
 
 ## Architecture
 
-The intended signing flow is `personal_sign` (ECDSA) over the ERC-8180 domain-separated message hash (`keccak256(domain || messageHash)` where `domain = keccak256("ERC-BAM.v1" || chainId)`), so commenters can use their existing wallet and signatures aren't replayable across chains. The current SDK applies EIP-191 `personal_sign` directly to the message hash without the domain wrap, so domain separation needs to land in the SDK first — see Prerequisites #5. BLS aggregation could be added later if volume justifies the UX cost.
+The intended signing flow is `personal_sign` (ECDSA) over an ERC-8180 domain-separated hash (wrapping the message hash with `domain = keccak256("ERC-BAM.v1" || chainId)`), so commenters can use their existing wallet and signatures aren't replayable across chains. See Prerequisites #5 for the current SDK gaps around this. BLS aggregation could be added later if volume justifies the UX cost.
+
+Terminology used below:
+- **`contentTag`** — the `bytes32` submitter-supplied identifier passed to `registerBlobBatch` and emitted as an indexed field in `BlobSegmentDeclared` (per ERC-8179/-8180). In this system, `contentTag = keccak256(blogPostUrl)` identifies a blog post. When the mermaid diagrams or prose informally say "topic tag", they mean the same `contentTag` value — the tag isn't a separate field, just a per-post identifier bound to that post.
+- **message hash** — per ERC-8180 this is `keccak256(sender || nonce || contents)`. Note that the SDK's `computeMessageHash` currently hashes a richer wire-format layout (magic, version, flags, timestamp, etc.) rather than the canonical 3-field form, so "the SDK's message hash" and "ERC-8180's message hash" are not the same bytes today — see Prerequisites #5.
+- **signed hash** — `keccak256(domain || messageHash)`, the value actually signed by the commenter's wallet.
 
 ### System overview
 
@@ -32,7 +37,7 @@ sequenceDiagram
     participant I as Indexer
     participant F as Frontend
 
-    C->>C: personal_sign(message + topicTag)
+    C->>C: personal_sign(signed hash)
     C->>R: submit signed message
     R->>F: serve as "pending"
     R->>L1: batch + blob tx (registerBlobBatch w/ contentTag)
@@ -50,7 +55,7 @@ sequenceDiagram
     participant L1 as Ethereum L1
     participant F as Frontend
 
-    C->>C: personal_sign(message + topicTag)
+    C->>C: personal_sign(signed hash)
     C->>L1: post blob + registerBlobBatch
     L1-->>F: BlobSegmentDeclared + BlobBatchRegistered
     F->>F: fetch blob, decode, display
@@ -105,7 +110,7 @@ With multiple relays, there are multiple archives by default.
 
 **Deduplication.** The natural dedup key is the hash the commenter signed over — any two views of the same signed message produce the same hash, whether the message is pending or confirmed. This key is also stable across indexers, so independent indexers converge on the same comment set regardless of the order in which messages arrive.
 
-Until the SDK includes the topic in `computeMessageHash` (Prerequisites #1), a signed message's hash is independent of the topic it's submitted under. An adversary — or a malfunctioning relay — could take a valid signed comment and re-submit the identical bytes under a different `contentTag`; both submissions would share the same hash, so a hash-only dedup key would count the duplicate as the original. Indexers therefore scope the dedup key by topic externally — e.g., `(topicTag, computeMessageHash(msg))` — as an interim convention. Once the upstream change lands and the topic is part of the signed hash, the external scoping becomes redundant.
+Until the SDK includes the topic in `computeMessageHash` (Prerequisites #1), a signed message's hash is independent of the topic it's submitted under. An adversary — or a malfunctioning relay — could take a valid signed comment and re-submit the identical bytes under a different `contentTag`; both submissions would share the same hash, so a hash-only dedup key would count the duplicate as the original. Indexers therefore scope the dedup key by `contentTag` externally — e.g., `(contentTag, computeMessageHash(msg))` — as an interim convention. Once the upstream change lands and `contentTag` is part of the signed hash, the external scoping becomes redundant.
 
 **Ordering.** Confirmed comments are ordered by their on-chain event order: `(block number, log index)` of the `BlobBatchRegistered` event that registered the containing batch, plus intra-batch position from the decoder. Two indexers with the same chain view and the same decoder agree on this order. Pending comments are ordered by whatever the relay served them in; this is advisory, not authoritative — when a pending message confirms, it takes its place in the confirmed order.
 
@@ -131,7 +136,7 @@ TBD. Requirements: decentralized (the blog author doesn't want to moderate), qua
 
 The design above relies on a few things that don't exist in this repo as of writing. Each is called out so the doc's concrete claims stay tethered to what needs to change for them to hold.
 
-1. **Topic in the signed message hash.** `bam-sdk`'s `computeMessageHash` currently hashes `(author, timestamp, nonce, content, flags)` with no topic field. A `bytes32 topicTag` (or equivalent) needs to be added to the encoding and included in the signed hash so topic binding is enforced by the signature rather than by indexer convention. Until then, topic binding is only an indexer-side rule, and dedup has to scope by topic externally — see Ordering and deduplication.
+1. **`contentTag` in the signed message hash.** `bam-sdk`'s `computeMessageHash` currently hashes `(author, timestamp, nonce, content, flags)` with no topic field. A `bytes32 contentTag` needs to be added to the encoding and included in the signed hash so topic binding is enforced by the signature rather than by indexer convention. Until then, topic binding is only an indexer-side rule, and dedup has to scope by `contentTag` externally — see Ordering and deduplication.
 
 2. **Canonical `messageId` definition.** ERC-8180 defines `messageId = keccak256(author, nonce, contentHash)` where `contentHash` is the *batch* identifier (blob versioned hash or `keccak256(batchData)`). The SDK's `computeMessageId` currently returns the hex of `computeMessageHash` — the per-message hash, no batch identifier — so the SDK helper and the spec disagree. The SDK needs either a rename (to something like `computeMessageHashHex`) or an additional helper of the form `computeMessageId(msg, batchContentHash)`.
 
@@ -143,7 +148,9 @@ The design above relies on a few things that don't exist in this repo as of writ
 
 4. **Confirmed-order source that isn't author-controlled.** The design orders confirmed comments by event-log position (`(block number, log index, intra-batch index)`), which is already achievable against the current core contract and decoder interface. Listed here to make the non-use of the author-signed `timestamp` field explicit: relying on `timestamp` for ordering would let commenters reorder their own comments by choosing the timestamp they sign over.
 
-5. **Domain-separated ECDSA signing in the SDK.** ERC-8180 defines the signed hash as `keccak256(domain || messageHash)` with `domain = keccak256("ERC-BAM.v1" || chainId)`, which prevents cross-chain replay of signatures. The SDK's current ECDSA path (`signECDSA` in `bam-sdk/src/signatures.ts`) applies EIP-191 `personal_sign` directly over a caller-supplied `messageHash` and doesn't wrap it in the ERC-8180 domain. Without this change, a comment signed on one chain could be lifted and re-submitted on another. The SDK needs a helper (e.g., `computeSignedHash(messageHash, chainId)`) and the ECDSA signing call-sites in this system need to route through it.
+5. **Domain separation and hash alignment for ECDSA signing.** Two related SDK gaps around what commenters actually sign:
+   - **Domain-separation helper.** ERC-8180's signed hash is `keccak256(domain || messageHash)` with `domain = keccak256("ERC-BAM.v1" || chainId)`, which prevents cross-chain replay. The SDK's `signECDSA` takes an arbitrary `Bytes32` and applies EIP-191 `personal_sign`, so call-sites *can* pre-wrap the hash themselves today — the gap is just a missing convenience helper (e.g., `computeSignedHash(messageHash, chainId)`) and a consistent convention so every caller wraps the same way. This is a nice-to-have, not a blocker, but worth landing before shipping comments so wrappers don't diverge.
+   - **Message-hash definition.** ERC-8180 defines `messageHash = keccak256(sender || nonce || contents)` (three fields). `bam-sdk`'s `computeMessageHash` hashes a richer wire-format layout (magic / version / flags / author / timestamp / nonce / content-length / content). The two aren't the same bytes, so "sign the ERC-8180 message hash" and "sign the SDK message hash" give different signatures. The project needs to pick one canonical hash input (spec-aligned vs. SDK-wire-format) and name it unambiguously before third-party tooling can verify these signatures without bespoke knowledge.
 
 ## Existing BAM infrastructure used
 
