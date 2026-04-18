@@ -23,10 +23,12 @@ feature will be built.
    - `.specify/templates/plan-template.md`
 3. If `spec.md` still has unresolved *Open questions*, stop and surface
    them. Do not invent answers.
-4. If `red-team.md` exists, check its *Blockers* section. A blocker is
-   unresolved if it appears as an unchecked bullet (`- [ ] **B-N** ...`)
-   with real content. A section containing only `_None._` or commented
-   examples is treated as having no blockers. Stop if any real blocker is
+4. If `red-team.md` exists, check its *Blockers* section. **Ignore all
+   HTML comments** (`<!-- ... -->`) when reading the section — they are
+   format hints, not entries. A blocker is unresolved if the
+   non-comment content contains an unchecked bullet matching
+   `- [ ] **B-N** …` with real content. A section whose only non-comment
+   content is `_None._` has no blockers. Stop if any real blocker is
    unresolved — it must fold into `spec.md` before the plan is drafted.
 5. Draft `<feature-dir>/plan.md` using the template. For each constitution
    principle, state *Not applicable*, *Satisfied*, or *Conflict* with
