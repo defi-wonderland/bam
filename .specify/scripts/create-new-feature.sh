@@ -22,17 +22,19 @@ repo_root="$(git rev-parse --show-toplevel)"
 features_dir="$repo_root/docs/specs/features"
 mkdir -p "$features_dir"
 
-last_num=$(
-  find "$features_dir" -maxdepth 1 -mindepth 1 -type d \
-    -printf '%f\n' 2>/dev/null \
-  | grep -E '^[0-9]{3}-' \
-  | sort \
-  | tail -n1 \
-  | cut -d- -f1 \
-  || true
-)
-last_num="${last_num:-000}"
-next_num=$(printf "%03d" "$((10#$last_num + 1))")
+last_num=0
+shopt -s nullglob
+for dir in "$features_dir"/[0-9][0-9][0-9]-*; do
+  [ -d "$dir" ] || continue
+  base="${dir##*/}"
+  num=$((10#${base%%-*}))
+  if [ "$num" -gt "$last_num" ]; then
+    last_num="$num"
+  fi
+done
+shopt -u nullglob
+
+next_num=$(printf "%03d" "$((last_num + 1))")
 
 feature_dir="$features_dir/${next_num}-${slug}"
 if [ -e "$feature_dir" ]; then
