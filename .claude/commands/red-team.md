@@ -26,7 +26,9 @@ interfaces, or access control, red-team is mandatory. Otherwise optional.
    - **Adversarial scenarios** — what would an attacker try? What would a
      well-intentioned but sloppy caller do?
    - **Blockers** (must be resolved before `/plan`) and **cautions** (must
-     be addressed in `/plan`).
+     be addressed in `/plan`). If you find none, leave the section as
+     `_None._` — do not insert empty placeholder bullets, which would
+     block `/plan` spuriously.
 4. For each blocker, draft the concrete `spec.md` edit that resolves it.
    Blockers fold back into `spec.md` — the spec is the single source of
    truth.

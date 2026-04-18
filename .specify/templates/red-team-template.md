@@ -51,14 +51,25 @@ Categories to consider (add or drop per feature):
 ## Blockers
 
 Issues that prevent `/plan` from starting. Each blocker lists the proposed
-`spec.md` edit that resolves it.
+`spec.md` edit that resolves it. If no blockers, write `_None._` — do not
+leave placeholder entries. Mark resolved blockers `[x]` once the spec edit
+has landed.
 
+_None._
+
+<!-- Example entry when blockers exist:
 - [ ] **B-1** — [issue]
   - **Spec edit:** [what to change in `spec.md`]
+-->
 
 ## Cautions
 
-Issues that must be addressed in `plan.md` (not the spec).
+Issues that must be addressed in `plan.md` (not the spec). If none, write
+`_None._`.
 
+_None._
+
+<!-- Example entry when cautions exist:
 - [ ] **C-1** — [issue]
   - **Plan treatment:** [what the plan must say or gate]
+-->
