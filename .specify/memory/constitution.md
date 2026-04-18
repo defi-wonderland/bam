@@ -104,9 +104,15 @@ alternative that was considered and rejected.
 
 Client-facing features declare their behavior when third-party Posters
 and Indexers are unavailable. Full offline operation is optional;
-silent breakage is not. Acceptable postures: **full degraded mode**,
-**partial**, or **hard-dep-deferred** (hard dependency on infra with a
-named follow-up).
+silent breakage is not. Acceptable postures:
+
+- **full degraded mode** — the feature works end-to-end with reduced
+  UX (e.g. cached reads, local-only writes); the user is told they're
+  offline.
+- **partial** — some flows work, some don't; the spec names which and
+  how the user is informed of what's unavailable.
+- **hard-dep-deferred** — hard dependency on infra; building
+  degradation is deferred, with a named follow-up.
 
 **Why:** BAM's censorship-resistance story depends on clients not
 locking into centralized availability. Sprint work rarely has time to
@@ -115,8 +121,9 @@ shipping with — and that declaration is what lets review catch
 architectural lock-in early.
 
 **In plans:** Client-facing features state their offline posture in one
-line (full degraded mode / partial / hard-dep-deferred). Deferred
-postures name the follow-up issue or milestone in *Risks deferred*.
+line (full degraded mode / partial / hard-dep-deferred).
+**Hard-dep-deferred** postures name the follow-up issue or milestone in
+*Risks deferred*; the other two postures don't require one.
 
 ### VIII. Explicit verification mode
 
