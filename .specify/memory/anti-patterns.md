@@ -116,18 +116,21 @@ the offchain path is pure loss.
 was insufficient, in the plan's *Packages and files touched* or
 *Alternatives considered*.
 
-### Silently failing when external infrastructure is offline
+### Undocumented offline posture on client-facing features
 
-**Don't** ship a client-facing feature that hangs, errors opaquely, or
-becomes unusable when a Poster or Indexer is unreachable, with no
-degraded mode surfaced to the user.
+**Don't** ship a client-facing feature whose behavior when Posters or
+Indexers are unreachable is undeclared. Hanging, opaque errors, or
+silent unusability in that case — with no spec-level acknowledgement —
+is the failure mode.
 
-**Why:** violates principle VII. BAM's censorship-resistance guarantee
-is meaningless if clients depend on centralized availability.
+**Why:** violates principle VII. The sin is silent brittleness, not
+the absence of degradation. A hard dependency on third-party infra is
+acceptable for sprint work; hiding it from review is not.
 
-**Instead:** define a degraded-mode acceptance scenario in `spec.md`:
-what functionality remains, how the user is informed that they're in
-degraded mode, and how normal mode resumes when infrastructure returns.
+**Instead:** in `spec.md`, declare the offline posture (full degraded
+mode / partial / hard-dep-deferred). If degraded, describe what still
+works and how the user is informed. If hard-dep-deferred, name the
+follow-up in the plan's *Risks deferred*.
 
 ### Landing crypto changes without a *Security impact* section
 

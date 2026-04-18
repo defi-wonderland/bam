@@ -21,7 +21,7 @@ For each principle in `.specify/memory/constitution.md`, state either:
 - **IV. Explicit security posture on crypto paths:**
 - **V. CROPS by default:**
 - **VI. L1-preferred:**
-- **VII. Local-first with graceful degradation:**
+- **VII. Local-first by design, degraded-mode by declaration:**
 - **VIII. Explicit verification mode:**
 - **IX. Minimal dependencies:**
 - **X. Demo-app-driven:**

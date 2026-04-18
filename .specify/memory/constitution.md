@@ -100,19 +100,23 @@ exists to provide.
 **In plans:** Offchain dependencies are listed with the L1-only
 alternative that was considered and rejected.
 
-### VII. Local-first with graceful degradation
+### VII. Local-first by design, degraded-mode by declaration
 
-Client-facing features remain functional when third-party Posters and
-Indexers are unavailable, even at reduced UX. Silent failure when
-external infrastructure is offline violates this principle; documented
-degraded behavior does not.
+Client-facing features declare their behavior when third-party Posters
+and Indexers are unavailable. Building full offline operation is not
+required; silently breaking when infrastructure is down is. Acceptable
+postures: **full degraded mode**, **partial degradation**, or **hard
+dependency with a named deferral**.
 
-**Why:** BAM's censorship-resistance story collapses if clients depend
-on centralized availability. Degradation is acceptable; invisible
-brittleness is not.
+**Why:** BAM's censorship-resistance story depends on clients not
+locking into centralized availability. Sprint work rarely has time to
+build full offline modes, but it can always declare the posture it's
+shipping with — and that declaration is what lets review catch
+architectural lock-in early.
 
-**In plans:** Client-facing features include a degraded-mode acceptance
-scenario: what still works, what doesn't, how the user is informed.
+**In plans:** Client-facing features state their offline posture in one
+line (full / partial / hard-dep-deferred). Deferred postures name the
+follow-up issue or milestone in *Risks deferred*.
 
 ### VIII. Explicit verification mode
 

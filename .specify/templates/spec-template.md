@@ -33,9 +33,11 @@ Who feels the pain, and in what scenario?
       with specific error").
 - [ ] Name the demo app (Social / Forum / Blog / …) that exercises this
       end-to-end, if applicable.
-- [ ] For client-facing features: include a degraded-mode scenario —
-      what still works when Posters/Indexers are unreachable, and how
-      the user is informed.
+- [ ] For client-facing features: declare offline posture — **full
+      degraded mode**, **partial**, or **hard-dep-deferred** (with a
+      follow-up named in the plan's *Risks deferred*). If any
+      degradation is in scope, describe what still works and how the
+      user is informed.
 
 ## Verification mode *(fill in if this feature exposes BAM data to a consumer)*
 
