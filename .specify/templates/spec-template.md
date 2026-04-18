@@ -32,7 +32,30 @@ Who feels the pain, and in what scenario?
 - [ ] Include negative cases where relevant (e.g. "invalid input rejected
       with specific error").
 
+## Trust boundary *(fill in if security-sensitive)*
+
+Where does untrusted input enter, and where is it considered trusted? Name
+the boundary; don't hand-wave.
+
+## Code path audit *(fill in if touching existing protocol code)*
+
+| Path / symbol | Current behavior | Change with this feature |
+| --- | --- | --- |
+|   |   |   |
+
+Include every function reachable from the change, not only those directly
+modified.
+
+## Adversarial scenarios *(fill in if security-sensitive)*
+
+Briefly list attacker or sloppy-caller scenarios the spec must prevent.
+Full adversarial analysis happens in `/red-team`; this section captures the
+ones already known during spec drafting.
+
+- **[Scenario]** — [what they try]; [what the spec ensures happens]
+
 ## Open questions
 
 - Anything unresolved. `/plan` should not start until these are answered or
-  explicitly deferred.
+  explicitly deferred. If `/red-team` runs, it will expand this list before
+  folding blockers back into the sections above.
