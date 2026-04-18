@@ -39,7 +39,12 @@ the boundary; don't hand-wave.
 
 ## Code path audit *(fill in if touching existing protocol code)*
 
-| Path / symbol | Current behavior | Change with this feature |
+Analysis of **existing** code the feature will touch. This is research,
+not design: name the existing contracts, modules, and functions that
+change or become reachable. Do not invent new APIs or file locations here
+— those belong in `/plan`.
+
+| Existing path / symbol | Current behavior | Change with this feature |
 | --- | --- | --- |
 |   |   |   |
 
