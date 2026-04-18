@@ -46,14 +46,41 @@ Which runtimes does this support, and how does the other behave?
 - **Invariant affected:**
 - **What could break:**
 - **Test coverage specifically exercising this:**
+- **Red-team cautions addressed:** [reference `red-team.md` C-N entries, or
+  *none* / *N/A*]
 
 ## Testing strategy
 
 - Unit / integration / contract / end-to-end — what lands where.
 
+## Pre-merge verification gates
+
+Concrete checks that must pass before merge. Number them; list the
+verification step for each. Add or drop gates per feature — numbers are
+ordinal, not magical.
+
+- **G-1** — Constitution check complete for every principle.
+  Verification: review §*Constitution check* above.
+- **G-2** — Spec docs updated in the same change (if protocol-touching).
+  Verification: `docs/specs/erc-*.md` diff matches §*Public API / wire
+  format*.
+- **G-3** — Tests cover new behavior, including negative cases.
+  Verification: `pnpm test:run` green; `forge test` green if contracts
+  touched.
+- **G-4** — Security impact addressed (if security-sensitive).
+  Verification: §*Security impact* complete; all red-team blockers
+  resolved; cautions addressed.
+
 ## Rollout
 
 Anything operational: deployments, migrations, deprecations, flags.
+
+## Risks deferred
+
+Risks we consciously chose not to address in this feature. Each has a
+justification and a follow-up.
+
+- **[Risk]** — why deferred: [...]; follow-up: [...]
 
 ## Alternatives considered
 

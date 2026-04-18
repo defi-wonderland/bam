@@ -6,10 +6,17 @@ You are drafting a feature spec for the BAM project. The user has given a
 short description of what they want. Your job is to expand it into a
 reviewable `spec.md` following the template.
 
-**Do not write implementation details.** No package names, file paths, API
-signatures, or library choices. Those belong in `/plan`. If you find
+**Do not write implementation details.** No *new* package names, file paths,
+API signatures, or library choices. Those belong in `/plan`. If you find
 yourself making technical decisions, stop — ask the user or defer to the
 plan.
+
+**Narrow exception for security-focused sections.** *Trust boundary*,
+*Code path audit*, and *Adversarial scenarios* are analysis of what
+*exists today* that the feature will touch — not a design for the
+implementation. These sections may name existing contracts, modules, and
+functions. They must not prescribe new APIs, new files, or library
+choices, which still belong in `/plan`.
 
 ## Steps
 
