@@ -31,6 +31,22 @@ Who feels the pain, and in what scenario?
 - [ ] Observable behavior that demonstrates the goal is met.
 - [ ] Include negative cases where relevant (e.g. "invalid input rejected
       with specific error").
+- [ ] Name the demo app (Social / Forum / Blog / …) that exercises this
+      end-to-end, if applicable.
+- [ ] For client-facing features: include a degraded-mode scenario —
+      what still works when Posters/Indexers are unreachable, and how
+      the user is informed.
+
+## Verification mode *(fill in if this feature exposes BAM data to a consumer)*
+
+Which verification mode(s) does this feature support?
+
+- [ ] **Trusted** — consumer relies on a service's answer.
+- [ ] **Locally verifiable** — client re-checks from L1 calldata / events.
+- [ ] **Proof-verifiable** — ZK or equivalent cryptographic proof.
+
+If more than one is supported, state the default and the caller-facing
+switch.
 
 ## Trust boundary *(fill in if security-sensitive)*
 
@@ -61,6 +77,14 @@ ones already known during spec drafting.
 
 ## Open questions
 
-- Anything unresolved. `/plan` should not start until these are answered or
-  explicitly deferred. If `/red-team` runs, it will expand this list before
-  folding blockers back into the sections above.
+Mark unresolved ambiguity **inline at the point it arises** using
+`[NEEDS CLARIFICATION: <question>]` — not just as a tidy list at the
+bottom. This section is the index of those inline markers, not a
+replacement for them.
+
+- `[NEEDS CLARIFICATION: …]` — brief pointer to where the marker lives
+  in the spec body.
+
+`/plan` should not start until every marker is resolved or explicitly
+deferred. If `/red-team` runs, it will expand this list before folding
+blockers back into the sections above.

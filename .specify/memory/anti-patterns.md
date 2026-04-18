@@ -102,6 +102,33 @@ drift makes the reference actively wrong.
 **Instead:** include the spec edit in `tasks.md`. If the implementation
 is leading the spec, the spec update is part of the feature.
 
+### Adding an offchain dependency without considering L1
+
+**Don't** introduce a Poster, Indexer, relay, or other third-party
+service as a required dependency without documenting the L1-only
+alternative that was considered and rejected.
+
+**Why:** violates principle VI. Every offchain dependency is a trust
+assumption and an availability failure mode. If L1 alone would work,
+the offchain path is pure loss.
+
+**Instead:** state the L1-native design that was considered and why it
+was insufficient, in the plan's *Packages and files touched* or
+*Alternatives considered*.
+
+### Silently failing when external infrastructure is offline
+
+**Don't** ship a client-facing feature that hangs, errors opaquely, or
+becomes unusable when a Poster or Indexer is unreachable, with no
+degraded mode surfaced to the user.
+
+**Why:** violates principle VII. BAM's censorship-resistance guarantee
+is meaningless if clients depend on centralized availability.
+
+**Instead:** define a degraded-mode acceptance scenario in `spec.md`:
+what functionality remains, how the user is informed that they're in
+degraded mode, and how normal mode resumes when infrastructure returns.
+
 ### Landing crypto changes without a *Security impact* section
 
 **Don't** ship signature, key, proof, or compression changes with
