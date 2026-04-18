@@ -103,10 +103,10 @@ alternative that was considered and rejected.
 ### VII. Local-first by design, degraded-mode by declaration
 
 Client-facing features declare their behavior when third-party Posters
-and Indexers are unavailable. Building full offline operation is not
-required; silently breaking when infrastructure is down is. Acceptable
-postures: **full degraded mode**, **partial degradation**, or **hard
-dependency with a named deferral**.
+and Indexers are unavailable. Full offline operation is optional;
+silent breakage is not. Acceptable postures: **full degraded mode**,
+**partial**, or **hard-dep-deferred** (hard dependency on infra with a
+named follow-up).
 
 **Why:** BAM's censorship-resistance story depends on clients not
 locking into centralized availability. Sprint work rarely has time to
@@ -115,8 +115,8 @@ shipping with — and that declaration is what lets review catch
 architectural lock-in early.
 
 **In plans:** Client-facing features state their offline posture in one
-line (full / partial / hard-dep-deferred). Deferred postures name the
-follow-up issue or milestone in *Risks deferred*.
+line (full degraded mode / partial / hard-dep-deferred). Deferred
+postures name the follow-up issue or milestone in *Risks deferred*.
 
 ### VIII. Explicit verification mode
 
