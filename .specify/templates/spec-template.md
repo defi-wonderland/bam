@@ -43,9 +43,9 @@ Who feels the pain, and in what scenario?
 
 Which verification mode(s) does this feature support?
 
-- [ ] **Trusted** — consumer relies on a service's answer.
-- [ ] **Locally verifiable** — client re-checks from L1 calldata / events.
-- [ ] **Proof-verifiable** — ZK or equivalent cryptographic proof.
+- [ ] **trusted** — consumer relies on a service's answer.
+- [ ] **locally verifiable** — client re-checks from L1 calldata / events.
+- [ ] **proof-verifiable** — ZK or equivalent cryptographic proof.
 
 If more than one is supported, state the default and the caller-facing
 switch.

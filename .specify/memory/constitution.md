@@ -106,8 +106,9 @@ Client-facing features declare their behavior when third-party Posters
 and Indexers are unavailable. Full offline operation is optional;
 silent breakage is not. Acceptable postures:
 
-- **full degraded mode** — the feature works end-to-end with reduced
-  UX (e.g. cached reads, local-only writes); the degraded state is
+- **full degraded mode** — the feature still works from the user's
+  perspective (e.g. reads from cache, writes queued as pending sync);
+  protocol propagation may be deferred, and the degraded state is
   surfaced to the user.
 - **partial** — some flows work, some don't; the spec names which and
   how the user is informed of what's unavailable.
