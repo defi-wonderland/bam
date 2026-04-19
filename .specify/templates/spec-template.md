@@ -34,8 +34,8 @@ Who feels the pain, and in what scenario?
 - [ ] Name the demo app (Social / Forum / Blog / …) that exercises this
       end-to-end, if applicable.
 - [ ] For client-facing features: declare offline posture — **full
-      degraded mode**, **partial**, or **hard-dep-deferred** (with a
-      follow-up named in the plan's *Risks deferred*). If any
+      degraded mode**, **partial**, or **hard-dep-deferred**; the last
+      requires a follow-up in the plan's *Risks deferred*. If any
       degradation is in scope, describe what still works and how the
       user is informed.
 

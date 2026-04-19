@@ -124,7 +124,7 @@ architectural lock-in early.
 **In plans:** Client-facing features state their offline posture in one
 line (full degraded mode / partial / hard-dep-deferred).
 **Hard-dep-deferred** postures name the follow-up issue or milestone in
-*Risks deferred*; the other two postures don't require one.
+*Risks deferred*.
 
 ### VIII. Explicit verification mode
 
@@ -161,8 +161,7 @@ Forum, Blog, or a named successor. Specs name which demo app(s) exercise
 the feature.
 
 **Why:** Demo apps are where the protocol's usefulness becomes
-observable. A feature no demo can exercise has no evidence it's useful
-in the form the protocol is meant to enable.
+observable. A feature no demo exercises has no evidence of usefulness.
 
 **In plans:** Feature value is tied to a demo-app flow; absence of such
 a flow is called out as a risk.
