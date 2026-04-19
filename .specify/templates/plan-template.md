@@ -2,7 +2,7 @@
 
 **Feature ID:** NNN-slug
 **Spec:** `./spec.md`
-**Constitution version consulted:** 0.1.0
+**Constitution version consulted:** 0.2.0
 **Status:** draft
 
 > **What this document is:** HOW we'll build what `spec.md` describes.
@@ -17,8 +17,14 @@ For each principle in `.specify/memory/constitution.md`, state either:
 
 - **I. Stateless core:**
 - **II. Dual-runtime SDK:**
-- **III. Spec-backed protocol changes:**
+- **III. Spec-backed, spec-evolving protocol changes:**
 - **IV. Explicit security posture on crypto paths:**
+- **V. CROPS by default:**
+- **VI. L1-preferred:**
+- **VII. Local-first by design, degraded-mode by declaration:**
+- **VIII. Explicit verification mode:**
+- **IX. Minimal dependencies:**
+- **X. Demo-app-driven:**
 
 ## Architecture
 

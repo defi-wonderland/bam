@@ -21,8 +21,13 @@ feature will be built.
      security-sensitive and this file is missing, stop and suggest the
      user run `/red-team` first.
    - `.specify/templates/plan-template.md`
-3. If `spec.md` still has unresolved *Open questions*, stop and surface
-   them. Do not invent answers.
+3. If `spec.md` still has unresolved clarifications, stop and surface
+   them. Treat any `[NEEDS CLARIFICATION:` occurrence as an unresolved
+   marker — whether in prose or in a code span — **except** when the
+   content after the colon is a template placeholder (`<question>`,
+   `<...>`, or a lone `…`/`...`), which is the template's own syntax
+   example. The *Open questions* section is just an index and may
+   drift from the inline markers. Do not invent answers.
 4. If `red-team.md` exists, check its *Blockers* section. Ignore the
    template's format-hint block (an HTML comment starting with
    `<!-- Format when entries exist`). If any *other* HTML comment in
