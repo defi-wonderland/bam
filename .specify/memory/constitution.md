@@ -107,8 +107,8 @@ and Indexers are unavailable. Full offline operation is optional;
 silent breakage is not. Acceptable postures:
 
 - **full degraded mode** — the feature works end-to-end with reduced
-  UX (e.g. cached reads, local-only writes); the user is told they're
-  offline.
+  UX (e.g. cached reads, local-only writes); the degraded state is
+  surfaced to the user.
 - **partial** — some flows work, some don't; the spec names which and
   how the user is informed of what's unavailable.
 - **hard-dep-deferred** — hard dependency on infra; building
