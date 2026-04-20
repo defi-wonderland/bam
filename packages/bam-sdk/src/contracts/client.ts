@@ -160,11 +160,16 @@ export class BAMClient {
   }
 
   /**
-   * Register a blob and also register it with the SimpleBoolVerifier
+   * Register a blob on the legacy SocialBlobsCore. Since the verifier is now a
+   * registration hook wired atomically through the core, there is no second wallet-side
+   * verifier call to make — the verifier is populated inside the same transaction. This
+   * method asserts that happened by reading `verifier.isRegistered(contentHash)` and
+   * throws if the hook did not fire (e.g. the core was deployed without the verifier
+   * wired in).
    */
   async registerBlobWithVerifier(blobIndex: number): Promise<BlobRegistrationResult> {
     const result = await this.registerBlob(blobIndex);
-    await this.registerWithVerifier(result.versionedHash);
+    await this.assertVerifierRegistered(result.versionedHash);
     return result;
   }
 
@@ -199,35 +204,59 @@ export class BAMClient {
   }
 
   /**
-   * Register calldata and also register with the SimpleBoolVerifier
+   * Register a calldata batch on the legacy SocialBlobsCore. See
+   * {@link registerBlobWithVerifier} for why this is an assertion rather than a second
+   * transaction.
    */
   async registerCalldataWithVerifier(batchData: Uint8Array): Promise<CalldataRegistrationResult> {
     const result = await this.registerCalldata(batchData);
-    await this.registerWithVerifier(result.contentHash);
+    await this.assertVerifierRegistered(result.contentHash);
     return result;
   }
 
   /**
-   * Register a content hash with the SimpleBoolVerifier
+   * Read-only check that `SimpleBoolVerifier.isRegistered(contentHash)` returns true —
+   * i.e., the core contract's hook fired and populated the verifier during the
+   * registration transaction. Throws if the verifier was not updated, which usually
+   * means the configured core was not deployed with the verifier wired as its hook.
    */
-  async registerWithVerifier(contentHash: Bytes32): Promise<void> {
+  private async assertVerifierRegistered(contentHash: Bytes32): Promise<void> {
     if (!this.verifierAddress) {
       throw new Error('Verifier address required. Provide verifierAddress in client options.');
     }
-    const wallet = this.requireWallet();
-
-    // Note: the v1 verifier is now a registration hook — `onRegistered` is gated to
-    // the core contract, so direct calls from a wallet revert with `OnlyCore`. This
-    // path is preserved for ABI-compat at build time; the verifier hook is wired
-    // through the core at registration time.
-    const hash = await wallet.writeContract({
+    const isRegistered = await this.publicClient.readContract({
       address: this.verifierAddress as `0x${string}`,
       abi: SIMPLE_BOOL_VERIFIER_ABI,
-      functionName: 'onRegistered',
-      args: [contentHash as `0x${string}`, '0x0000000000000000000000000000000000000000'],
+      functionName: 'isRegistered',
+      args: [contentHash as `0x${string}`],
     });
+    if (!isRegistered) {
+      throw new Error(
+        `Verifier at ${this.verifierAddress} did not record contentHash ${contentHash}. ` +
+          'This usually means the core contract is not wired with the verifier as its ' +
+          'registration hook. Deploy a core that accepts the verifier in its constructor ' +
+          'and calls `onRegistered` inside `registerBlob` / `registerCalldata`.'
+      );
+    }
+  }
 
-    await this.publicClient.waitForTransactionReceipt({ hash });
+  /**
+   * @deprecated SimpleBoolVerifier is a registration hook invoked atomically by the core
+   *   contract. Direct wallet calls to `onRegistered` revert with `OnlyCore`.
+   *
+   *   If the configured core already has the verifier wired as its hook, call
+   *   `registerBlob` / `registerCalldata` and the verifier will be populated inside the
+   *   same transaction — no separate `registerWithVerifier` step needed.
+   *
+   *   Retained as a synchronous throw so existing call sites surface the new model at
+   *   lint/test time instead of paying gas for a guaranteed revert.
+   */
+  async registerWithVerifier(_contentHash: Bytes32): Promise<void> {
+    throw new Error(
+      'registerWithVerifier is no longer callable: SimpleBoolVerifier.onRegistered is a ' +
+        'core-only hook (reverts with OnlyCore for wallet senders). Call registerBlob / ' +
+        'registerCalldata on a core whose hook is wired to the verifier instead.'
+    );
   }
 
   /**
