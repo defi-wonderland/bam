@@ -169,7 +169,7 @@ export class BAMClient {
    */
   async registerBlobWithVerifier(blobIndex: number): Promise<BlobRegistrationResult> {
     const result = await this.registerBlob(blobIndex);
-    await this.assertVerifierRegistered(result.versionedHash);
+    await this.assertVerifierRegistered(result.versionedHash, BigInt(result.blockNumber));
     return result;
   }
 
@@ -210,17 +210,27 @@ export class BAMClient {
    */
   async registerCalldataWithVerifier(batchData: Uint8Array): Promise<CalldataRegistrationResult> {
     const result = await this.registerCalldata(batchData);
-    await this.assertVerifierRegistered(result.contentHash);
+    await this.assertVerifierRegistered(result.contentHash, BigInt(result.blockNumber));
     return result;
   }
 
   /**
-   * Read-only check that `SimpleBoolVerifier.isRegistered(contentHash)` returns true —
-   * i.e., the core contract's hook fired and populated the verifier during the
+   * Read-only check that `SimpleBoolVerifier.isRegistered(registrationHash)` returns true
+   * — i.e., the core contract's hook fired and populated the verifier during the
    * registration transaction. Throws if the verifier was not updated, which usually
    * means the configured core was not deployed with the verifier wired as its hook.
+   *
+   * `registrationHash` is whichever identifier the core used — the EIP-4844 versioned
+   * hash for blob registrations, or `keccak256(batchData)` for calldata. The verifier
+   * doesn't distinguish; both land in the same `_registered` mapping.
+   *
+   * The read is pinned to `blockNumber` (typically the receipt's block) so load-balanced
+   * RPC backends don't return a stale "latest" that predates the registration tx.
    */
-  private async assertVerifierRegistered(contentHash: Bytes32): Promise<void> {
+  private async assertVerifierRegistered(
+    registrationHash: Bytes32,
+    blockNumber: bigint
+  ): Promise<void> {
     if (!this.verifierAddress) {
       throw new Error('Verifier address required. Provide verifierAddress in client options.');
     }
@@ -228,14 +238,16 @@ export class BAMClient {
       address: this.verifierAddress as `0x${string}`,
       abi: SIMPLE_BOOL_VERIFIER_ABI,
       functionName: 'isRegistered',
-      args: [contentHash as `0x${string}`],
+      args: [registrationHash as `0x${string}`],
+      blockNumber,
     });
     if (!isRegistered) {
       throw new Error(
-        `Verifier at ${this.verifierAddress} did not record contentHash ${contentHash}. ` +
-          'This usually means the core contract is not wired with the verifier as its ' +
-          'registration hook. Deploy a core that accepts the verifier in its constructor ' +
-          'and calls `onRegistered` inside `registerBlob` / `registerCalldata`.'
+        `Verifier at ${this.verifierAddress} did not record registration hash ` +
+          `${registrationHash} at block ${blockNumber}. This usually means the core ` +
+          'contract is not wired with the verifier as its registration hook. Deploy a ' +
+          'core that accepts the verifier in its constructor and calls `onRegistered` ' +
+          'inside `registerBlob` / `registerCalldata`.'
       );
     }
   }
