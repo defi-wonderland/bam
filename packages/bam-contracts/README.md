@@ -140,10 +140,11 @@ forge fmt
 
 | Contract | Address |
 |----------|---------|
-| SocialBlobsCore | `0xAdd498490f0Ffc1ba15af01D6Bf6374518fE0969` |
-| BLSRegistry | `0x2146758C8f24e9A0aFf98dF3Da54eef9f53BCFbf` |
-| BLSExposer | `0x0136454b435fE6cCa5F7b8A6a8cFB5B549afB717` |
-| SimpleBoolVerifier | `0x5163647B0057C5d07e568220AdD45D36C6b86C1b` |
+| BlobAuthenticatedMessagingCore | `0x9C4b230066a6808D83F5FBa0c040E0Df2Fcc7314` |
+| SocialBlobsCore (legacy) | `0x11a825a0774d0471292eab4706743bffcdd5d137` |
+| BLSRegistry | `0x15866bf5a8724f2aa9fe75e262d8f00ba2818e25` |
+| BLSExposer | `0x443029b4b96fbf2d8feba77d828a394d19615a48` |
+| SimpleBoolVerifier | `0xdec5faa3e32d6296e53bae7e359e059b58a482f4` |
 
 ## Future Work
 

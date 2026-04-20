@@ -2,7 +2,11 @@ import { NextResponse } from 'next/server';
 import { createPublicClient, http, parseAbiItem } from 'viem';
 import { sepolia } from 'viem/chains';
 import { computeMessageId } from 'bam-sdk';
-import { SOCIAL_BLOBS_CORE_ADDRESS } from '@/lib/constants';
+import {
+  BAM_CORE_ADDRESS,
+  MESSAGE_IN_A_BLOBBLE_TAG,
+  SOCIAL_BLOBS_CORE_ADDRESS,
+} from '@/lib/constants';
 import { fetchBlobForTx, extractUsableBytes, decodeBlobBatch } from '@/lib/blob-fetch';
 import {
   getSyncedBlobbleTxHashes,
@@ -14,21 +18,16 @@ import {
 interface OnChainBlobble {
   versionedHash: string;
   submitter: string;
-  timestamp: number;
+  /** Source event: legacy `BlobRegistered` (SocialBlobsCore) or amended `BlobBatchRegistered` (BAM core). */
+  source: 'legacy' | 'bam-core';
   txHash: string;
   blockNumber: number;
 }
 
-async function fetchOnChainBlobbles(): Promise<OnChainBlobble[]> {
-  const rpcUrl = process.env.NEXT_PUBLIC_RPC_URL || undefined;
-  const publicClient = createPublicClient({
-    chain: sepolia,
-    transport: http(rpcUrl),
-  });
-
-  const currentBlock = await publicClient.getBlockNumber();
-  const fromBlock = currentBlock - 7200n > 0n ? currentBlock - 7200n : 0n;
-
+async function fetchLegacyBlobbles(
+  publicClient: ReturnType<typeof createPublicClient>,
+  fromBlock: bigint
+): Promise<OnChainBlobble[]> {
   const logs = await publicClient.getLogs({
     address: SOCIAL_BLOBS_CORE_ADDRESS,
     event: parseAbiItem(
@@ -41,10 +40,60 @@ async function fetchOnChainBlobbles(): Promise<OnChainBlobble[]> {
   return logs.map((log) => ({
     versionedHash: log.args.versionedHash!,
     submitter: log.args.submitter!,
-    timestamp: Number(log.args.timestamp),
+    source: 'legacy' as const,
     txHash: log.transactionHash,
     blockNumber: Number(log.blockNumber),
   }));
+}
+
+/**
+ * Read path for the amended ERC-8180 BAM core: filter `BlobBatchRegistered` logs by
+ * the indexed `contentTag` topic. Only batches whose tag equals
+ * `MESSAGE_IN_A_BLOBBLE_TAG` are returned — the single-filter-recovery primitive that
+ * the ERC amendment unlocks.
+ */
+async function fetchBamCoreBlobbles(
+  publicClient: ReturnType<typeof createPublicClient>,
+  fromBlock: bigint
+): Promise<OnChainBlobble[]> {
+  if (BAM_CORE_ADDRESS === '0x0000000000000000000000000000000000000000') return [];
+
+  const logs = await publicClient.getLogs({
+    address: BAM_CORE_ADDRESS,
+    event: parseAbiItem(
+      'event BlobBatchRegistered(bytes32 indexed versionedHash, address indexed submitter, bytes32 indexed contentTag, address decoder, address signatureRegistry)'
+    ),
+    args: {
+      contentTag: MESSAGE_IN_A_BLOBBLE_TAG,
+    },
+    fromBlock,
+    toBlock: 'latest',
+  });
+
+  return logs.map((log) => ({
+    versionedHash: log.args.versionedHash!,
+    submitter: log.args.submitter!,
+    source: 'bam-core' as const,
+    txHash: log.transactionHash,
+    blockNumber: Number(log.blockNumber),
+  }));
+}
+
+async function fetchOnChainBlobbles(): Promise<OnChainBlobble[]> {
+  const rpcUrl = process.env.NEXT_PUBLIC_RPC_URL || undefined;
+  const publicClient = createPublicClient({
+    chain: sepolia,
+    transport: http(rpcUrl),
+  });
+
+  const currentBlock = await publicClient.getBlockNumber();
+  const fromBlock = currentBlock - 7200n > 0n ? currentBlock - 7200n : 0n;
+
+  const [legacy, bam] = await Promise.all([
+    fetchLegacyBlobbles(publicClient, fromBlock),
+    fetchBamCoreBlobbles(publicClient, fromBlock),
+  ]);
+  return [...legacy, ...bam];
 }
 
 export async function GET() {

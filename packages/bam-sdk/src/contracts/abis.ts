@@ -3,6 +3,30 @@
 
 export const SOCIAL_BLOBS_CORE_ABI = [
   {
+    "type": "constructor",
+    "inputs": [
+      {
+        "name": "hook_",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "hook",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "contract IRegistrationHook"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
     "type": "function",
     "name": "registerBlob",
     "inputs": [
@@ -198,6 +222,11 @@ export const BAM_CORE_ABI = [
         "internalType": "bytes"
       },
       {
+        "name": "contentTag",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
         "name": "decoder",
         "type": "address",
         "internalType": "address"
@@ -234,9 +263,15 @@ export const BAM_CORE_ABI = [
         "internalType": "address"
       },
       {
+        "name": "contentTag",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
         "name": "decoder",
         "type": "address",
-        "indexed": true,
+        "indexed": false,
         "internalType": "address"
       },
       {
@@ -302,9 +337,15 @@ export const BAM_CORE_ABI = [
         "internalType": "address"
       },
       {
+        "name": "contentTag",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
         "name": "decoder",
         "type": "address",
-        "indexed": true,
+        "indexed": false,
         "internalType": "address"
       },
       {
@@ -850,6 +891,24 @@ export const BLS_EXPOSER_ABI = [
 
 export const SIMPLE_BOOL_VERIFIER_ABI = [
   {
+    "type": "constructor",
+    "inputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "core",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
     "type": "function",
     "name": "isRegistered",
     "inputs": [
@@ -870,12 +929,30 @@ export const SIMPLE_BOOL_VERIFIER_ABI = [
   },
   {
     "type": "function",
-    "name": "register",
+    "name": "onRegistered",
     "inputs": [
       {
         "name": "contentHash",
         "type": "bytes32",
         "internalType": "bytes32"
+      },
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "setCore",
+    "inputs": [
+      {
+        "name": "core_",
+        "type": "address",
+        "internalType": "address"
       }
     ],
     "outputs": [],
@@ -912,6 +989,19 @@ export const SIMPLE_BOOL_VERIFIER_ABI = [
   },
   {
     "type": "event",
+    "name": "CoreSet",
+    "inputs": [
+      {
+        "name": "core",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
     "name": "Registered",
     "inputs": [
       {
@@ -922,6 +1012,26 @@ export const SIMPLE_BOOL_VERIFIER_ABI = [
       }
     ],
     "anonymous": false
+  },
+  {
+    "type": "error",
+    "name": "CoreAlreadySet",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OnlyCore",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OnlyDeployer",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "ZeroCoreAddress",
+    "inputs": []
   }
 ] as const;
 

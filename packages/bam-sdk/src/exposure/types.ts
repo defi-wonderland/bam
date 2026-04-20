@@ -106,6 +106,12 @@ export interface BlobRegistrationResult {
   txHash: Bytes32;
   /** Versioned hash */
   versionedHash: VersionedHash;
+  /**
+   * Protocol/content identifier parsed from the `BlobBatchRegistered` event (indexed
+   * topic). Equal to the `contentTag` argument the caller passed to `registerBlobBatch`.
+   * Undefined for legacy `registerBlob` (SocialBlobsCore), which does not emit a tag.
+   */
+  contentTag?: Bytes32;
   /** Block number */
   blockNumber: number;
 }
@@ -118,6 +124,13 @@ export interface CalldataRegistrationResult {
   txHash: Bytes32;
   /** Content hash (keccak256 of batch data) */
   contentHash: Bytes32;
+  /**
+   * Protocol/content identifier parsed from the `CalldataBatchRegistered` event
+   * (indexed topic). Equal to the `contentTag` argument the caller passed to
+   * `registerCalldataBatch`. Undefined for legacy `registerCalldata`
+   * (SocialBlobsCore), which does not emit a tag.
+   */
+  contentTag?: Bytes32;
   /** Block number */
   blockNumber: number;
   /** Gas used */

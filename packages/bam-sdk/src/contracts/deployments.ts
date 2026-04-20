@@ -8,7 +8,7 @@ export interface DeployedContract {
 export interface ChainDeployment {
   chainId: number;
   name: string;
-  contracts: Partial<Record<'BLSExposer' | 'BLSRegistry' | 'SimpleBoolVerifier' | 'SocialBlobsCore', DeployedContract>>;
+  contracts: Partial<Record<'BLSExposer' | 'BLSRegistry' | 'BlobAuthenticatedMessagingCore' | 'SimpleBoolVerifier' | 'SocialBlobsCore', DeployedContract>>;
 }
 
 const DEPLOYMENTS: Record<number, ChainDeployment> = {
@@ -20,6 +20,7 @@ const DEPLOYMENTS: Record<number, ChainDeployment> = {
       SimpleBoolVerifier: { address: '0xdec5faa3e32d6296e53bae7e359e059b58a482f4' },
       BLSRegistry: { address: '0x15866bf5a8724f2aa9fe75e262d8f00ba2818e25' },
       BLSExposer: { address: '0x443029b4b96fbf2d8feba77d828a394d19615a48' },
+      BlobAuthenticatedMessagingCore: { address: '0x9C4b230066a6808D83F5FBa0c040E0Df2Fcc7314' },
     },
   },
 };

@@ -216,11 +216,15 @@ export class BAMClient {
     }
     const wallet = this.requireWallet();
 
+    // Note: the v1 verifier is now a registration hook — `onRegistered` is gated to
+    // the core contract, so direct calls from a wallet revert with `OnlyCore`. This
+    // path is preserved for ABI-compat at build time; the verifier hook is wired
+    // through the core at registration time.
     const hash = await wallet.writeContract({
       address: this.verifierAddress as `0x${string}`,
       abi: SIMPLE_BOOL_VERIFIER_ABI,
-      functionName: 'register',
-      args: [contentHash as `0x${string}`],
+      functionName: 'onRegistered',
+      args: [contentHash as `0x${string}`, '0x0000000000000000000000000000000000000000'],
     });
 
     await this.publicClient.waitForTransactionReceipt({ hash });
@@ -285,15 +289,25 @@ export class BAMClient {
     return {
       txHash: receipt.transactionHash as Bytes32,
       versionedHash: event.args.versionedHash as VersionedHash,
+      contentTag: event.args.contentTag as Bytes32,
       blockNumber: Number(receipt.blockNumber),
     };
   }
 
   /**
-   * Register a calldata batch via ERC-BAM
+   * Register a calldata batch via ERC-BAM.
+   *
+   * @param batchData           Batch payload bytes.
+   * @param contentTag          Protocol/content identifier emitted verbatim in
+   *                            `CalldataBatchRegistered`. `bytes32(0)` is accepted by
+   *                            the contract but NOT RECOMMENDED — prefer
+   *                            `keccak256("<protocol>.v<n>")`.
+   * @param decoder             Decoder contract address.
+   * @param signatureRegistry   Signature registry address.
    */
   async registerCalldataBatch(
     batchData: Uint8Array,
+    contentTag: Bytes32,
     decoder: Address,
     signatureRegistry: Address
   ): Promise<CalldataRegistrationResult> {
@@ -306,6 +320,7 @@ export class BAMClient {
       functionName: 'registerCalldataBatch',
       args: [
         `0x${Buffer.from(batchData).toString('hex')}` as `0x${string}`,
+        contentTag as `0x${string}`,
         decoder as `0x${string}`,
         signatureRegistry as `0x${string}`,
       ],
@@ -319,6 +334,7 @@ export class BAMClient {
     return {
       txHash: receipt.transactionHash as Bytes32,
       contentHash: event.args.contentHash as Bytes32,
+      contentTag: event.args.contentTag as Bytes32,
       blockNumber: Number(receipt.blockNumber),
       gasUsed: receipt.gasUsed,
     };
