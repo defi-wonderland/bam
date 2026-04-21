@@ -160,11 +160,16 @@ export class BAMClient {
   }
 
   /**
-   * Register a blob and also register it with the SimpleBoolVerifier
+   * Register a blob on the legacy SocialBlobsCore. Since the verifier is now a
+   * registration hook wired atomically through the core, there is no second wallet-side
+   * verifier call to make — the verifier is populated inside the same transaction. This
+   * method asserts that happened by reading `verifier.isRegistered(contentHash)` and
+   * throws if the hook did not fire (e.g. the core was deployed without the verifier
+   * wired in).
    */
   async registerBlobWithVerifier(blobIndex: number): Promise<BlobRegistrationResult> {
     const result = await this.registerBlob(blobIndex);
-    await this.registerWithVerifier(result.versionedHash);
+    await this.assertVerifierRegistered(result.versionedHash, BigInt(result.blockNumber));
     return result;
   }
 
@@ -199,31 +204,71 @@ export class BAMClient {
   }
 
   /**
-   * Register calldata and also register with the SimpleBoolVerifier
+   * Register a calldata batch on the legacy SocialBlobsCore. See
+   * {@link registerBlobWithVerifier} for why this is an assertion rather than a second
+   * transaction.
    */
   async registerCalldataWithVerifier(batchData: Uint8Array): Promise<CalldataRegistrationResult> {
     const result = await this.registerCalldata(batchData);
-    await this.registerWithVerifier(result.contentHash);
+    await this.assertVerifierRegistered(result.contentHash, BigInt(result.blockNumber));
     return result;
   }
 
   /**
-   * Register a content hash with the SimpleBoolVerifier
+   * Read-only check that `SimpleBoolVerifier.isRegistered(registrationHash)` returns true
+   * — i.e., the core contract's hook fired and populated the verifier during the
+   * registration transaction. Throws if the verifier was not updated, which usually
+   * means the configured core was not deployed with the verifier wired as its hook.
+   *
+   * `registrationHash` is whichever identifier the core used — the EIP-4844 versioned
+   * hash for blob registrations, or `keccak256(batchData)` for calldata. The verifier
+   * doesn't distinguish; both land in the same `_registered` mapping.
+   *
+   * The read is pinned to `blockNumber` (typically the receipt's block) so load-balanced
+   * RPC backends don't return a stale "latest" that predates the registration tx.
    */
-  async registerWithVerifier(contentHash: Bytes32): Promise<void> {
+  private async assertVerifierRegistered(
+    registrationHash: Bytes32,
+    blockNumber: bigint
+  ): Promise<void> {
     if (!this.verifierAddress) {
       throw new Error('Verifier address required. Provide verifierAddress in client options.');
     }
-    const wallet = this.requireWallet();
-
-    const hash = await wallet.writeContract({
+    const isRegistered = await this.publicClient.readContract({
       address: this.verifierAddress as `0x${string}`,
       abi: SIMPLE_BOOL_VERIFIER_ABI,
-      functionName: 'register',
-      args: [contentHash as `0x${string}`],
+      functionName: 'isRegistered',
+      args: [registrationHash as `0x${string}`],
+      blockNumber,
     });
+    if (!isRegistered) {
+      throw new Error(
+        `Verifier at ${this.verifierAddress} did not record registration hash ` +
+          `${registrationHash} at block ${blockNumber}. This usually means the core ` +
+          'contract is not wired with the verifier as its registration hook. Deploy a ' +
+          'core that accepts the verifier in its constructor and calls `onRegistered` ' +
+          'inside `registerBlob` / `registerCalldata`.'
+      );
+    }
+  }
 
-    await this.publicClient.waitForTransactionReceipt({ hash });
+  /**
+   * @deprecated SimpleBoolVerifier is a registration hook invoked atomically by the core
+   *   contract. Direct wallet calls to `onRegistered` revert with `OnlyCore`.
+   *
+   *   If the configured core already has the verifier wired as its hook, call
+   *   `registerBlob` / `registerCalldata` and the verifier will be populated inside the
+   *   same transaction — no separate `registerWithVerifier` step needed.
+   *
+   *   Retained as a synchronous throw so existing call sites surface the new model at
+   *   lint/test time instead of paying gas for a guaranteed revert.
+   */
+  async registerWithVerifier(_contentHash: Bytes32): Promise<void> {
+    throw new Error(
+      'registerWithVerifier is no longer callable: SimpleBoolVerifier.onRegistered is a ' +
+        'core-only hook (reverts with OnlyCore for wallet senders). Call registerBlob / ' +
+        'registerCalldata on a core whose hook is wired to the verifier instead.'
+    );
   }
 
   /**
@@ -285,15 +330,25 @@ export class BAMClient {
     return {
       txHash: receipt.transactionHash as Bytes32,
       versionedHash: event.args.versionedHash as VersionedHash,
+      contentTag: event.args.contentTag as Bytes32,
       blockNumber: Number(receipt.blockNumber),
     };
   }
 
   /**
-   * Register a calldata batch via ERC-BAM
+   * Register a calldata batch via ERC-BAM.
+   *
+   * @param batchData           Batch payload bytes.
+   * @param contentTag          Protocol/content identifier emitted verbatim in
+   *                            `CalldataBatchRegistered`. `bytes32(0)` is accepted by
+   *                            the contract but NOT RECOMMENDED — prefer
+   *                            `keccak256("<protocol>.v<n>")`.
+   * @param decoder             Decoder contract address.
+   * @param signatureRegistry   Signature registry address.
    */
   async registerCalldataBatch(
     batchData: Uint8Array,
+    contentTag: Bytes32,
     decoder: Address,
     signatureRegistry: Address
   ): Promise<CalldataRegistrationResult> {
@@ -306,6 +361,7 @@ export class BAMClient {
       functionName: 'registerCalldataBatch',
       args: [
         `0x${Buffer.from(batchData).toString('hex')}` as `0x${string}`,
+        contentTag as `0x${string}`,
         decoder as `0x${string}`,
         signatureRegistry as `0x${string}`,
       ],
@@ -319,6 +375,7 @@ export class BAMClient {
     return {
       txHash: receipt.transactionHash as Bytes32,
       contentHash: event.args.contentHash as Bytes32,
+      contentTag: event.args.contentTag as Bytes32,
       blockNumber: Number(receipt.blockNumber),
       gasUsed: receipt.gasUsed,
     };

@@ -94,6 +94,12 @@ export interface BlobBatchRegisteredEvent {
   versionedHash: Bytes32;
   /** Address that registered the batch */
   submitter: Address;
+  /**
+   * Protocol/content identifier (indexed topic). Equal to the `contentTag` argument
+   * passed to `registerBlobBatch`. `bytes32(0)` is accepted but NOT RECOMMENDED at
+   * the application layer.
+   */
+  contentTag: Bytes32;
   /** Decoder contract address */
   decoder: Address;
   /** Signature registry address */
@@ -108,6 +114,12 @@ export interface CalldataBatchRegisteredEvent {
   contentHash: Bytes32;
   /** Address that registered the batch */
   submitter: Address;
+  /**
+   * Protocol/content identifier (indexed topic). Equal to the `contentTag` argument
+   * passed to `registerCalldataBatch`. `bytes32(0)` is accepted but NOT RECOMMENDED
+   * at the application layer.
+   */
+  contentTag: Bytes32;
   /** Decoder contract address */
   decoder: Address;
   /** Signature registry address */

@@ -22,18 +22,19 @@ contract BlobAuthenticatedMessagingCore is IERC_BAM_Core {
     ) external returns (bytes32 versionedHash) {
         versionedHash = declareBlobSegment(blobIndex, startFE, endFE, contentTag);
 
-        emit BlobBatchRegistered(versionedHash, msg.sender, decoder, signatureRegistry);
+        emit BlobBatchRegistered(versionedHash, msg.sender, contentTag, decoder, signatureRegistry);
     }
 
     /// @inheritdoc IERC_BAM_Core
     function registerCalldataBatch(
         bytes calldata batchData,
+        bytes32 contentTag,
         address decoder,
         address signatureRegistry
     ) external returns (bytes32 contentHash) {
         contentHash = keccak256(batchData);
 
-        emit CalldataBatchRegistered(contentHash, msg.sender, decoder, signatureRegistry);
+        emit CalldataBatchRegistered(contentHash, msg.sender, contentTag, decoder, signatureRegistry);
     }
 
     /// @inheritdoc IERC_BSS

@@ -6,6 +6,7 @@ import {
   loadTrustedSetup,
   createBlob,
   commitToBlob,
+  BAM_CORE_ABI,
 } from 'bam-sdk';
 import type { SignedMessage, Address } from 'bam-sdk';
 import {
@@ -15,6 +16,7 @@ import {
   toBlobs,
   parseGwei,
   encodeFunctionData,
+  zeroAddress,
   type Kzg,
 } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
@@ -25,18 +27,8 @@ import {
   updateBlobbleStatus,
   markMessagesPosted,
 } from '@/db/queries';
-import { SOCIAL_BLOBS_CORE_ADDRESS } from '@/lib/constants';
+import { BAM_CORE_ADDRESS, MESSAGE_IN_A_BLOBBLE_TAG } from '@/lib/constants';
 import { COOLDOWN_MS, getLastPostTime } from '@/lib/poster-state';
-
-const SOCIAL_BLOBS_CORE_ABI = [
-  {
-    type: 'function',
-    name: 'registerBlob',
-    inputs: [{ name: 'blobIndex', type: 'uint256' }],
-    outputs: [],
-    stateMutability: 'nonpayable',
-  },
-] as const;
 
 export async function POST() {
   try {
@@ -108,15 +100,33 @@ export async function POST() {
     const kzg = await getKzgForViem();
     const blobData = toBlobs({ data: batchData });
 
-    // Encode registerBlob(0) calldata so the blob tx also registers in one transaction
+    // Route registration through the amended ERC-8180 BAM core: registerBlobBatch
+    // carries the caller-chosen contentTag into BlobBatchRegistered as an indexed topic,
+    // which the sync route filters on to recover message-in-a-blobble batches.
+    // decoder=0 and signatureRegistry=0: this app uses the BAM v1 wire format with
+    // ECDSA ecrecover — no on-chain decoder or BLS registry needed for the read path.
+    if (BAM_CORE_ADDRESS === '0x0000000000000000000000000000000000000000') {
+      return NextResponse.json(
+        { error: 'NEXT_PUBLIC_BAM_CORE_ADDRESS is not configured' },
+        { status: 500 }
+      );
+    }
+
     const registerData = encodeFunctionData({
-      abi: SOCIAL_BLOBS_CORE_ABI,
-      functionName: 'registerBlob',
-      args: [0n],
+      abi: BAM_CORE_ABI,
+      functionName: 'registerBlobBatch',
+      args: [
+        0n, // blobIndex
+        0, // startFE — full blob
+        4096, // endFE — full blob
+        MESSAGE_IN_A_BLOBBLE_TAG,
+        zeroAddress,
+        zeroAddress,
+      ],
     });
 
     const hash = await walletClient.sendTransaction({
-      to: SOCIAL_BLOBS_CORE_ADDRESS,
+      to: BAM_CORE_ADDRESS,
       data: registerData,
       blobs: blobData,
       maxFeePerBlobGas: parseGwei('30'),

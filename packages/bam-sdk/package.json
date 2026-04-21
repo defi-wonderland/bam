@@ -1,6 +1,6 @@
 {
   "name": "bam-sdk",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "BAM SDK - Blob Authenticated Messaging protocol toolkit",
   "type": "module",
   "main": "dist/esm/index.js",
