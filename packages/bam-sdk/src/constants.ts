@@ -111,6 +111,12 @@ export const CODEC_ZSTD = 0x02;
 /** BLS domain separator for message signing */
 export const BLS_DOMAIN_PREFIX = 'SocialBlobs-v1';
 
+/**
+ * PoP domain tag for the ERC-8180 scheme-0x01 ECDSA registry.
+ * Must match `POP_DOMAIN` in `ECDSARegistry.sol`.
+ */
+export const ECDSA_POP_DOMAIN = 'ERC-BAM-ECDSA-PoP.v1';
+
 /** Default compression level for Zstd */
 export const DEFAULT_COMPRESSION_LEVEL = 12;
 

@@ -37,6 +37,7 @@ import {
   BLS_EXPOSER_ABI,
   SIMPLE_BOOL_VERIFIER_ABI,
   BLS_REGISTRY_ABI,
+  ECDSA_REGISTRY_ABI,
 } from './abis.js';
 
 export { BAM_CORE_ABI, BAM_DECODER_ABI } from './abis.js';
@@ -589,6 +590,112 @@ export class BAMClient {
     if (!event) throw new Error('KeyRegistered event not found');
 
     return event.args.index;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════════
+  // ECDSA REGISTRY OPERATIONS (ERC-8180 scheme 0x01)
+  // ═══════════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Register a delegate signing key with an ECDSA registry.
+   *
+   * @param registry     Deployed ECDSARegistry address.
+   * @param delegate     20-byte Ethereum address of the delegate's EOA key.
+   * @param popProof     65-byte proof-of-possession signature: the delegate
+   *                     key's `personal_sign` of `computeEcdsaPopMessage({
+   *                     owner: msg.sender, chainId, registry })`.
+   * @returns            The registry index assigned to the new binding.
+   */
+  async registerEcdsaDelegate(
+    registry: Address,
+    delegate: Address,
+    popProof: `0x${string}`
+  ): Promise<bigint> {
+    const wallet = this.requireWallet();
+    const hash = await wallet.writeContract({
+      address: registry as `0x${string}`,
+      abi: ECDSA_REGISTRY_ABI,
+      functionName: 'register',
+      args: [delegate as `0x${string}`, popProof],
+    });
+    const receipt = await this.publicClient.waitForTransactionReceipt({ hash });
+    const event = this.findEvent(receipt.logs, ECDSA_REGISTRY_ABI, 'KeyRegistered');
+    if (!event) throw new Error('KeyRegistered event not found');
+    return event.args.index as bigint;
+  }
+
+  /**
+   * Rotate a delegate signing key in an ECDSA registry.
+   *
+   * @param registry     Deployed ECDSARegistry address.
+   * @param newDelegate  20-byte Ethereum address of the new delegate's EOA key.
+   * @param newPopProof  65-byte PoP signature from the new delegate.
+   * @returns            The fresh registry index assigned to the new binding.
+   */
+  async rotateEcdsaDelegate(
+    registry: Address,
+    newDelegate: Address,
+    newPopProof: `0x${string}`
+  ): Promise<bigint> {
+    const wallet = this.requireWallet();
+    const hash = await wallet.writeContract({
+      address: registry as `0x${string}`,
+      abi: ECDSA_REGISTRY_ABI,
+      functionName: 'rotate',
+      args: [newDelegate as `0x${string}`, newPopProof],
+    });
+    const receipt = await this.publicClient.waitForTransactionReceipt({ hash });
+    const event = this.findEvent(receipt.logs, ECDSA_REGISTRY_ABI, 'KeyRotated');
+    if (!event) throw new Error('KeyRotated event not found');
+    return event.args.newIndex as bigint;
+  }
+
+  /**
+   * Verify a signature against an explicit delegate address (`registry.verify`).
+   */
+  async verifyEcdsa(
+    registry: Address,
+    delegate: Address,
+    messageHash: Bytes32,
+    signature: `0x${string}`
+  ): Promise<boolean> {
+    return this.publicClient.readContract({
+      address: registry as `0x${string}`,
+      abi: ECDSA_REGISTRY_ABI,
+      functionName: 'verify',
+      args: [delegate as `0x${string}`, messageHash as `0x${string}`, signature],
+    });
+  }
+
+  /**
+   * Verify a signature using an owner's registered delegate (or keyless
+   * fallback) via `registry.verifyWithRegisteredKey`.
+   */
+  async verifyEcdsaWithRegisteredKey(
+    registry: Address,
+    owner: Address,
+    messageHash: Bytes32,
+    signature: `0x${string}`
+  ): Promise<boolean> {
+    return this.publicClient.readContract({
+      address: registry as `0x${string}`,
+      abi: ECDSA_REGISTRY_ABI,
+      functionName: 'verifyWithRegisteredKey',
+      args: [owner as `0x${string}`, messageHash as `0x${string}`, signature],
+    });
+  }
+
+  /**
+   * Canonical "keyed vs keyless" query — true iff `owner` has a bound
+   * delegate in the ECDSA registry.
+   */
+  async hasEcdsaDelegate(registry: Address, owner: Address): Promise<boolean> {
+    return this.publicClient.readContract({
+      address: registry as `0x${string}`,
+      abi: ECDSA_REGISTRY_ABI,
+      functionName: 'hasDelegate',
+      args: [owner as `0x${string}`],
+    });
   }
 
   // ═══════════════════════════════════════════════════════════════════════════════

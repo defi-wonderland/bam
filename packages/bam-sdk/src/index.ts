@@ -73,6 +73,7 @@ export {
   MESSAGE_HEADER_SIZE,
   PROTOCOL_VERSION,
   PROTOCOL_VERSION_STRING,
+  ECDSA_POP_DOMAIN,
   SCHEME_ID_BLS,
   SCHEME_ID_DILITHIUM,
   SCHEME_ID_ECDSA,
@@ -159,6 +160,7 @@ export {
 // Signature functions
 export {
   aggregateBLS,
+  computeEcdsaPopMessage,
   deriveAddress,
   deriveBLSPublicKey,
   deserializeBLSPrivateKey,
@@ -181,6 +183,9 @@ export {
   verifyAggregateBLS,
   verifyBLS,
   verifyECDSA,
+  verifyEcdsaLocal,
+  verifyEcdsaAsEOA,
+  wrapPersonalSign,
 } from './signatures.js';
 
 export type {

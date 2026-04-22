@@ -46,7 +46,10 @@ import { keccak_256 } from '@noble/hashes/sha3';
 // Configure @noble/secp256k1 to use @noble/hashes for HMAC-SHA256
 secp256k1.etc.hmacSha256Sync = (k: Uint8Array, ...m: Uint8Array[]) =>
   hmac(sha256, k, secp256k1.etc.concatBytes(...m));
-import type { Address, Bytes32 } from './types.js';
+import { encodeAbiParameters, keccak256 as viemKeccak256 } from 'viem';
+
+import type { Address, Bytes32, HexBytes } from './types.js';
+import { ECDSA_POP_DOMAIN } from './constants.js';
 import { SignatureError } from './errors.js';
 
 // Helper: bytes to hex string (with 0x prefix)
@@ -453,4 +456,140 @@ export function isValidBLSSignature(value: unknown): value is BLSSignature {
  */
 export function isValidECDSASignature(value: unknown): value is ECDSASignature {
   return value instanceof Uint8Array && value.length === 65;
+}
+
+// =============================================================================
+// ECDSA — ERC-8180 scheme-0x01 registry envelope helpers
+// =============================================================================
+
+/**
+ * Wrap a raw 32-byte hash in the EIP-191 `personal_sign` envelope.
+ *
+ * Computes `keccak256("\x19Ethereum Signed Message:\n32" || hash)`, which is
+ * the exact digest `ecrecover` operates on when a wallet signed via
+ * `personal_sign`. The third argument to the ECDSA registry's `verify` is
+ * this post-envelope hash.
+ *
+ * @param hash 32-byte hash as 0x-prefixed hex string.
+ * @returns post-envelope 32-byte hash as 0x-prefixed hex string.
+ */
+export function wrapPersonalSign(hash: HexBytes): HexBytes {
+  const bytes = fromHex(hash);
+  if (bytes.length !== 32) {
+    throw new SignatureError(`wrapPersonalSign requires a 32-byte hash (got ${bytes.length})`);
+  }
+  const prefix = new TextEncoder().encode('\x19Ethereum Signed Message:\n32');
+  const out = new Uint8Array(prefix.length + bytes.length);
+  out.set(prefix);
+  out.set(bytes, prefix.length);
+  return toHex(keccak_256(out)) as HexBytes;
+}
+
+const ZERO_ADDRESS: Address = '0x0000000000000000000000000000000000000000';
+
+/**
+ * Attempt to recover the signer address of `hash` from a 65-byte raw
+ * signature, mirroring `ECDSARegistry.sol`'s pure `ecrecover`-plus-OZ-
+ * `ECDSA` path: rejects signatures with malformed length, non-canonical
+ * `v`, high-s (EIP-2), or zero-address recovery. Returns `null` on any
+ * rejection; never throws.
+ */
+function tryRecoverLikeRegistry(hash: HexBytes, signature: Uint8Array): Address | null {
+  if (signature.length !== 65) return null;
+  const v = signature[64];
+  if (v !== 27 && v !== 28) return null;
+
+  const r = signature.slice(0, 32);
+  const s = signature.slice(32, 64);
+  const compact = new Uint8Array(64);
+  compact.set(r, 0);
+  compact.set(s, 32);
+
+  try {
+    const sig = secp256k1.Signature.fromCompact(compact).addRecoveryBit(v - 27);
+    if (sig.hasHighS()) return null; // EIP-2 low-s enforcement.
+    const msg = fromHex(hash);
+    if (msg.length !== 32) return null;
+    const pubKey = sig.recoverPublicKey(msg);
+    const uncompressed = pubKey.toRawBytes(false);
+    const addr = publicKeyToAddress(uncompressed).toLowerCase() as Address;
+    if (addr === ZERO_ADDRESS) return null;
+    return addr;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Local mirror of `ECDSARegistry.verifyWithRegisteredKey`, matching its
+ * keyed / keyless branching behaviour (red-team C-9 — SDK and contract
+ * MUST agree byte-for-byte on the same inputs).
+ *
+ * @param params.owner     Owner address the message is attributed to.
+ * @param params.hash      Post-envelope 32-byte hash (`ecrecover`'s digest).
+ * @param params.signature 65-byte raw signature (r || s || v).
+ * @param params.delegate  Optional bound delegate. When omitted (or
+ *                         `undefined`), the helper runs the keyless branch
+ *                         (recovered signer MUST equal `owner`). When
+ *                         provided, runs the keyed branch (recovered signer
+ *                         MUST equal `delegate`).
+ */
+export function verifyEcdsaLocal(params: {
+  owner: Address;
+  hash: HexBytes;
+  signature: Uint8Array;
+  delegate?: Address;
+}): boolean {
+  const expected = params.delegate ?? params.owner;
+  if ((expected.toLowerCase() as Address) === ZERO_ADDRESS) return false;
+  const recovered = tryRecoverLikeRegistry(params.hash, params.signature);
+  if (recovered === null) return false;
+  return recovered === (expected.toLowerCase() as Address);
+}
+
+/**
+ * Local verify that always runs the keyless branch (treats the caller's
+ * `owner` as the expected signer, ignoring any registered delegate).
+ *
+ * Useful for reading pre-delegation message history — once an owner
+ * registers a delegate, `verifyEcdsaLocal` without an explicit `delegate`
+ * still branches keyless, but any consumer caching delegate state would
+ * otherwise be tempted to always pass the current delegate. This helper
+ * pins the verification to the owner's EOA identity (red-team C-11).
+ */
+export function verifyEcdsaAsEOA(params: {
+  owner: Address;
+  hash: HexBytes;
+  signature: Uint8Array;
+}): boolean {
+  if ((params.owner.toLowerCase() as Address) === ZERO_ADDRESS) return false;
+  const recovered = tryRecoverLikeRegistry(params.hash, params.signature);
+  if (recovered === null) return false;
+  return recovered === (params.owner.toLowerCase() as Address);
+}
+
+/**
+ * Compute the ECDSA registry's PoP inner hash for a given (owner, chainId,
+ * registry) tuple.
+ *
+ * Matches `keccak256(abi.encode("ERC-BAM-ECDSA-PoP.v1", chainId, registry,
+ * owner))` in `ECDSARegistry.sol`. The returned hash is the pre-envelope
+ * digest; wallets sign it wrapped in `personal_sign`, and the registry
+ * recomputes that wrapping on-chain.
+ */
+export function computeEcdsaPopMessage(params: {
+  owner: Address;
+  chainId: number | bigint;
+  registry: Address;
+}): HexBytes {
+  const encoded = encodeAbiParameters(
+    [
+      { type: 'string' },
+      { type: 'uint256' },
+      { type: 'address' },
+      { type: 'address' },
+    ],
+    [ECDSA_POP_DOMAIN, BigInt(params.chainId), params.registry, params.owner]
+  );
+  return viemKeccak256(encoded) as HexBytes;
 }
