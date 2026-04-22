@@ -280,11 +280,22 @@ contract ECDSARegistryTest is Test {
         registry.verify(hex"01020304", raw, sig);
     }
 
-    function test_verify_invalidSignatureLength_reverts() public {
+    function test_verify_invalidSignatureLength_returnsFalse() public view {
+        // Signature-length malformedness is modeled as a verification failure
+        // (return false), not a revert — keeps `verify` / `verifyWithRegisteredKey`
+        // / SDK `verifyEcdsaLocal` in lock-step on malformed input.
         bytes32 raw = keccak256("hello");
+        assertFalse(registry.verify(_pubKey(aliceDelegate), raw, hex"010203"));
+        assertFalse(registry.verify(_pubKey(aliceDelegate), raw, new bytes(64)));
+        assertFalse(registry.verify(_pubKey(aliceDelegate), raw, new bytes(66)));
+    }
 
-        vm.expectRevert(IERC_BAM_SignatureRegistry.InvalidSignature.selector);
-        registry.verify(_pubKey(aliceDelegate), raw, hex"010203");
+    function test_verifyWithRegisteredKey_invalidSignatureLength_returnsFalse() public view {
+        // Symmetric to `verify` — must also return false, not revert.
+        bytes32 envelope = _personalHash(keccak256("bad-len"));
+        assertFalse(registry.verifyWithRegisteredKey(alice, envelope, hex"010203"));
+        assertFalse(registry.verifyWithRegisteredKey(alice, envelope, new bytes(64)));
+        assertFalse(registry.verifyWithRegisteredKey(alice, envelope, new bytes(66)));
     }
 
     // ═══════════════════════════════════════════════════════════════════════════════

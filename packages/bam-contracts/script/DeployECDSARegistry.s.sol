@@ -81,8 +81,11 @@ contract DeployECDSARegistry is Script {
         console2.log("ECDSARegistry:      ", address(registry));
         console2.log("Scheme ID:          ", uint256(SCHEME_ID_ECDSA));
         console2.log("");
+        // NOTE: message-in-a-blobble reads `ECDSA_REGISTRY_ADDRESS` from a
+        // hard-coded constant, not `.env.local`. Updating env won't move the
+        // runtime; paste the address into the constants file.
         console2.log("Paste the address into:");
         console2.log("  - packages/bam-sdk/src/contracts/deployments.ts (ecdsaRegistry)");
-        console2.log("  - apps/message-in-a-blobble/.env.local (signatureRegistry config)");
+        console2.log("  - apps/message-in-a-blobble/src/lib/constants.ts (ECDSA_REGISTRY_ADDRESS)");
     }
 }

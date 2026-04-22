@@ -182,6 +182,13 @@ contract ECDSARegistry is IECDSARegistry {
     // ═══════════════════════════════════════════════════════════════════════════════
 
     /// @inheritdoc IERC_BAM_SignatureRegistry
+    /// @dev Returns `false` for malformed signatures (wrong length, non-
+    ///      canonical v, high-s, zero-address recovery). Only reverts on
+    ///      malformed `pubKey` via `InvalidPublicKey` — that's a caller-misuse
+    ///      signal (wrong key format for this scheme), distinct from signature
+    ///      malformedness, which we model as a verification failure to keep
+    ///      parity with the SDK local mirror (`tryRecoverLikeRegistry`) and
+    ///      with `verifyWithRegisteredKey`.
     function verify(bytes calldata pubKey, bytes32 messageHash, bytes calldata signature)
         external
         pure
@@ -189,7 +196,6 @@ contract ECDSARegistry is IECDSARegistry {
         returns (bool)
     {
         address expected = _decodeDelegate(pubKey);
-        if (signature.length != ECDSA_SIGNATURE_LENGTH) revert InvalidSignature();
         return _tryRecoverMatches(messageHash, signature, expected);
     }
 
@@ -235,15 +241,18 @@ contract ECDSARegistry is IECDSARegistry {
     }
 
     /// @dev Length-gated wrapper around `ECDSA.tryRecover`. Returns `false`
-    ///      on any recovery error (including high-s, non-canonical v, or
-    ///      length mismatch from within the library) or zero-address
-    ///      recovery, and `true` only when the recovered address equals
-    ///      `expected` and is non-zero. Never reverts.
+    ///      on any recovery error (wrong signature length, high-s,
+    ///      non-canonical v) or zero-address recovery, and `true` only when
+    ///      the recovered address equals `expected` and is non-zero. Never
+    ///      reverts. Centralizing the length gate here keeps `verify` and
+    ///      `verifyWithRegisteredKey` consistent (both return `false` on bad
+    ///      length) and matches the SDK's `tryRecoverLikeRegistry` mirror.
     function _tryRecoverMatches(bytes32 hash, bytes calldata signature, address expected)
         internal
         pure
         returns (bool)
     {
+        if (signature.length != ECDSA_SIGNATURE_LENGTH) return false;
         (address recovered, ECDSA.RecoverError err,) = ECDSA.tryRecover(hash, signature);
         if (err != ECDSA.RecoverError.NoError) return false;
         if (recovered == address(0)) return false;
