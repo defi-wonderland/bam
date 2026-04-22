@@ -9,11 +9,12 @@ import { ISignatureRegistry } from "../src/interfaces/ISignatureRegistry.sol";
 import { SignatureRegistryDispatcher } from "../src/core/SignatureRegistryDispatcher.sol";
 
 /// @title DeployECDSARegistryTest
-/// @notice Exercises the atomic deploy-and-register script in-process (no
-///         fork required). Asserts the post-deploy invariant that the
-///         dispatcher's scheme-0x01 slot points at the newly-deployed
-///         registry and that exactly one `SchemeRegistered(0x01, ...)` event
-///         fires in the deploy window.
+/// @notice Exercises the deploy-and-register script in-process (no fork
+///         required). Asserts the post-deploy invariant that the dispatcher's
+///         scheme-0x01 slot points at the newly-deployed registry and that
+///         exactly one `SchemeRegistered(0x01, ...)` event fires in the
+///         deploy window, plus the fail-fast behavior when the slot is
+///         already claimed.
 contract DeployECDSARegistryTest is Test {
     SignatureRegistryDispatcher internal dispatcher;
     DeployECDSARegistry internal script;

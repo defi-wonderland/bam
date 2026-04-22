@@ -10,10 +10,13 @@
 
 import { describe, expect, it, beforeEach } from 'vitest';
 import {
+  createPublicClient,
+  createWalletClient,
   custom,
   decodeFunctionData,
   encodeEventTopics,
   encodeAbiParameters,
+  parseTransaction,
   type EIP1193RequestFn,
 } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
@@ -138,8 +141,6 @@ function makeClient(responders: Record<string, (params: readonly unknown[]) => u
   });
 
   // Swap out the public / wallet clients for ones wired to our stub transport.
-  const { createPublicClient, createWalletClient } =
-    require('viem') as typeof import('viem');
   const transport = custom({ request });
   const publicClient = createPublicClient({ chain: sepolia, transport });
   const walletClient = createWalletClient({ chain: sepolia, transport, account });
@@ -162,7 +163,6 @@ function findReadCall(calls: Call[]): Call | undefined {
 function decodeWrittenCalldata(rawTxOrCall: Call) {
   // With viem's local account flow we get eth_sendRawTransaction with a
   // signed tx — decode calldata via parseTransaction.
-  const { parseTransaction } = require('viem') as typeof import('viem');
   if (rawTxOrCall.method === 'eth_sendRawTransaction') {
     const tx = parseTransaction(rawTxOrCall.params[0] as `0x${string}`);
     return tx.data as `0x${string}`;

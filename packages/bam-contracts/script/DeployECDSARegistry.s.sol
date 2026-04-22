@@ -8,10 +8,18 @@ import { ISignatureRegistry } from "../src/interfaces/ISignatureRegistry.sol";
 import { SignatureRegistryDispatcher } from "../src/core/SignatureRegistryDispatcher.sol";
 
 /// @title DeployECDSARegistry
-/// @notice Atomic deploy-and-register script for the ERC-8180 scheme-0x01
-///         ECDSA registry. Deploys `ECDSARegistry` and registers it with the
-///         `SignatureRegistryDispatcher` in a single broadcast window so that
-///         a griefer cannot front-run the `0x01` slot (red-team C-7).
+/// @notice Deploy-and-register script for the ERC-8180 scheme-0x01 ECDSA
+///         registry. Deploys `ECDSARegistry` and registers it with the
+///         `SignatureRegistryDispatcher`.
+///
+///         `SignatureRegistryDispatcher.registerScheme` is permissionless and
+///         first-come-first-served, so `vm.startBroadcast` does NOT make the
+///         two txs atomic: another account could still claim the `0x01` slot
+///         between the deploy and the register tx. To keep the slot from being
+///         griefed (red-team C-7), submit through a private mempool / bundler
+///         (e.g. Flashbots) or otherwise hide the txs from the public mempool.
+///         The script also fails fast if `0x01` is already claimed, and
+///         asserts the post-condition after broadcast.
 ///
 /// Usage:
 ///   forge script script/DeployECDSARegistry.s.sol:DeployECDSARegistry \
@@ -48,6 +56,15 @@ contract DeployECDSARegistry is Script {
         console2.log("Dispatcher:         ", address(dispatcher));
         console2.log("Deployer balance:   ", deployer.balance);
 
+        // Fail fast if the 0x01 slot is already claimed — avoids a wasted
+        // deployment tx when the scheme has been registered by someone else.
+        // This does not prevent a mempool race; for that, submit the deploy
+        // and register txs via a private mempool / bundler.
+        require(
+            !dispatcher.isSchemeRegistered(SCHEME_ID_ECDSA),
+            "DeployECDSARegistry: scheme 0x01 already registered"
+        );
+
         vm.startBroadcast(deployerPrivateKey);
 
         registry = new ECDSARegistry();
@@ -55,7 +72,7 @@ contract DeployECDSARegistry is Script {
 
         vm.stopBroadcast();
 
-        // Atomicity post-condition (red-team C-7).
+        // Post-condition: confirm we actually own the slot after broadcast.
         address claimed = address(dispatcher.registries(SCHEME_ID_ECDSA));
         require(claimed == address(registry), "DeployECDSARegistry: dispatcher slot mismatch");
 
