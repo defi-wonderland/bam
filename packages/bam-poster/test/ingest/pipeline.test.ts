@@ -192,6 +192,39 @@ describe('IngestPipeline — cheap gates before crypto', () => {
     expect(res.accepted).toBe(false);
     if (!res.accepted) expect(res.reason).toBe('unknown_tag');
   });
+
+  it('custom recoverSigner that throws is contained (qodo review)', async () => {
+    // A custom validator whose recoverSigner throws must not escape the
+    // pipeline as an uncaught error — the contract is to return a
+    // PosterRejection. We treat it as recover-mismatch so rate-limit
+    // routes to the sentinel bucket.
+    const realEcdsa = defaultEcdsaValidator();
+    const throwingValidator: MessageValidator = {
+      validate(m) {
+        return realEcdsa.validate(m);
+      },
+      recoverSigner() {
+        throw new Error('boom');
+      },
+    };
+    const { pipeline } = makePipeline({
+      validator: throwingValidator,
+      rateLimit: { windowMs: 60_000, maxPerWindow: 2 },
+    });
+    const { raw } = await signedEnvelope({});
+    // The throw must not bubble; first two calls land in the sentinel
+    // bucket and succeed (validator.validate runs next and accepts the
+    // good signature), third gets rate-limited.
+    const results = await Promise.all([
+      pipeline.ingest(raw),
+      pipeline.ingest(await signedEnvelope({ nonce: 2 }).then((e) => e.raw)),
+      pipeline.ingest(await signedEnvelope({ nonce: 3 }).then((e) => e.raw)),
+    ]);
+    // Exactly one rate_limited reject among the three.
+    const rejections = results.filter((r) => !r.accepted);
+    expect(rejections).toHaveLength(1);
+    if (!rejections[0].accepted) expect(rejections[0].reason).toBe('rate_limited');
+  });
 });
 
 describe('IngestPipeline — nonce monotonicity', () => {

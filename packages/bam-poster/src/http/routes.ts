@@ -139,11 +139,19 @@ type ParsedLimit =
   | { ok: true; value: number | undefined }
   | { ok: false };
 
+/**
+ * Upper bound on `?limit=` for list endpoints. Keeps a malicious caller
+ * from driving an unbounded `SELECT … LIMIT` into the store, and sits
+ * well under `Number.MAX_SAFE_INTEGER` so `Number()` parsing can't
+ * silently lose precision on huge digit strings (qodo review).
+ */
+const MAX_LIMIT = 10_000;
+
 function parseLimit(limitStr: string | null): ParsedLimit {
   if (limitStr === null || limitStr === '') return { ok: true, value: undefined };
   if (!/^[0-9]+$/.test(limitStr)) return { ok: false };
   const n = Number(limitStr);
-  if (!Number.isInteger(n) || n < 0) return { ok: false };
+  if (!Number.isSafeInteger(n) || n < 0 || n > MAX_LIMIT) return { ok: false };
   return { ok: true, value: n };
 }
 

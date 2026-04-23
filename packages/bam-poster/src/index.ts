@@ -38,6 +38,7 @@ export type {
   MessageSnapshot,
   RateLimitConfig,
   BackoffConfig,
+  PosterLogger,
 } from './types.js';
 
 export type { PosterRejection } from './errors.js';

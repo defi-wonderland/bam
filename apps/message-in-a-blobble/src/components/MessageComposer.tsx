@@ -73,8 +73,10 @@ export function MessageComposer() {
         }
         return Number(n);
       };
-      // Try a reasonable next-nonce; on `stale_nonce` retry once
-      // with +1 to cover an in-flight submission we didn't see.
+      // Send at a given nonce. On `stale_nonce` we climb from the
+      // Poster's pool — a single +1 retry isn't enough if two or more
+      // concurrent sends (e.g. another tab) accepted between our
+      // scan and this submit (qodo review).
       const trySend = async (nonce: bigint): Promise<Response> => {
         const wire = toWire(nonce);
         const msg = { author: address, timestamp, nonce: wire, content: content.trim() };
@@ -93,19 +95,22 @@ export function MessageComposer() {
         });
       };
 
-      const initial = await nextNonceForAuthor(address);
-      let res = await trySend(initial);
-      if (!res.ok) {
+      // Bounded climb: walk nonce forward on each stale_nonce. Cap at
+      // a small number so a persistently-failing condition (e.g. the
+      // Poster is rejecting for a different reason that races with
+      // monotonicity) still surfaces to the user.
+      const MAX_STALE_RETRIES = 8;
+      let nonce = await nextNonceForAuthor(address);
+      for (let attempt = 0; attempt <= MAX_STALE_RETRIES; attempt++) {
+        const res = await trySend(nonce);
+        if (res.ok) return;
         const data = (await res.json()) as { reason?: string; error?: string };
-        if (data.reason === 'stale_nonce') {
-          res = await trySend(initial + 1n);
-          if (!res.ok) {
-            const err = (await res.json()) as { reason?: string; error?: string };
-            throw new Error(err.reason ?? err.error ?? 'Failed to submit');
-          }
-        } else {
+        if (data.reason !== 'stale_nonce' || attempt === MAX_STALE_RETRIES) {
           throw new Error(data.reason ?? data.error ?? 'Failed to submit');
         }
+        // Re-fetch on every retry so we converge even if *many* new
+        // messages landed while we were signing the previous attempt.
+        nonce = await nextNonceForAuthor(address);
       }
     },
     onSuccess: () => {

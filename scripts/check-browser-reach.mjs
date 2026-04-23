@@ -48,10 +48,14 @@ async function walkSource(file, seen = new Set()) {
     for (const ref of refs) {
       if (ref.startsWith('.')) {
         const resolved = path.resolve(path.dirname(file), ref);
-        // Try the path as-is first — imports that already carry an
-        // explicit extension (`./foo.ts`, `./foo.js`) should match the
-        // resolved path directly rather than get `.ts` appended and
-        // fall through to "not found."
+        // TS ESM convention (`moduleResolution: NodeNext`) is to write
+        // sibling imports with an explicit `.js` extension even though
+        // the on-disk file is `.ts` / `.tsx`. The compiler rewrites at
+        // build time; we're scanning source, so `./foo.js` has to also
+        // be tried as `./foo.ts` / `./foo.tsx`. Without this, the
+        // walker silently misses transitive imports and the G-5 gate
+        // can false-negative (qodo review).
+        const jsStripped = resolved.replace(/\.m?js$/, '');
         const candidates = [
           resolved,
           resolved + '.ts',
@@ -60,6 +64,10 @@ async function walkSource(file, seen = new Set()) {
           resolved + '.mjs',
           resolved + '/index.ts',
           resolved + '/index.js',
+          // `./foo.js` → `./foo.ts` / `./foo.tsx`
+          ...(jsStripped !== resolved
+            ? [jsStripped + '.ts', jsStripped + '.tsx']
+            : []),
         ];
         for (const candidate of candidates) {
           if (await exists(candidate)) {

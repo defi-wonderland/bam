@@ -158,7 +158,16 @@ export class IngestPipeline {
   private rateLimitKey(decoded: DecodedMessage): Address {
     const recoverSigner = this.opts.validator.recoverSigner;
     if (!recoverSigner) return decoded.author;
-    const recovered = recoverSigner.call(this.opts.validator, decoded);
+    // A throwing custom recoverSigner must not escape as HTTP 500 —
+    // the pipeline's contract is to return a stable PosterRejection.
+    // Treat any failure the same as a recover-mismatch: sentinel
+    // bucket, so rotation / brokenness can't multiply the budget.
+    let recovered: Address | null;
+    try {
+      recovered = recoverSigner.call(this.opts.validator, decoded);
+    } catch {
+      return RECOVER_FAILED_KEY;
+    }
     if (recovered === null) return RECOVER_FAILED_KEY;
     // Unauthenticated envelopes (claimed !== recovered) share the
     // sentinel bucket so rotation across either field can't multiply

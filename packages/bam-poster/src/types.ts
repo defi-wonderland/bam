@@ -291,6 +291,15 @@ export interface PosterStore {
 // PosterConfig
 // ═══════════════════════════════════════════════════════════════════════
 
+/**
+ * Injected logger. The library writes submission-loop outcomes and
+ * build-and-submit failures through this surface so consumers can
+ * route output (or silence it) rather than inheriting `stdout`/`stderr`.
+ * Default: `info`/`warn` → stdout, `error` → stderr, each with a
+ * `[bam-poster]` prefix preserved from the previous inline writes.
+ */
+export type PosterLogger = (level: 'info' | 'warn' | 'error', message: string) => void;
+
 export interface RateLimitConfig {
   /** Sliding-window width in milliseconds. */
   windowMs: number;
@@ -338,6 +347,12 @@ export interface PosterConfig {
   idlePollMs?: number;
   /** Reorg-watcher tick interval, in ms. Default 12000 (L1 block time). */
   reorgPollMs?: number;
+  /**
+   * Injected logger. Default routes info→stdout, warn/error→stderr
+   * with a `[bam-poster]` prefix. Pass a no-op (or your own sink) to
+   * silence / redirect library output (qodo review).
+   */
+  logger?: PosterLogger;
 }
 
 // ═══════════════════════════════════════════════════════════════════════

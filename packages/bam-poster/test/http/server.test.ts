@@ -407,6 +407,23 @@ describe('HTTP transport — query validation (cubic review)', () => {
     }
   });
 
+  it('rejects absurdly large limits (qodo review)', async () => {
+    // A 20-digit string coerces to Infinity or a lossy float via
+    // Number(); handler must reject before the value reaches the
+    // store and drives an unbounded query.
+    const h = await startHarness();
+    try {
+      const huge = '9'.repeat(25);
+      const res = await fetch(`${h.baseUrl}/submitted-batches?limit=${huge}`);
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error: string; field: string };
+      expect(body.error).toBe('invalid_query');
+      expect(body.field).toBe('limit');
+    } finally {
+      await h.close();
+    }
+  });
+
   it('accepts a well-formed sinceBlock', async () => {
     const h = await startHarness();
     try {

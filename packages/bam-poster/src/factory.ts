@@ -9,6 +9,7 @@ import type {
   PendingQuery,
   Poster,
   PosterConfig,
+  PosterLogger,
   PosterStore,
   Status,
   SubmitHint,
@@ -79,6 +80,21 @@ const DEFAULT_IDLE_POLL_MS = 1_000;
 const DEFAULT_REORG_POLL_MS = 12_000;
 
 /**
+ * Default logger — info/warn to stdout, error to stderr, same
+ * `[bam-poster]` prefix the old inline writes used. Consumers can
+ * replace via `PosterConfig.logger` (qodo review — unconfigurable
+ * stdout logging).
+ */
+const defaultLogger: PosterLogger = (level, message) => {
+  const line = `[bam-poster] ${message}\n`;
+  if (level === 'error') {
+    process.stderr.write(line);
+  } else {
+    process.stdout.write(line);
+  }
+};
+
+/**
  * Constructs a Poster wired with every piece built in Phases 2–6.
  * Startup reconciliation (chain-ID + contract code) runs *before*
  * any submission loop is created; a mismatch throws synchronously.
@@ -121,6 +137,7 @@ export async function createPoster(
     const backoff = config.backoff ?? DEFAULT_BACKOFF;
     const idlePollMs = config.idlePollMs ?? DEFAULT_IDLE_POLL_MS;
     const reorgPollMs = config.reorgPollMs ?? DEFAULT_REORG_POLL_MS;
+    const logger: PosterLogger = config.logger ?? defaultLogger;
 
     // Canonicalize the configured allowlist once; downstream maps,
     // store queries, and comparisons all operate on this single
@@ -154,6 +171,7 @@ export async function createPoster(
           backoff,
           now,
           reorgWindowBlocks: reorgWindow,
+          logger,
         })
       );
     }
@@ -174,6 +192,10 @@ export async function createPoster(
         tag,
         new WorkerTimer(async () => {
           const outcome = await loop.tick();
+          // Refresh the health latch on every tick so `health().since`
+          // reports when the non-ok epoch actually started, not when a
+          // consumer next happened to call `health()` (qodo review).
+          aggregateHealth();
           switch (outcome) {
             case 'idle':
               return idlePollMs;

@@ -43,27 +43,36 @@ export async function GET() {
       toBlock: 'latest',
     });
 
-    // Memoize block timestamps — several events in the same block
-    // shouldn't hit the RPC twice.
-    const blockCache = new Map<bigint, Promise<number>>();
-    const timestampOf = (blk: bigint): Promise<number> => {
-      let p = blockCache.get(blk);
-      if (!p) {
-        p = client.getBlock({ blockNumber: blk }).then((b) => Number(b.timestamp));
-        blockCache.set(blk, p);
+    // Fetch unique block timestamps under bounded concurrency so a
+    // window with many distinct event-carrying blocks can't fan out
+    // into thousands of simultaneous RPC calls and trip rate limits
+    // (qodo review). Memoize so duplicate events in the same block
+    // reuse a single fetch.
+    const uniqueBlocks = Array.from(new Set(logs.map((l) => l.blockNumber)));
+    const timestampByBlock = new Map<bigint, number>();
+    const RPC_CONCURRENCY = 8;
+    let cursor = 0;
+    const workers = Array.from(
+      { length: Math.min(RPC_CONCURRENCY, uniqueBlocks.length) },
+      async () => {
+        while (true) {
+          const i = cursor++;
+          if (i >= uniqueBlocks.length) return;
+          const blk = uniqueBlocks[i];
+          const b = await client.getBlock({ blockNumber: blk });
+          timestampByBlock.set(blk, Number(b.timestamp));
+        }
       }
-      return p;
-    };
-
-    const blobbles: Blobble[] = await Promise.all(
-      logs.map(async (log) => ({
-        versionedHash: log.args.versionedHash!,
-        submitter: log.args.submitter!,
-        timestamp: await timestampOf(log.blockNumber),
-        txHash: log.transactionHash,
-        blockNumber: Number(log.blockNumber),
-      }))
     );
+    await Promise.all(workers);
+
+    const blobbles: Blobble[] = logs.map((log) => ({
+      versionedHash: log.args.versionedHash!,
+      submitter: log.args.submitter!,
+      timestamp: timestampByBlock.get(log.blockNumber) ?? 0,
+      txHash: log.transactionHash,
+      blockNumber: Number(log.blockNumber),
+    }));
 
     blobbles.sort((a, b) => b.blockNumber - a.blockNumber);
 

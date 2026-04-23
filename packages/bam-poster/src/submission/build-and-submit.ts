@@ -46,6 +46,12 @@ export interface BuildAndSubmitOptions {
   transport?: BuildAndSubmitTransport;
   /** Test injection: override the KZG loader (default uses `c-kzg`). */
   kzgLoader?: () => Promise<Kzg>;
+  /**
+   * Optional logger for submission-path errors. Default is a no-op —
+   * the CLI wires through the same logger it passes to the factory
+   * so library consumers can silence/redirect.
+   */
+  logger?: import('../types.js').PosterLogger;
 }
 
 /**
@@ -195,14 +201,13 @@ export async function buildAndSubmitWithViem(
         blockNumber: Number(receipt.blockNumber),
       };
     } catch (err) {
-      // Log the underlying error to stderr before classification — the
-      // classifier throws away the message, and without this the health
-      // surface reports "tag has failed N times" with no way to see why.
+      // Log the underlying error before classification — the classifier
+      // throws away the message, and without this the health surface
+      // reports "tag has failed N times" with no way to see why.
       const detail =
         err instanceof Error ? `${err.name}: ${err.message}` : String(err);
-      process.stderr.write(
-        `[bam-poster] submission failed for tag ${contentTag}: ${detail}\n`
-      );
+      const log = opts.logger ?? ((_level, msg) => process.stderr.write(`[bam-poster] ${msg}\n`));
+      log('error', `submission failed for tag ${contentTag}: ${detail}`);
       return classifySubmissionError(err);
     }
   };

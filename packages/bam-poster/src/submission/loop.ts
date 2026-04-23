@@ -6,6 +6,7 @@ import type {
   HealthState,
   MessageSnapshot,
   PoolView,
+  PosterLogger,
   PosterStore,
   StoreTxnPendingRow,
 } from '../types.js';
@@ -16,6 +17,8 @@ import type { BuildAndSubmit } from './types.js';
 // Hoisted so decoding pending-row bytes doesn't allocate a fresh
 // TextDecoder per message on the tick path.
 const TEXT_DECODER = new TextDecoder();
+
+const NOOP_LOGGER: PosterLogger = () => undefined;
 
 export interface SubmissionLoopOptions {
   tag: Bytes32;
@@ -33,6 +36,11 @@ export interface SubmissionLoopOptions {
    * considered.
    */
   reorgWindowBlocks: number;
+  /**
+   * Optional logger for tick outcomes. Defaults to a no-op so tests
+   * stay quiet; the factory's default wires through stdout/stderr.
+   */
+  logger?: PosterLogger;
 }
 
 /**
@@ -52,10 +60,12 @@ export interface SubmissionLoopOptions {
  */
 export class SubmissionLoop {
   private readonly backoff: BackoffState;
+  private readonly log: PosterLogger;
   private permanentlyStopped = false;
 
   constructor(private readonly opts: SubmissionLoopOptions) {
     this.backoff = new BackoffState(opts.backoff);
+    this.log = opts.logger ?? NOOP_LOGGER;
   }
 
   healthState(): HealthState {
@@ -161,28 +171,30 @@ export class SubmissionLoop {
         }
       });
       this.backoff.recordSuccess();
-      process.stdout.write(
-        `[bam-poster] tag ${this.opts.tag} submitted ` +
-          `${includedMessageIds.length} message(s) → tx ${outcome.txHash} ` +
-          `(block ${outcome.blockNumber}, versionedHash ${outcome.blobVersionedHash})\n`
+      this.log(
+        'info',
+        `tag ${this.opts.tag} submitted ${includedMessageIds.length} message(s) → ` +
+          `tx ${outcome.txHash} (block ${outcome.blockNumber}, ` +
+          `versionedHash ${outcome.blobVersionedHash})`
       );
       return 'success';
     }
 
     if (outcome.kind === 'retryable') {
       this.backoff.recordFailure();
-      process.stderr.write(
-        `[bam-poster] tag ${this.opts.tag} retryable failure ` +
-          `(attempt ${this.backoff.attempts()}, next in ${this.backoff.nextDelayMs()} ms)\n`
+      this.log(
+        'warn',
+        `tag ${this.opts.tag} retryable failure ` +
+          `(attempt ${this.backoff.attempts()}, next in ${this.backoff.nextDelayMs()} ms)`
       );
       return 'retry';
     }
 
     // permanent — stop this tag's worker. Operator must intervene.
     this.backoff.recordFailure();
-    process.stderr.write(
-      `[bam-poster] tag ${this.opts.tag} PERMANENT failure — worker stopped. ` +
-        `Operator must intervene.\n`
+    this.log(
+      'error',
+      `tag ${this.opts.tag} PERMANENT failure — worker stopped. Operator must intervene.`
     );
     this.permanentlyStopped = true;
     return 'permanent';
