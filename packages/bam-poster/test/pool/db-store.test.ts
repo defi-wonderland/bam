@@ -125,6 +125,28 @@ describe('SqlitePosterStore — pending CRUD', () => {
     });
   });
 
+  it('deletePending handles large batches above SQLITE_MAX_VARIABLE_NUMBER (qodo review)', async () => {
+    // SQLite's historical SQLITE_MAX_VARIABLE_NUMBER is 999. A single
+    // IN (?, ?, …) with thousands of placeholders would throw; the
+    // chunked implementation must handle it transparently.
+    store = new SqlitePosterStore(':memory:');
+    const COUNT = 1500;
+    const ids = Array.from(
+      { length: COUNT },
+      (_, i) => (`0x${(i + 1).toString(16).padStart(64, '0')}`) as Bytes32
+    );
+    await store.withTxn(async (txn) => {
+      for (let i = 0; i < COUNT; i++) {
+        await txn.insertPending(pending({ messageId: ids[i], ingestSeq: i + 1 }));
+      }
+    });
+    await store.withTxn(async (txn) => {
+      expect(await txn.countPendingByTag(TAG_A)).toBe(COUNT);
+      await txn.deletePending(ids);
+      expect(await txn.countPendingByTag(TAG_A)).toBe(0);
+    });
+  });
+
   it('nextIngestSeq is 1 on empty pool, then strictly increasing per-tag', async () => {
     store = new SqlitePosterStore(':memory:');
     await store.withTxn(async (txn) => {

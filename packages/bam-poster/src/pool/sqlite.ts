@@ -179,12 +179,19 @@ export class SqlitePosterStore implements PosterStore {
       },
       deletePending(messageIds: Bytes32[]): void {
         if (messageIds.length === 0) return;
-        // Single statement avoids N round-trips through prepare/run
-        // when the submission loop deletes a whole flushed batch.
-        const placeholders = messageIds.map(() => '?').join(', ');
-        db.prepare(`DELETE FROM poster_pending WHERE message_id IN (${placeholders})`).run(
-          ...messageIds
-        );
+        // Chunked IN (?, ?, …) so we get the round-trip win for typical
+        // batches but don't hit SQLite's SQLITE_MAX_VARIABLE_NUMBER
+        // (999 pre-3.32, 32766 after) on the rare large flush (qodo
+        // review). 500 is well under the old limit and one statement
+        // covers ~every realistic batch.
+        const CHUNK = 500;
+        for (let i = 0; i < messageIds.length; i += CHUNK) {
+          const slice = messageIds.slice(i, i + CHUNK);
+          const placeholders = slice.map(() => '?').join(', ');
+          db.prepare(`DELETE FROM poster_pending WHERE message_id IN (${placeholders})`).run(
+            ...slice
+          );
+        }
       },
       countPendingByTag(tag: Bytes32): number {
         const row = db
