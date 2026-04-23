@@ -16,8 +16,9 @@ Feature spec: [`docs/specs/features/001-bam-poster`](../../docs/specs/features/0
 - **CLI entrypoint** — `bam-poster` binary that reads env, wires the
   library, mounts HTTP, handles SIGTERM.
 
-This package is **Node-only**. It is never reachable from
-`bam-sdk/browser` (guardrail G-5 in the plan).
+This package is **Node-only** — it imports `better-sqlite3`, `c-kzg`,
+and `node:http` at the top level. Do not import it from
+`bam-sdk/browser` or any other browser-reachable code.
 
 ## Non-goals
 

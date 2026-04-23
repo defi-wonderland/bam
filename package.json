@@ -10,7 +10,6 @@
     "clean": "pnpm -r clean",
     "dev": "pnpm --parallel --stream --filter @bam/poster --filter message-in-a-blobble dev",
     "dev:poster": "pnpm --filter @bam/poster dev",
-    "lint:browser-reach": "node scripts/check-browser-reach.mjs",
     "sync:abis": "cd packages/bam-contracts && forge build && cd ../.. && npx tsx scripts/sync-abis.ts",
     "sync:deployments": "npx tsx scripts/sync-deployments.ts",
     "deploy:save": "npx tsx scripts/save-deployment.ts && npx tsx scripts/sync-deployments.ts"
