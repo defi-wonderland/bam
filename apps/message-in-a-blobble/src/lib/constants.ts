@@ -1,11 +1,8 @@
-/** Legacy SocialBlobsCore deployment. Kept for reading historical `BlobRegistered` logs. */
-export const SOCIAL_BLOBS_CORE_ADDRESS = '0x11a825a0774d0471292eab4706743bffcdd5d137' as const;
-
 /**
- * Amended `BlobAuthenticatedMessagingCore` (ERC-8180) deployment.
- *
- * Set via `NEXT_PUBLIC_BAM_CORE_ADDRESS`. Falls back to the zero address so misconfig is
- * a loud error at first send rather than silently targeting the legacy contract.
+ * ERC-8180 `BlobAuthenticatedMessagingCore` deployment. Set via
+ * `NEXT_PUBLIC_BAM_CORE_ADDRESS`. Falls back to the zero address so
+ * misconfiguration fails loudly instead of silently skipping event
+ * queries.
  */
 export const BAM_CORE_ADDRESS = (process.env.NEXT_PUBLIC_BAM_CORE_ADDRESS ||
   '0x0000000000000000000000000000000000000000') as `0x${string}`;
