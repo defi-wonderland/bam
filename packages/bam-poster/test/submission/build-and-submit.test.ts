@@ -47,7 +47,6 @@ async function signedDecoded(): Promise<DecodedMessage> {
     contentTag: TAG,
     signature,
     messageId: computeMessageId({ author, timestamp, nonce, content }),
-    raw: new Uint8Array([0x00]),
   };
 }
 

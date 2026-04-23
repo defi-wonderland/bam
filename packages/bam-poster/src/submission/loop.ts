@@ -13,6 +13,10 @@ import { BackoffState } from './backoff.js';
 import type { BackoffConfig } from '../types.js';
 import type { BuildAndSubmit } from './types.js';
 
+// Hoisted so decoding pending-row bytes doesn't allocate a fresh
+// TextDecoder per message on the tick path.
+const TEXT_DECODER = new TextDecoder();
+
 export interface SubmissionLoopOptions {
   tag: Bytes32;
   store: PosterStore;
@@ -108,7 +112,7 @@ export class SubmissionLoop {
             author: row.author,
             nonce: row.nonce,
             timestamp: row.timestamp,
-            content: new TextDecoder().decode(row.content),
+            content: TEXT_DECODER.decode(row.content),
             signature: new Uint8Array(row.signature),
             originalIngestSeq: row.ingestSeq,
           });
@@ -205,11 +209,10 @@ function pendingRowToDecoded(row: StoreTxnPendingRow): DecodedMessage {
     author: row.author,
     timestamp: row.timestamp,
     nonce: row.nonce,
-    content: new TextDecoder().decode(row.content),
+    content: TEXT_DECODER.decode(row.content),
     contentTag: row.contentTag,
     signature: row.signature,
     messageId: row.messageId,
-    raw: row.content,
     ingestedAt: row.ingestedAt,
   };
 }

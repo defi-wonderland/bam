@@ -3,6 +3,9 @@ import type { Hex } from 'viem';
 import type { ValidationResult } from '../types.js';
 import { canonicalTag } from '../util/canonical.js';
 
+// Hoisted so every ingest call doesn't allocate a fresh decoder.
+const TEXT_DECODER = new TextDecoder();
+
 /**
  * Wire format accepted at the Poster's ingest boundary (plan §C-11):
  * a JSON envelope that bundles the signed v1 message together with the
@@ -37,7 +40,7 @@ export type ParseResult =
 export function parseEnvelope(raw: Uint8Array): ParseResult {
   let decoded: unknown;
   try {
-    decoded = JSON.parse(new TextDecoder().decode(raw));
+    decoded = JSON.parse(TEXT_DECODER.decode(raw));
   } catch {
     return { ok: false, result: { ok: false, reason: 'malformed' } };
   }

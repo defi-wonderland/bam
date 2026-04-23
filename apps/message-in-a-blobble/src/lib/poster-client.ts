@@ -9,6 +9,8 @@
  * leaking a fetch error.
  */
 
+import { NextResponse } from 'next/server';
+
 export class PosterUnreachableError extends Error {
   readonly reason = 'poster_unreachable';
   constructor(message: string) {
@@ -18,6 +20,29 @@ export class PosterUnreachableError extends Error {
 
 export class PosterConfigError extends Error {
   readonly reason = 'poster_url_not_configured';
+}
+
+/**
+ * Shared error-to-NextResponse mapper so every proxy route translates
+ * the same two library errors to the same stable wire shape (502 for
+ * unreachable, 500 with `poster_misconfigured` for missing POSTER_URL).
+ * Returns `null` for anything else; route handlers rethrow so Next's
+ * default 500 path kicks in.
+ */
+export function posterErrorToResponse(err: unknown): NextResponse | null {
+  if (err instanceof PosterUnreachableError) {
+    return NextResponse.json(
+      { error: 'poster_unreachable', detail: 'POSTER_URL not reachable' },
+      { status: 502 }
+    );
+  }
+  if (err instanceof PosterConfigError) {
+    return NextResponse.json(
+      { error: 'poster_url_not_configured', detail: 'POSTER_URL env not set' },
+      { status: 500 }
+    );
+  }
+  return null;
 }
 
 function resolvePosterUrl(envOverride?: string): string {

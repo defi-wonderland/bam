@@ -30,7 +30,6 @@ async function makeSigned(content: string, nonce = 1): Promise<DecodedMessage> {
     contentTag: TAG,
     signature: sig,
     messageId,
-    raw: new Uint8Array([1, 2, 3]),
   };
 }
 

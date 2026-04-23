@@ -68,4 +68,4 @@ export {
 export type { BuildAndSubmit, SubmitOutcome } from './submission/types.js';
 export type { ReconcileRpcClient } from './startup/reconcile.js';
 export type { StatusRpcReader } from './surfaces/status.js';
-export { HttpServer, mountHttp } from './http/server.js';
+export { HttpServer } from './http/server.js';

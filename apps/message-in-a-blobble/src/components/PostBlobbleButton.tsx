@@ -3,6 +3,11 @@
 import { useState } from 'react';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { MESSAGE_IN_A_BLOBBLE_TAG } from '@/lib/constants';
+import {
+  MESSAGES_QUERY_KEY,
+  MESSAGES_REFETCH_MS,
+  fetchMessages,
+} from '@/lib/messages';
 
 /**
  * Post-migration, the Poster submits autonomously — its per-tag
@@ -31,13 +36,6 @@ interface PosterStatusBody {
 
 interface PosterHealthBody {
   health: { state: 'ok' | 'degraded' | 'unhealthy'; reason?: string };
-}
-
-async function fetchPendingCount(): Promise<number> {
-  const res = await fetch('/api/messages');
-  if (!res.ok) return 0;
-  const data = (await res.json()) as { pending?: unknown[] };
-  return (data.pending ?? []).length;
 }
 
 async function fetchPosterStatus(): Promise<PosterStatusBody['status']> {
@@ -85,11 +83,15 @@ export function PostBlobbleButton() {
   const queryClient = useQueryClient();
   const [flushedAt, setFlushedAt] = useState<number | null>(null);
 
-  const { data: pendingCount = 0 } = useQuery({
-    queryKey: ['pendingCount'],
-    queryFn: fetchPendingCount,
-    refetchInterval: 5000,
+  // Subscribe to the same ['messages'] query MessageList owns.
+  // React-query dedupes by key, so only one poller actually fires
+  // regardless of how many components read it.
+  const { data: messages = [] } = useQuery({
+    queryKey: MESSAGES_QUERY_KEY,
+    queryFn: fetchMessages,
+    refetchInterval: MESSAGES_REFETCH_MS,
   });
+  const pendingCount = messages.filter((m) => m.status === 'pending').length;
 
   const { data: posterStatus } = useQuery({
     queryKey: ['posterStatus'],
@@ -107,8 +109,7 @@ export function PostBlobbleButton() {
     mutationFn: nudgeFlush,
     onSuccess: () => {
       setFlushedAt(Date.now());
-      queryClient.invalidateQueries({ queryKey: ['messages'] });
-      queryClient.invalidateQueries({ queryKey: ['pendingCount'] });
+      queryClient.invalidateQueries({ queryKey: MESSAGES_QUERY_KEY });
       queryClient.invalidateQueries({ queryKey: ['posterStatus'] });
       // Nudge the on-chain audit view so a successful flush lands on
       // screen immediately rather than on the next 30 s poll.

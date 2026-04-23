@@ -1,10 +1,6 @@
 import { NextResponse } from 'next/server';
 
-import {
-  PosterConfigError,
-  PosterUnreachableError,
-  getSubmittedBatches,
-} from '@/lib/poster-client';
+import { getSubmittedBatches, posterErrorToResponse } from '@/lib/poster-client';
 import { MESSAGE_IN_A_BLOBBLE_TAG } from '@/lib/constants';
 
 /**
@@ -72,9 +68,7 @@ export async function GET(): Promise<NextResponse> {
       // case — the Poster's submission path only inserts when a
       // receipt is back, but the type allows it). `reorged` = fell
       // out of the canonical chain; messages get re-enqueued and
-      // reappear under the replacement batch's txHash. `resubmitted`
-      // = duplicate accounting — already reflected under the newer
-      // `included` entry.
+      // reappear under the replacement batch's txHash.
       if (b.status !== 'included') continue;
       const blobbleId = b.blobVersionedHash.slice(0, 18);
       for (const m of b.messages) {
@@ -94,18 +88,8 @@ export async function GET(): Promise<NextResponse> {
 
     return NextResponse.json({ messages });
   } catch (err) {
-    if (err instanceof PosterUnreachableError) {
-      return NextResponse.json(
-        { error: 'poster_unreachable', detail: 'POSTER_URL not reachable' },
-        { status: 502 }
-      );
-    }
-    if (err instanceof PosterConfigError) {
-      return NextResponse.json(
-        { error: 'poster_url_not_configured' },
-        { status: 500 }
-      );
-    }
+    const mapped = posterErrorToResponse(err);
+    if (mapped) return mapped;
     throw err;
   }
 }

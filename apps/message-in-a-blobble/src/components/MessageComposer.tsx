@@ -5,6 +5,7 @@ import { useAccount, useSignMessage } from 'wagmi';
 import { useQueryClient, useMutation } from '@tanstack/react-query';
 import { computeMessageHash } from 'bam-sdk/browser';
 import { MAX_MESSAGE_CHARS } from '@/lib/constants';
+import { MESSAGES_QUERY_KEY } from '@/lib/messages';
 
 /**
  * Per-author next-nonce estimate. Walks the two sources the demo has
@@ -109,7 +110,7 @@ export function MessageComposer() {
     },
     onSuccess: () => {
       setContent('');
-      queryClient.invalidateQueries({ queryKey: ['messages'] });
+      queryClient.invalidateQueries({ queryKey: MESSAGES_QUERY_KEY });
       queryClient.invalidateQueries({ queryKey: ['posterStatus'] });
     },
   });

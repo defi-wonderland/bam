@@ -1,5 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 
+import { bytesToHex } from 'bam-sdk';
+
 import type { Poster } from '../types.js';
 import { rejectionToStatus } from './error-map.js';
 
@@ -21,10 +23,6 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
   res.statusCode = status;
   res.setHeader('Content-Type', 'application/json');
   res.end(json);
-}
-
-function bytesToHex(b: Uint8Array): string {
-  return '0x' + Buffer.from(b).toString('hex');
 }
 
 /**

@@ -5,6 +5,10 @@ import type {
   StoreTxnSubmittedRow,
 } from '../types.js';
 
+// Hoisted so replaying reorged snapshots back into pending doesn't
+// allocate a fresh TextEncoder per message.
+const TEXT_ENCODER = new TextEncoder();
+
 /**
  * Abstraction over the L1 block-header source the watcher needs.
  * Implementations can be viem's `publicClient.getTransactionReceipt` +
@@ -113,7 +117,7 @@ export class ReorgWatcher {
           author: snap.author,
           nonce: snap.nonce,
           timestamp: snap.timestamp,
-          content: new TextEncoder().encode(snap.content),
+          content: TEXT_ENCODER.encode(snap.content),
           signature: new Uint8Array(snap.signature),
           ingestedAt,
           ingestSeq: seq,

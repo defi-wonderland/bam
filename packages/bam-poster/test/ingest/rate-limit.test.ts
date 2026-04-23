@@ -62,16 +62,6 @@ describe('RateLimiter', () => {
     expect(rl.check(('0x' + 'a'.repeat(40)) as Address).ok).toBe(false);
   });
 
-  it('release() rolls back the most recent accepted slot', () => {
-    const clock = new FakeClock();
-    const rl = new RateLimiter({ windowMs: 1000, maxPerWindow: 2 }, clock.fn());
-    expect(rl.check(ALICE).ok).toBe(true);
-    expect(rl.check(ALICE).ok).toBe(true);
-    expect(rl.check(ALICE).ok).toBe(false);
-    rl.release(ALICE);
-    expect(rl.check(ALICE).ok).toBe(true);
-  });
-
   it('exposes a non-DoS default aligned with spec §Non-goals', () => {
     expect(DEFAULT_RATE_LIMIT.windowMs).toBeGreaterThan(0);
     expect(DEFAULT_RATE_LIMIT.maxPerWindow).toBeGreaterThan(0);

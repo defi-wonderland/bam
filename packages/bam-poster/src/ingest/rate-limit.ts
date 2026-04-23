@@ -74,18 +74,6 @@ export class RateLimiter {
     return { ok: true };
   }
 
-  /**
-   * Release a slot reserved by a prior `check` that did not actually
-   * proceed through ingest. Used when a later-running check rejects.
-   */
-  release(key: Address): void {
-    const normalized = key.toLowerCase() as Address;
-    const history = this.timestamps.get(normalized);
-    if (!history || history.length === 0) return;
-    history.pop();
-    if (history.length === 0) this.timestamps.delete(normalized);
-  }
-
   /** Test-only introspection: count of tracked signer addresses. */
   _trackedCount(): number {
     return this.timestamps.size;

@@ -179,8 +179,12 @@ export class SqlitePosterStore implements PosterStore {
       },
       deletePending(messageIds: Bytes32[]): void {
         if (messageIds.length === 0) return;
-        const stmt = db.prepare('DELETE FROM poster_pending WHERE message_id = ?');
-        for (const id of messageIds) stmt.run(id);
+        // Single statement avoids N round-trips through prepare/run
+        // when the submission loop deletes a whole flushed batch.
+        const placeholders = messageIds.map(() => '?').join(', ');
+        db.prepare(`DELETE FROM poster_pending WHERE message_id IN (${placeholders})`).run(
+          ...messageIds
+        );
       },
       countPendingByTag(tag: Bytes32): number {
         const row = db

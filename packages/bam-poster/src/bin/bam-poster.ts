@@ -101,8 +101,6 @@ export async function runCli(): Promise<void> {
         signer,
         store,
         reorgWindowBlocks: env.reorgWindowBlocks,
-        decoderAddress: env.decoderAddress,
-        signatureRegistryAddress: env.signatureRegistryAddress,
       },
       {
         buildAndSubmit: viemPieces.buildAndSubmit,

@@ -18,6 +18,10 @@ import { RateLimiter } from './rate-limit.js';
 import { checkSignedTag } from './signed-tag.js';
 import { checkSizeBound } from './size-bound.js';
 
+// Hoisted so the per-accept pending-insert doesn't allocate a fresh
+// TextEncoder on every successful ingest.
+const TEXT_ENCODER = new TextEncoder();
+
 export interface IngestPipelineOptions {
   store: PosterStore;
   validator: MessageValidator;
@@ -96,7 +100,6 @@ export class IngestPipeline {
       contentTag,
       signature: message.signature,
       messageId,
-      raw,
     };
 
     // 3. Rate-limit, keyed on the recovered signer when the validator
@@ -143,7 +146,7 @@ export class IngestPipeline {
         author: decoded.author,
         nonce: decoded.nonce,
         timestamp: decoded.timestamp,
-        content: new TextEncoder().encode(decoded.content),
+        content: TEXT_ENCODER.encode(decoded.content),
         signature: decoded.signature,
         ingestedAt: this.opts.now().getTime(),
         ingestSeq: seq,

@@ -1,10 +1,6 @@
 import { NextResponse } from 'next/server';
 
-import {
-  PosterConfigError,
-  PosterUnreachableError,
-  getHealth,
-} from '@/lib/poster-client';
+import { getHealth, posterErrorToResponse } from '@/lib/poster-client';
 
 /**
  * Thin HTTP proxy to the Poster's `GET /health`. Returns the Poster's
@@ -15,18 +11,8 @@ export async function GET(): Promise<NextResponse> {
     const poster = await getHealth();
     return NextResponse.json(poster.body, { status: poster.status });
   } catch (err) {
-    if (err instanceof PosterUnreachableError) {
-      return NextResponse.json(
-        { error: 'poster_unreachable', detail: 'POSTER_URL not reachable' },
-        { status: 502 }
-      );
-    }
-    if (err instanceof PosterConfigError) {
-      return NextResponse.json(
-        { error: 'poster_url_not_configured' },
-        { status: 500 }
-      );
-    }
+    const mapped = posterErrorToResponse(err);
+    if (mapped) return mapped;
     throw err;
   }
 }

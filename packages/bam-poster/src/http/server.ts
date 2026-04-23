@@ -142,7 +142,3 @@ export class HttpServer {
     return this.server;
   }
 }
-
-export function mountHttp(poster: Poster, maxMessageSizeBytes: number): HttpServer {
-  return new HttpServer({ poster, maxMessageSizeBytes });
-}

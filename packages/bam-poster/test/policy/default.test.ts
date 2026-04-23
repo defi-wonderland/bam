@@ -16,7 +16,6 @@ function msg(overrides: Partial<DecodedMessage> = {}): DecodedMessage {
     contentTag: TAG,
     signature: new Uint8Array(65),
     messageId: ('0x' + '11'.repeat(32)) as Bytes32,
-    raw: new Uint8Array(10),
     ...overrides,
   };
 }

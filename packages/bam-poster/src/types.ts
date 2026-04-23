@@ -56,8 +56,6 @@ export interface DecodedMessage {
   signature: Uint8Array;
   /** Canonical id computed via `bam-sdk.computeMessageId`. */
   messageId: Bytes32;
-  /** Original raw bytes as presented to the ingest boundary (size-bound + dedup). */
-  raw: Uint8Array;
   /**
    * Poster-side ingest time, in ms since epoch. Populated for messages
    * drawn from the pool via the submission loop; `undefined` for a
@@ -99,7 +97,7 @@ export interface PendingQuery {
 // Submitted-batch read surface
 // ═══════════════════════════════════════════════════════════════════════
 
-export type SubmittedBatchStatus = 'pending' | 'included' | 'reorged' | 'resubmitted';
+export type SubmittedBatchStatus = 'pending' | 'included' | 'reorged';
 
 /**
  * Public per-message entry on a submitted batch. Carries the full
@@ -336,10 +334,6 @@ export interface PosterConfig {
   store?: PosterStore;
   /** Wall-clock source; default `() => new Date()`. Exposed for tests. */
   now?: () => Date;
-  /** Decoder address passed through to `registerBlobBatch`. Default `zeroAddress`. */
-  decoderAddress?: Address;
-  /** Signature registry address passed through to `registerBlobBatch`. Default `zeroAddress`. */
-  signatureRegistryAddress?: Address;
   /** Idle-poll delay for the per-tag submission workers, in ms. Default 1000. */
   idlePollMs?: number;
   /** Reorg-watcher tick interval, in ms. Default 12000 (L1 block time). */

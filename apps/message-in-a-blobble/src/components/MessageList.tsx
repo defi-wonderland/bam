@@ -3,102 +3,25 @@
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { AddressLink } from '@/components/AddressLink';
+import {
+  MESSAGES_QUERY_KEY,
+  MESSAGES_REFETCH_MS,
+  fetchMessages,
+  type DisplayMessage,
+} from '@/lib/messages';
 
 /**
- * Post-migration, the UI renders two independent data sources:
- *  - **pending**: from the Poster's `/pending` surface (via
- *    `/api/messages`). In flight, not yet on chain.
- *  - **posted**:  from the demo's own DB, written by the sync
- *    indexer after it observes `BlobBatchRegistered` events and
- *    decodes the blobs (via `/api/confirmed-messages`). On chain.
- *
- * Both are coerced into a single `DisplayMessage` shape so the
- * render code stays uniform.
+ * Renders the merged pending + confirmed message list. Data + its
+ * polling cadence live in `lib/messages.ts` so `PostBlobbleButton`
+ * shares the same react-query cache and we don't double-poll the
+ * same two endpoints.
  */
-interface DisplayMessage {
-  id: string;
-  author: string;
-  timestamp: number;
-  /**
-   * Decimal-string nonce to preserve uint64 precision (future-compatible
-   * with NEXT_SPEC's widening). Not rendered — only consumed by
-   * `MessageComposer`'s next-nonce computation, which parses via BigInt.
-   */
-  nonce: string;
-  content: string;
-  status: 'pending' | 'posted';
-  tx_hash?: string | null;
-  block_number?: number | null;
-}
-
-interface PosterPendingRow {
-  messageId: string;
-  author: string;
-  nonce: string | number;
-  content: string;
-  timestamp: number;
-  ingestedAt: number;
-}
-
-interface ConfirmedRow {
-  message_id: string;
-  author: string;
-  timestamp: number;
-  nonce: string;
-  content: string;
-  tx_hash: string | null;
-  block_number: number | null;
-}
-
-async function fetchPending(): Promise<DisplayMessage[]> {
-  const res = await fetch('/api/messages');
-  if (!res.ok) return [];
-  const data = (await res.json()) as { pending?: PosterPendingRow[] };
-  return (data.pending ?? []).map((p) => ({
-    id: p.messageId,
-    author: p.author,
-    timestamp: p.timestamp,
-    nonce: String(p.nonce),
-    content: p.content,
-    status: 'pending' as const,
-  }));
-}
-
-async function fetchConfirmed(): Promise<DisplayMessage[]> {
-  const res = await fetch('/api/confirmed-messages');
-  if (!res.ok) return [];
-  const data = (await res.json()) as { messages?: ConfirmedRow[] };
-  return (data.messages ?? []).map((m) => ({
-    id: m.message_id,
-    author: m.author,
-    timestamp: m.timestamp,
-    nonce: m.nonce,
-    content: m.content,
-    status: 'posted' as const,
-    tx_hash: m.tx_hash,
-    block_number: m.block_number,
-  }));
-}
-
-async function fetchMessages(): Promise<DisplayMessage[]> {
-  // allSettled, not all: pending and confirmed come from independent
-  // backends (/api/messages → Poster vs /api/confirmed-messages →
-  // demo DB). One flaky endpoint should degrade the corresponding
-  // list, not blank both (cubic review).
-  const [pendingRes, confirmedRes] = await Promise.allSettled([
-    fetchPending(),
-    fetchConfirmed(),
-  ]);
-  const pending = pendingRes.status === 'fulfilled' ? pendingRes.value : [];
-  const confirmed = confirmedRes.status === 'fulfilled' ? confirmedRes.value : [];
-  return [...pending, ...confirmed].sort((a, b) => b.timestamp - a.timestamp);
-}
 
 export function MessageList() {
   const { data: messages = [], isLoading } = useQuery({
-    queryKey: ['messages'],
+    queryKey: MESSAGES_QUERY_KEY,
     queryFn: fetchMessages,
-    refetchInterval: 5000,
+    refetchInterval: MESSAGES_REFETCH_MS,
   });
 
   const [showIndexed, setShowIndexed] = useState(false);
