@@ -27,6 +27,9 @@ const ABI_MAP: Record<string, string> = {
   BLS_EXPOSER_ABI: 'BLSExposer.sol/BLSExposer.json',
   SIMPLE_BOOL_VERIFIER_ABI: 'SimpleBoolVerifier.sol/SimpleBoolVerifier.json',
   BLS_REGISTRY_ABI: 'BLSRegistry.sol/BLSRegistry.json',
+  ECDSA_REGISTRY_ABI: 'ECDSARegistry.sol/ECDSARegistry.json',
+  SIGNATURE_REGISTRY_DISPATCHER_ABI:
+    'SignatureRegistryDispatcher.sol/SignatureRegistryDispatcher.json',
 };
 
 function extractAbi(artifactPath: string): unknown[] {

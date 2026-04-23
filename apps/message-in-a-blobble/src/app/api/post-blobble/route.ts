@@ -27,7 +27,11 @@ import {
   updateBlobbleStatus,
   markMessagesPosted,
 } from '@/db/queries';
-import { BAM_CORE_ADDRESS, MESSAGE_IN_A_BLOBBLE_TAG } from '@/lib/constants';
+import {
+  BAM_CORE_ADDRESS,
+  ECDSA_REGISTRY_ADDRESS,
+  MESSAGE_IN_A_BLOBBLE_TAG,
+} from '@/lib/constants';
 import { COOLDOWN_MS, getLastPostTime } from '@/lib/poster-state';
 
 export async function POST() {
@@ -103,8 +107,9 @@ export async function POST() {
     // Route registration through the amended ERC-8180 BAM core: registerBlobBatch
     // carries the caller-chosen contentTag into BlobBatchRegistered as an indexed topic,
     // which the sync route filters on to recover message-in-a-blobble batches.
-    // decoder=0 and signatureRegistry=0: this app uses the BAM v1 wire format with
-    // ECDSA ecrecover — no on-chain decoder or BLS registry needed for the read path.
+    // decoder=0: the BAM v1 wire format is parsed off-chain.
+    // signatureRegistry=ECDSA_REGISTRY_ADDRESS: ECDSA-signed messages are verifiable
+    // end-to-end through the scheme-0x01 registry (no more address(0) "unverified" path).
     if (BAM_CORE_ADDRESS === '0x0000000000000000000000000000000000000000') {
       return NextResponse.json(
         { error: 'NEXT_PUBLIC_BAM_CORE_ADDRESS is not configured' },
@@ -120,8 +125,8 @@ export async function POST() {
         0, // startFE — full blob
         4096, // endFE — full blob
         MESSAGE_IN_A_BLOBBLE_TAG,
-        zeroAddress,
-        zeroAddress,
+        zeroAddress, // decoder
+        ECDSA_REGISTRY_ADDRESS,
       ],
     });
 

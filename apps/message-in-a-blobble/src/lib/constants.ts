@@ -25,3 +25,13 @@ export const MESSAGE_IN_A_BLOBBLE_TAG =
 
 export const SEPOLIA_CHAIN_ID = 11155111;
 export const MAX_MESSAGE_CHARS = 280;
+
+/**
+ * Sepolia ECDSA signature registry (ERC-8180 scheme `0x01`). Passed as the
+ * `signatureRegistry` argument on `registerBlobBatch` so indexers / exposers
+ * that route via `SignatureRegistryDispatcher` can verify this app's
+ * ECDSA-signed messages against a real registry rather than treating them as
+ * unregistered (`address(0)`).
+ */
+export const ECDSA_REGISTRY_ADDRESS =
+  '0xF4Ce909305a112C2CBEC6b339a42f34bA8bf3381' as const;
