@@ -190,6 +190,14 @@ export async function buildAndSubmitWithViem(
         blockNumber: Number(receipt.blockNumber),
       };
     } catch (err) {
+      // Log the underlying error to stderr before classification — the
+      // classifier throws away the message, and without this the health
+      // surface reports "tag has failed N times" with no way to see why.
+      const detail =
+        err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+      process.stderr.write(
+        `[bam-poster] submission failed for tag ${contentTag}: ${detail}\n`
+      );
       return classifySubmissionError(err);
     }
   };

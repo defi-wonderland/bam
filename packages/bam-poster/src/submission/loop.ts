@@ -162,11 +162,19 @@ export class SubmissionLoop {
 
     if (outcome.kind === 'retryable') {
       this.backoff.recordFailure();
+      process.stderr.write(
+        `[bam-poster] tag ${this.opts.tag} retryable failure ` +
+          `(attempt ${this.backoff.attempts()}, next in ${this.backoff.nextDelayMs()} ms)\n`
+      );
       return 'retry';
     }
 
     // permanent — stop this tag's worker. Operator must intervene.
     this.backoff.recordFailure();
+    process.stderr.write(
+      `[bam-poster] tag ${this.opts.tag} PERMANENT failure — worker stopped. ` +
+        `Operator must intervene.\n`
+    );
     this.permanentlyStopped = true;
     return 'permanent';
   }
