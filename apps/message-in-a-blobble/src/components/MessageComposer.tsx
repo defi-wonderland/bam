@@ -8,12 +8,16 @@ import { MAX_MESSAGE_CHARS } from '@/lib/constants';
 
 /**
  * Per-author next-nonce estimate. Walks the two sources the demo has
- * visibility into (Poster pending + demo-DB confirmed) and picks
- * `max(nonce) + 1`. The Poster enforces strict monotonicity per
- * ERC-8180, so if our guess collides with an in-flight submit we get
- * `stale_nonce` back and retry with nonce+1.
+ * visibility into (Poster pending + Poster-backed confirmed) and
+ * picks `max(nonce) + 1`. The Poster enforces strict monotonicity
+ * per ERC-8180, so if our guess collides with an in-flight submit we
+ * get `stale_nonce` back and retry with nonce+1.
+ *
+ * Arithmetic runs in BigInt to support uint64 nonces — v1 wire is
+ * uint16 and well within Number range, but NEXT_SPEC widens to uint64
+ * and the Poster already returns decimal strings.
  */
-async function nextNonceForAuthor(address: string): Promise<number> {
+async function nextNonceForAuthor(address: string): Promise<bigint> {
   const lc = address.toLowerCase();
   const [pendingRes, confirmedRes] = await Promise.all([
     fetch('/api/messages').then((r) => (r.ok ? r.json() : { pending: [] })),
@@ -21,19 +25,27 @@ async function nextNonceForAuthor(address: string): Promise<number> {
   ]);
   const pending = (pendingRes as { pending?: Array<{ author: string; nonce: string | number }> })
     .pending ?? [];
-  const confirmed = (confirmedRes as { messages?: Array<{ author: string; nonce: number }> })
+  const confirmed = (confirmedRes as { messages?: Array<{ author: string; nonce: string | number }> })
     .messages ?? [];
-  let max = -1;
+  const parse = (v: string | number): bigint | null => {
+    try {
+      return BigInt(v);
+    } catch {
+      return null;
+    }
+  };
+  let max = -1n;
   for (const p of pending) {
     if (p.author.toLowerCase() !== lc) continue;
-    const n = typeof p.nonce === 'string' ? Number(p.nonce) : p.nonce;
-    if (Number.isFinite(n) && n > max) max = n;
+    const n = parse(p.nonce);
+    if (n !== null && n > max) max = n;
   }
   for (const c of confirmed) {
     if (c.author.toLowerCase() !== lc) continue;
-    if (c.nonce > max) max = c.nonce;
+    const n = parse(c.nonce);
+    if (n !== null && n > max) max = n;
   }
-  return max + 1;
+  return max + 1n;
 }
 
 export function MessageComposer() {
@@ -47,10 +59,20 @@ export function MessageComposer() {
       if (!address || !content.trim()) throw new Error('Missing address or content');
 
       const timestamp = Math.floor(Date.now() / 1000);
+      // v1 wire encodes nonce as uint16 — well inside Number range.
+      // We compute next-nonce in BigInt for NEXT_SPEC forward-compat,
+      // then narrow at the network boundary.
+      const toWire = (n: bigint): number => {
+        if (n < 0n || n > BigInt(Number.MAX_SAFE_INTEGER)) {
+          throw new Error(`nonce ${n} exceeds safe-integer range`);
+        }
+        return Number(n);
+      };
       // Try a reasonable next-nonce; on `stale_nonce` retry once
       // with +1 to cover an in-flight submission we didn't see.
-      const trySend = async (nonce: number): Promise<Response> => {
-        const msg = { author: address, timestamp, nonce, content: content.trim() };
+      const trySend = async (nonce: bigint): Promise<Response> => {
+        const wire = toWire(nonce);
+        const msg = { author: address, timestamp, nonce: wire, content: content.trim() };
         const messageHash = computeMessageHash(msg);
         const signature = await signMessageAsync({ message: { raw: messageHash } });
         return fetch('/api/messages', {
@@ -59,7 +81,7 @@ export function MessageComposer() {
           body: JSON.stringify({
             author: address,
             timestamp,
-            nonce,
+            nonce: wire,
             content: content.trim(),
             signature,
           }),
@@ -71,11 +93,13 @@ export function MessageComposer() {
       if (!res.ok) {
         const data = (await res.json()) as { reason?: string; error?: string };
         if (data.reason === 'stale_nonce') {
-          res = await trySend(initial + 1);
-        }
-        if (!res.ok) {
-          const err = (await res.json()) as { reason?: string; error?: string };
-          throw new Error(err.reason ?? err.error ?? 'Failed to submit');
+          res = await trySend(initial + 1n);
+          if (!res.ok) {
+            const err = (await res.json()) as { reason?: string; error?: string };
+            throw new Error(err.reason ?? err.error ?? 'Failed to submit');
+          }
+        } else {
+          throw new Error(data.reason ?? data.error ?? 'Failed to submit');
         }
       }
     },

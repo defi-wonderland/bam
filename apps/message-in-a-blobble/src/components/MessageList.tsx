@@ -19,7 +19,12 @@ interface DisplayMessage {
   id: string;
   author: string;
   timestamp: number;
-  nonce: number;
+  /**
+   * Decimal-string nonce to preserve uint64 precision (future-compatible
+   * with NEXT_SPEC's widening). Not rendered — only consumed by
+   * `MessageComposer`'s next-nonce computation, which parses via BigInt.
+   */
+  nonce: string;
   content: string;
   status: 'pending' | 'posted';
   tx_hash?: string | null;
@@ -39,7 +44,7 @@ interface ConfirmedRow {
   message_id: string;
   author: string;
   timestamp: number;
-  nonce: number;
+  nonce: string;
   content: string;
   tx_hash: string | null;
   block_number: number | null;
@@ -53,7 +58,7 @@ async function fetchPending(): Promise<DisplayMessage[]> {
     id: p.messageId,
     author: p.author,
     timestamp: p.timestamp,
-    nonce: typeof p.nonce === 'string' ? Number(p.nonce) : p.nonce,
+    nonce: String(p.nonce),
     content: p.content,
     status: 'pending' as const,
   }));

@@ -188,9 +188,16 @@ export class MemoryPosterStore implements PosterStore {
       ): void {
         const row = submitted.get(txHash);
         if (!row) throw new Error('updateSubmittedStatus: no row for tx_hash');
-        row.status = status;
-        row.replacedByTxHash = replacedByTxHash;
-        if (blockNumber !== null) row.blockNumber = blockNumber;
+        // Replace the row object rather than mutating in place. The
+        // `withTxn` rollback snapshots the outer Map with a shallow
+        // copy; an in-place mutation on a row would survive the
+        // rollback because both snapshots reference the same object.
+        submitted.set(txHash, {
+          ...row,
+          status,
+          replacedByTxHash,
+          blockNumber: blockNumber !== null ? blockNumber : row.blockNumber,
+        });
       },
     };
   }

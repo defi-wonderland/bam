@@ -23,7 +23,13 @@ interface ConfirmedRow {
   message_id: string;
   author: string;
   timestamp: number;
-  nonce: number;
+  /**
+   * Preserved as the decimal string the Poster sends. Casting to
+   * JS `number` would silently lose precision for a 20-digit uint64
+   * nonce (NEXT_SPEC's widening direction); keeping the string lets
+   * clients parse via `BigInt` if they need arithmetic.
+   */
+  nonce: string;
   content: string;
   tx_hash: string;
   block_number: number | null;
@@ -61,16 +67,22 @@ export async function GET(): Promise<NextResponse> {
 
     const messages: ConfirmedRow[] = [];
     for (const b of batches) {
-      // Skip reorged-out batches; their messages get re-enqueued
-      // and reappear under a different txHash once resubmitted.
-      if (b.status === 'reorged') continue;
+      // Only batches the Poster considers landed-on-canonical-chain
+      // are rendered as "posted". `pending` = not yet on chain (edge
+      // case — the Poster's submission path only inserts when a
+      // receipt is back, but the type allows it). `reorged` = fell
+      // out of the canonical chain; messages get re-enqueued and
+      // reappear under the replacement batch's txHash. `resubmitted`
+      // = duplicate accounting — already reflected under the newer
+      // `included` entry.
+      if (b.status !== 'included') continue;
       const blobbleId = b.blobVersionedHash.slice(0, 18);
       for (const m of b.messages) {
         messages.push({
           message_id: m.messageId,
           author: m.author,
           timestamp: m.timestamp,
-          nonce: typeof m.nonce === 'string' ? Number(m.nonce) : m.nonce,
+          nonce: String(m.nonce),
           content: m.content,
           tx_hash: b.txHash,
           block_number: b.blockNumber,

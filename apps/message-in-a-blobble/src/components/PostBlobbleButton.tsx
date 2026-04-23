@@ -48,9 +48,17 @@ async function fetchPosterStatus(): Promise<PosterStatusBody['status']> {
 
 async function fetchPosterHealth(): Promise<PosterHealthBody['health']> {
   const res = await fetch('/api/poster-health');
-  if (!res.ok) throw new Error('Failed to fetch poster health');
-  const data = (await res.json()) as PosterHealthBody;
-  return data.health;
+  // Poster encodes `unhealthy` as HTTP 503 (with the same `{ health }`
+  // body). Parse the body regardless of status so we actually render
+  // the unhealthy state instead of treating it as a fetch failure.
+  let data: PosterHealthBody | null = null;
+  try {
+    data = (await res.json()) as PosterHealthBody;
+  } catch {
+    // Not JSON — treat as a real network error below.
+  }
+  if (data?.health?.state) return data.health;
+  throw new Error(`Poster health unavailable (HTTP ${res.status})`);
 }
 
 async function nudgeFlush(): Promise<{ flushed: string } | { error: string }> {

@@ -309,4 +309,29 @@ describe('MemoryPosterStore — withTxn serialization', () => {
     const res = await store.withTxn(async () => 'ok');
     expect(res).toBe('ok');
   });
+
+  it('rolls back updateSubmittedStatus mutations on a thrown txn (cubic review)', async () => {
+    const store = new MemoryPosterStore();
+    const txHash = ('0x' + '11'.repeat(32)) as Bytes32;
+
+    await store.withTxn(async (txn) => {
+      await txn.insertSubmitted(makeSubmitted({ txHash, status: 'included' }));
+    });
+
+    const replacement = ('0x' + 'ff'.repeat(32)) as Bytes32;
+    // Update + then throw — rollback must restore the original
+    // status/replacedByTxHash/blockNumber.
+    await expect(
+      store.withTxn(async (txn) => {
+        await txn.updateSubmittedStatus(txHash, 'reorged', replacement, 999);
+        throw new Error('abort');
+      })
+    ).rejects.toThrow(/abort/);
+
+    const after = await store.withTxn(async (txn) => txn.getSubmittedByTx(txHash));
+    expect(after).not.toBeNull();
+    expect(after!.status).toBe('included');
+    expect(after!.replacedByTxHash).toBeNull();
+    expect(after!.blockNumber).toBe(100);
+  });
 });
