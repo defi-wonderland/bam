@@ -200,6 +200,12 @@ export async function createPoster(
     interface HealthSnapshot {
       state: HealthState;
       reason?: string;
+      /**
+       * Timestamp the *current* non-ok epoch started. Stable across
+       * repeated calls — `/health` consumers use it to tell how long
+       * we've been degraded/unhealthy. `undefined` when state is `ok`.
+       */
+      since?: Date;
     }
 
     /**
@@ -208,18 +214,26 @@ export async function createPoster(
      * `/health` consumer can tell what tripped (e.g. "tag
      * 0xabc… has failed 7 consecutive submissions"). Strictly textual —
      * no structured fields, no PII.
+     *
+     * `nonOkSince` is latched at the first non-ok observation and
+     * cleared when aggregate state returns to ok, so `since` reports
+     * when the current non-ok epoch began rather than "right now."
      */
+    let nonOkSince: Date | null = null;
     const aggregateHealth = (): HealthSnapshot => {
+      let result: HealthSnapshot = { state: 'ok' };
       let worst: HealthState = 'ok';
       let worstTag: Bytes32 | null = null;
       let worstAttempts = 0;
       for (const [tag, l] of loops) {
         const s = l.healthState();
         if (s === 'unhealthy') {
-          return {
+          result = {
             state: 'unhealthy',
             reason: `tag ${tag} has failed ${l.attempts()} consecutive submissions`,
           };
+          worst = 'unhealthy';
+          break;
         }
         if (s === 'degraded' && worst === 'ok') {
           worst = 'degraded';
@@ -228,12 +242,22 @@ export async function createPoster(
         }
       }
       if (worst === 'degraded' && worstTag !== null) {
-        return {
+        result = {
           state: 'degraded',
           reason: `tag ${worstTag} has failed ${worstAttempts} consecutive submissions`,
         };
       }
-      return { state: 'ok' };
+
+      // Latch `since` on the first non-ok observation; clear it when
+      // we return to ok. Calling `health()` repeatedly during a single
+      // non-ok epoch must report the same timestamp.
+      if (result.state === 'ok') {
+        nonOkSince = null;
+      } else {
+        if (nonOkSince === null) nonOkSince = now();
+        result = { ...result, since: nonOkSince };
+      }
+      return result;
     };
 
     const internal: InternalPoster = {
@@ -281,7 +305,7 @@ export async function createPoster(
         return readHealth({
           submissionState: snap.state,
           reason: snap.reason,
-          since: snap.state === 'ok' ? undefined : now(),
+          since: snap.since,
         });
       },
       async start(): Promise<void> {

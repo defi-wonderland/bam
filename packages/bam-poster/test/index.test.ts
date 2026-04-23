@@ -14,6 +14,7 @@ import {
   _clearSignerRegistryForTests,
   createMemoryStore,
   createPoster,
+  defaultBatchPolicy,
 } from '../src/index.js';
 import type { BuildAndSubmit, PosterFactoryExtras } from '../src/index.js';
 
@@ -147,6 +148,90 @@ describe('createPoster — duplicate-signer-in-process (plan §C-10)', () => {
       { buildAndSubmit, rpc: makeRpcOk() }
     );
     await second.stop();
+  });
+});
+
+describe('createPoster — health().since latching (cubic review)', () => {
+  beforeEach(() => _clearSignerRegistryForTests());
+
+  it('latches non-ok epoch start; repeated calls return the same `since`', async () => {
+    const signer = new LocalEcdsaSigner(
+      (('0x' + '03'.repeat(32)) as unknown) as `0x${string}`
+    );
+    // Controllable clock: every call to `now()` returns whatever the
+    // test last set. Lets us assert that `since` was latched at the
+    // *first* non-ok observation and does not drift.
+    let clock = new Date('2026-01-01T00:00:00Z');
+    const now = (): Date => clock;
+
+    // Sink always reports an included tx so the happy path can flip
+    // the loop back to ok. Overridden below for the failure phase.
+    let shouldFail = false;
+    const failingBuildAndSubmit: BuildAndSubmit = async () => {
+      if (shouldFail) {
+        return { kind: 'retryable', detail: 'simulated RPC blip' };
+      }
+      return {
+        kind: 'included',
+        txHash: ('0x' + '11'.repeat(32)) as Bytes32,
+        blobVersionedHash: ('0x' + '22'.repeat(32)) as Bytes32,
+        blockNumber: 100,
+      };
+    };
+
+    const poster = await createPoster(
+      {
+        allowlistedTags: [TAG],
+        chainId: 1,
+        bamCoreAddress: BAM_CORE,
+        signer,
+        store: createMemoryStore(),
+        now,
+        // Trip to degraded on the first failure so the test doesn't
+        // need to drive 5 ticks just to set up the assertion.
+        backoff: {
+          baseMs: 1,
+          capMs: 1,
+          degradedAfterAttempts: 1,
+          unhealthyAfterAttempts: 50,
+        },
+        // Force selection to fire on a single pending message so we
+        // don't have to wait for size/age thresholds.
+        batchPolicy: defaultBatchPolicy({ countTrigger: 1 }),
+      },
+      { buildAndSubmit: failingBuildAndSubmit, rpc: makeRpcOk() }
+    );
+    const internal = poster as unknown as {
+      _tickTag: (t: Bytes32) => Promise<unknown>;
+    };
+
+    // Feed a pending message so the loop has something to submit.
+    const raw = await signedRaw('first');
+    expect((await poster.submit(raw)).accepted).toBe(true);
+
+    // Phase 1: force a submission failure. Clock = T0.
+    shouldFail = true;
+    await internal._tickTag(TAG);
+    expect((await poster.health()).state).toBe('degraded');
+
+    const firstSince = (await poster.health()).since;
+    expect(firstSince).toEqual(new Date('2026-01-01T00:00:00Z'));
+
+    // Phase 2: time advances but we're still degraded. `since` must
+    // be latched at T0, not re-computed to T1.
+    clock = new Date('2026-01-01T00:05:00Z');
+    const laterSince = (await poster.health()).since;
+    expect(laterSince).toEqual(firstSince);
+
+    // Phase 3: a successful tick clears the non-ok epoch; `since`
+    // should disappear from the next `ok` health read.
+    shouldFail = false;
+    await internal._tickTag(TAG);
+    const healthy = await poster.health();
+    expect(healthy.state).toBe('ok');
+    expect(healthy.since).toBeUndefined();
+
+    await poster.stop();
   });
 });
 
