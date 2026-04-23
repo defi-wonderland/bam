@@ -14,6 +14,20 @@ import { decodeNonce, encodeNonce } from './nonce-codec.js';
 import { SQL_CREATE_POSTGRES } from './schema.js';
 import { decodeSnapshots, encodeSnapshots } from './snapshot-codec.js';
 
+/**
+ * PostgreSQL signals a SERIALIZABLE conflict via SQLSTATE 40001
+ * (serialization_failure). `@vercel/postgres` surfaces it on the
+ * thrown error's `code` field. Retry is the documented remedy.
+ */
+function isSerializationFailure(err: unknown): boolean {
+  return (
+    typeof err === 'object' &&
+    err !== null &&
+    'code' in err &&
+    (err as { code?: string }).code === '40001'
+  );
+}
+
 interface PendingRowRaw {
   message_id: string;
   content_tag: string;
@@ -99,25 +113,43 @@ export class PostgresPosterStore implements PosterStore {
 
   async withTxn<T>(fn: (txn: StoreTxn) => Promise<T>): Promise<T> {
     await this.ready;
-    const client = await this.pool.connect();
-    try {
-      await client.query('BEGIN ISOLATION LEVEL SERIALIZABLE');
+    // PostgreSQL SERIALIZABLE can reject a txn with SQLSTATE 40001
+    // (serialization_failure) under concurrent write conflicts. The
+    // documented remedy is an application-level retry of the whole
+    // txn — the sqlite path sidesteps this with a process-local
+    // mutex, postgres needs its own loop (cubic review). Cap retries
+    // so a genuinely stuck condition still surfaces.
+    const MAX_RETRIES = 5;
+    let lastErr: unknown;
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      const client = await this.pool.connect();
       try {
-        const txn = makePgTxn(client);
-        const result = await fn(txn);
-        await client.query('COMMIT');
-        return result;
-      } catch (err) {
+        await client.query('BEGIN ISOLATION LEVEL SERIALIZABLE');
         try {
-          await client.query('ROLLBACK');
-        } catch {
-          // ignore
+          const txn = makePgTxn(client);
+          const result = await fn(txn);
+          await client.query('COMMIT');
+          return result;
+        } catch (err) {
+          try {
+            await client.query('ROLLBACK');
+          } catch {
+            // ignore
+          }
+          if (!isSerializationFailure(err) || attempt === MAX_RETRIES) {
+            throw err;
+          }
+          lastErr = err;
         }
-        throw err;
+      } finally {
+        client.release();
       }
-    } finally {
-      client.release();
+      // Short backoff before retrying so a hot row doesn't busy-loop.
+      await new Promise((resolve) => setTimeout(resolve, 10 * (attempt + 1)));
     }
+    // Unreachable: the loop either returns, throws on terminal attempt,
+    // or falls through below after MAX_RETRIES serialization failures.
+    throw lastErr ?? new Error('withTxn: exhausted serialization retries');
   }
 
   async close(): Promise<void> {

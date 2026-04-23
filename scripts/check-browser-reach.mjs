@@ -41,10 +41,25 @@ async function walkSource(file, seen = new Set()) {
   seen.add(file);
   try {
     const src = await readFile(file, 'utf8');
-    const importRegex = /(?:import[^'"]*?from\s*|require\s*\(|import\s*\()\s*['"]([^'"]+)['"]/g;
-    let match;
+    // Static dependency surface the walker covers:
+    //   - `import … from 'x'` / `export … from 'x'`
+    //   - `require('x')`
+    //   - dynamic `import('x')`
+    //   - `new URL('x', import.meta.url)` (ESM asset-loading idiom)
+    // Scoped to what this monorepo actually uses (cubic review) —
+    // runtime-constructed paths, webpack loader syntax, and
+    // template-literal specifiers are out of scope. The
+    // `referencesPoster` string scan below is the backstop for any
+    // exotic pattern that slips past the walker.
+    const patterns = [
+      /(?:import[^'"]*?from\s*|require\s*\(|import\s*\()\s*['"]([^'"]+)['"]/g,
+      /new\s+URL\s*\(\s*['"]([^'"]+)['"]\s*,\s*import\.meta\.url\s*\)/g,
+    ];
     const refs = new Set();
-    while ((match = importRegex.exec(src)) !== null) refs.add(match[1]);
+    for (const re of patterns) {
+      let match;
+      while ((match = re.exec(src)) !== null) refs.add(match[1]);
+    }
     for (const ref of refs) {
       if (ref.startsWith('.')) {
         const resolved = path.resolve(path.dirname(file), ref);
