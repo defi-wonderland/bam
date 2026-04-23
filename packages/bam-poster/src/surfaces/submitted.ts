@@ -29,5 +29,13 @@ function mapRow(row: StoreTxnSubmittedRow): SubmittedBatch {
     replacedByTxHash: row.replacedByTxHash,
     submittedAt: row.submittedAt,
     messageIds: [...row.messageIds],
+    messages: row.messages.map((m) => ({
+      messageId: m.messageId,
+      author: m.author,
+      nonce: m.nonce,
+      timestamp: m.timestamp,
+      content: m.content,
+      signature: new Uint8Array(m.signature),
+    })),
   };
 }

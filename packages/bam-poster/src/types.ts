@@ -101,6 +101,23 @@ export interface PendingQuery {
 
 export type SubmittedBatchStatus = 'pending' | 'included' | 'reorged' | 'resubmitted';
 
+/**
+ * Public per-message entry on a submitted batch. Carries the full
+ * decoded body so clients can render "posted" messages directly from
+ * this surface — no chain re-fetch + blob-decode round trip needed.
+ * The Poster already committed to these exact bytes; a consumer that
+ * wants third-party verification can fetch the blob + compute the
+ * messageId independently, but the default path trusts the Poster.
+ */
+export interface SubmittedBatchMessage {
+  messageId: Bytes32;
+  author: Address;
+  nonce: bigint;
+  timestamp: number;
+  content: string;
+  signature: Uint8Array;
+}
+
 export interface SubmittedBatch {
   txHash: Bytes32;
   contentTag: Bytes32;
@@ -110,6 +127,8 @@ export interface SubmittedBatch {
   replacedByTxHash: Bytes32 | null;
   submittedAt: number;
   messageIds: Bytes32[];
+  /** Decoded message bodies in original ingest order. */
+  messages: SubmittedBatchMessage[];
 }
 
 export interface SubmittedBatchesQuery {

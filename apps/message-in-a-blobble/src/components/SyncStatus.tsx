@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 
 interface SyncCheck {
@@ -57,6 +57,20 @@ export function SyncStatus() {
       queryClient.invalidateQueries({ queryKey: ['blobbles'] });
     },
   });
+
+  // Auto-sync when the poller detects a missing blobble. Debounced
+  // at 30s so a permanently-unavailable blob (pruned past ~18 days,
+  // or RPC that can't serve blob data) doesn't hot-loop.
+  const lastAutoSyncAt = useRef<number>(0);
+  useEffect(() => {
+    if (!status) return;
+    if (status.missingCount === 0) return;
+    if (mutation.isPending) return;
+    const now = Date.now();
+    if (now - lastAutoSyncAt.current < 30_000) return;
+    lastAutoSyncAt.current = now;
+    mutation.mutate();
+  }, [status, mutation]);
 
   if (isLoading) return null;
 

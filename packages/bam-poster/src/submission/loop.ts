@@ -157,6 +157,11 @@ export class SubmissionLoop {
         }
       });
       this.backoff.recordSuccess();
+      process.stdout.write(
+        `[bam-poster] tag ${this.opts.tag} submitted ` +
+          `${includedMessageIds.length} message(s) → tx ${outcome.txHash} ` +
+          `(block ${outcome.blockNumber}, versionedHash ${outcome.blobVersionedHash})\n`
+      );
       return 'success';
     }
 

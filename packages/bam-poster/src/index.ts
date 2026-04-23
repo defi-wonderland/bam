@@ -18,6 +18,7 @@ export type {
   PendingQuery,
   MessageCursor,
   SubmittedBatch,
+  SubmittedBatchMessage,
   SubmittedBatchesQuery,
   SubmittedBatchStatus,
   Status,
