@@ -56,7 +56,12 @@ export function parseEnvelope(raw: Uint8Array): ParseResult {
   }
   const { author, timestamp, nonce, content, signature } = message as Record<string, unknown>;
   if (!isAddress(author)) return { ok: false, result: { ok: false, reason: 'malformed' } };
-  if (typeof timestamp !== 'number' || !Number.isFinite(timestamp) || timestamp < 0) {
+  // `Number.isFinite` alone lets floats (`1700000000.5`) and values
+  // above MAX_SAFE_INTEGER slip through — the SDK packs timestamp as
+  // a uint64 via DataView, so a non-integer or lossy value silently
+  // diverges between the signer's payload and what we hash (cubic
+  // review). Require a safe, non-negative integer at parse time.
+  if (typeof timestamp !== 'number' || !Number.isSafeInteger(timestamp) || timestamp < 0) {
     return { ok: false, result: { ok: false, reason: 'malformed' } };
   }
   const parsedNonce = parseNonce(nonce);

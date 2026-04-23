@@ -324,6 +324,30 @@ describe('IngestPipeline — malformed envelopes', () => {
     expect(res.accepted).toBe(false);
     if (!res.accepted) expect(res.reason).toBe('malformed');
   });
+
+  it('rejects non-integer / unsafe-integer timestamps (cubic review)', async () => {
+    // `Number.isFinite` previously accepted floats and values above
+    // MAX_SAFE_INTEGER. Both would silently coerce during uint64
+    // packing and break signature verification in subtle ways.
+    const { pipeline } = makePipeline();
+    const badTimestamps = [1_700_000_000.5, Number.MAX_SAFE_INTEGER + 2, -1, Number.POSITIVE_INFINITY];
+    for (const ts of badTimestamps) {
+      const env = {
+        contentTag: TAG,
+        message: {
+          author: '0x1111111111111111111111111111111111111111',
+          timestamp: ts,
+          nonce: 1,
+          content: 'x',
+          signature: '0x' + '00'.repeat(65),
+        },
+      };
+      const raw = new TextEncoder().encode(JSON.stringify(env));
+      const res = await pipeline.ingest(raw);
+      expect(res.accepted).toBe(false);
+      if (!res.accepted) expect(res.reason).toBe('malformed');
+    }
+  });
 });
 
 describe('IngestPipeline — nonce parsing (cubic review)', () => {
