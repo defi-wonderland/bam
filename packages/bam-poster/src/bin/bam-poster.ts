@@ -24,12 +24,15 @@ import { StartupReconciliationError } from '../startup/reconcile.js';
 import { DEFAULT_MAX_MESSAGE_SIZE_BYTES } from '../ingest/size-bound.js';
 
 /**
- * Resolve + load a `.env` file so users don't have to `export` each
+ * Resolve + load a dotenv file so users don't have to `export` each
  * POSTER_* var before running. Resolution order:
- *   1. `POSTER_ENV_FILE` — explicit override (e.g. `POSTER_ENV_FILE=.env.sepolia`).
- *   2. `./.env` in the current working directory.
- *   3. Walk up to find a `.env` at a workspace-like ancestor
- *      (bounded at 5 levels so we don't escape unexpectedly).
+ *   1. `POSTER_ENV_FILE` — explicit override (e.g.
+ *      `POSTER_ENV_FILE=.env.sepolia pnpm dev:poster`).
+ *   2. Walk up (bounded at 5 ancestors) looking for `.env.local`,
+ *      then `.env`, in each directory. `.env.local` wins within a
+ *      directory — consistent with Next.js / Vite conventions and
+ *      matches the root `.gitignore`'s `!.env.*.example` un-ignore
+ *      so `.env.local.example` can be committed as a template.
  *
  * Existing `process.env` values always win — dotenv only fills in
  * variables that aren't already set, matching standard semantics.
@@ -42,10 +45,12 @@ function loadDotenv(): void {
   }
   let dir = process.cwd();
   for (let i = 0; i < 5; i++) {
-    const candidate = path.join(dir, '.env');
-    if (existsSync(candidate)) {
-      dotenvConfig({ path: candidate });
-      return;
+    for (const name of ['.env.local', '.env']) {
+      const candidate = path.join(dir, name);
+      if (existsSync(candidate)) {
+        dotenvConfig({ path: candidate });
+        return;
+      }
     }
     const parent = path.dirname(dir);
     if (parent === dir) return;

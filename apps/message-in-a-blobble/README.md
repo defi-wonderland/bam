@@ -28,9 +28,13 @@ Local development — run both processes with one command:
 pnpm install
 pnpm --filter bam-sdk build
 
-# Configure environment for the demo
+# Configure env for the Poster (workspace root)
+cp .env.local.example .env.local
+# Edit .env.local with Sepolia RPC + signer private key
+
+# Configure env for the demo (Next.js app)
 cp apps/message-in-a-blobble/.env.local.example apps/message-in-a-blobble/.env.local
-# Edit .env.local — set POSTER_URL=http://localhost:8787 (default) and Sepolia values
+# Edit .env.local with Sepolia RPC + WalletConnect project ID
 
 # Run the Poster + demo concurrently
 pnpm dev
@@ -43,7 +47,11 @@ pnpm dev:poster                           # Poster on PORT=8787
 pnpm --filter message-in-a-blobble dev    # Next.js on :3000
 ```
 
-The Poster itself reads its config from env (`POSTER_SIGNER_PRIVATE_KEY`, `POSTER_CHAIN_ID`, `POSTER_BAM_CORE_ADDRESS`, `POSTER_RPC_URL`, `POSTER_ALLOWED_TAGS`). See [`packages/bam-poster/README.md`](../../packages/bam-poster/README.md).
+**Two env files on purpose:**
+- **`.env.local` at the workspace root** — consumed by the `@bam/poster` Node service. The Poster's CLI walks up from its cwd looking for `.env.local` (preferred) or `.env`. Template in `.env.local.example`.
+- **`apps/message-in-a-blobble/.env.local`** — consumed by Next.js (`NEXT_PUBLIC_*` for the browser bundle, plus `POSTER_URL` + `BEACON_API_URL` for the API routes). Template in `apps/message-in-a-blobble/.env.local.example`.
+
+Different processes, different owners. The Poster's vars (`POSTER_*`) only matter in the root file; the demo's vars (`NEXT_PUBLIC_*`, `POSTER_URL`) only in the app file.
 
 ### Environment Variables (demo)
 

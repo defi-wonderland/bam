@@ -61,8 +61,14 @@ describe('bam-poster CLI — SIGTERM graceful shutdown (FU-10)', () => {
     const rpcUrl = `http://127.0.0.1:${rpcAddr.port}`;
 
     const dir = mkdtempSync(path.join(tmpdir(), 'bam-poster-dotenv-'));
+    // Write a conflicting `.env` too — `.env.local` must win in
+    // the loader's in-directory precedence.
     writeFileSync(
       path.join(dir, '.env'),
+      `POSTER_SIGNER_PRIVATE_KEY=0x${'00'.repeat(32)}\n` // malformed; must NOT be used
+    );
+    writeFileSync(
+      path.join(dir, '.env.local'),
       [
         `POSTER_ALLOWED_TAGS=0x${'aa'.repeat(32)}`,
         `POSTER_CHAIN_ID=1`,
