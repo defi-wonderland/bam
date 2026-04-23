@@ -57,12 +57,11 @@ Different processes, different owners. The Poster's vars (`POSTER_*`) only matte
 
 | Variable | Description |
 |----------|-------------|
-| `NEXT_PUBLIC_RPC_URL` | Sepolia execution RPC (Alchemy/Infura) — used by the client-side sync indexer |
+| `NEXT_PUBLIC_RPC_URL` | Sepolia execution RPC (Alchemy/Infura) — used by `/api/blobbles` to query on-chain logs |
 | `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` | WalletConnect project ID for RainbowKit |
 | `POSTER_URL` | URL of a running `@bam/poster` instance (default `http://localhost:8787`) |
 | `POSTER_SIGNER_PRIVATE_KEY` | Poster signer private key — consumed by the separate `@bam/poster` process, **not** by this demo or Vercel. Listed here so a local `.env.local` is self-contained when running `pnpm dev`. |
-| `BEACON_API_URL` | Beacon chain API for blob retrieval |
-| `POSTGRES_URL` | Postgres connection string for the sync indexer's confirmed-history table (SQLite locally when unset) |
+| `BEACON_API_URL` | Beacon chain API for blob retrieval (used by `/api/blobbles/[txHash]` for third-party blob verification) |
 
 ### Production deployment note
 
@@ -78,10 +77,9 @@ Different processes, different owners. The Poster's vars (`POSTER_*`) only matte
 | `/api/poster-status` | GET | Proxies to Poster `GET /status` |
 | `/api/poster-health` | GET | Proxies to Poster `GET /health` |
 | `/api/submitted-batches` | GET | Proxies to Poster `GET /submitted-batches` |
-| `/api/blobbles` | GET | Query `BlobRegistered` events from contract logs |
-| `/api/blobbles/[txHash]` | GET | Fetch and decode blob data |
-| `/api/sync` | GET | Report on-chain vs DB discrepancies |
-| `/api/sync` | POST | Backfill missing blobbles and messages |
+| `/api/confirmed-messages` | GET | Flattens decoded messages out of Poster's submitted batches (source of truth for the "Posted" view) |
+| `/api/blobbles` | GET | Query `BlobBatchRegistered` events from BAM Core, filtered by content tag |
+| `/api/blobbles/[txHash]` | GET | Fetch a blob from the beacon API and decode it independently — third-party verification path |
 
 ## Stack
 

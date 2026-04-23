@@ -14,10 +14,7 @@
     "@rainbow-me/rainbowkit": "^2.2.4",
     "@tanstack/react-query": "^5.62.16",
     "@bam/poster": "workspace:*",
-    "@vercel/postgres": "^0.10.0",
     "bam-sdk": "workspace:*",
-    "c-kzg": "^4.1.0",
-    "better-sqlite3": "^11.7.0",
     "next": "^15.1.4",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
@@ -25,7 +22,6 @@
     "wagmi": "^2.14.11"
   },
   "devDependencies": {
-    "@types/better-sqlite3": "^7.6.12",
     "@types/node": "^20.11.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",

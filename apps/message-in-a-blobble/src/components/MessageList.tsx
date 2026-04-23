@@ -3,7 +3,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { AddressLink } from '@/components/AddressLink';
-import { SyncStatus } from '@/components/SyncStatus';
 
 /**
  * Post-migration, the UI renders two independent data sources:
@@ -128,7 +127,6 @@ export function MessageList() {
       </button>
       {showIndexed && (
         <div className="mt-3 space-y-4 pl-4 border-l-2 border-sand-200">
-          <SyncStatus />
           {pending.length > 0 && (
             <div>
               <h4 className="text-sm font-semibold text-sand-600 mb-2">Pending ({pending.length})</h4>

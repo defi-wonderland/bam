@@ -44,6 +44,14 @@ export function OnChainBlobbles() {
   const { data: blobbles = [], isLoading } = useQuery({
     queryKey: ['blobbles'],
     queryFn: fetchBlobbles,
+    // Poll every 30 s so a batch submitted by the Poster shows up
+    // without a page refresh. `/api/blobbles` does eth_getLogs +
+    // one eth_getBlock per new event, so 30 s keeps RPC usage modest
+    // for what's a background "audit" view. The `queryClient
+    // .invalidateQueries({ queryKey: ['blobbles'] })` call in
+    // PostBlobbleButton's flush-success handler still forces an
+    // immediate refetch after a manual flush.
+    refetchInterval: 30_000,
   });
 
   return (
