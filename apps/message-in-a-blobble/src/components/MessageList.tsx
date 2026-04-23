@@ -3,32 +3,25 @@
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { AddressLink } from '@/components/AddressLink';
-import { SyncStatus } from '@/components/SyncStatus';
+import {
+  MESSAGES_QUERY_KEY,
+  MESSAGES_REFETCH_MS,
+  fetchMessages,
+  type DisplayMessage,
+} from '@/lib/messages';
 
-interface Message {
-  id: number;
-  message_id: string;
-  author: string;
-  timestamp: number;
-  content: string;
-  status: 'pending' | 'posted';
-  blobble_id: string | null;
-  tx_hash: string | null;
-  block_number: number | null;
-  created_at: string;
-}
-
-async function fetchMessages(): Promise<Message[]> {
-  const res = await fetch('/api/messages');
-  const data = await res.json();
-  return data.messages || [];
-}
+/**
+ * Renders the merged pending + confirmed message list. Data + its
+ * polling cadence live in `lib/messages.ts` so `PostBlobbleButton`
+ * shares the same react-query cache and we don't double-poll the
+ * same two endpoints.
+ */
 
 export function MessageList() {
   const { data: messages = [], isLoading } = useQuery({
-    queryKey: ['messages'],
+    queryKey: MESSAGES_QUERY_KEY,
     queryFn: fetchMessages,
-    refetchInterval: 5000,
+    refetchInterval: MESSAGES_REFETCH_MS,
   });
 
   const [showIndexed, setShowIndexed] = useState(false);
@@ -64,14 +57,13 @@ export function MessageList() {
         </span>
         <span className="font-medium">Indexed blobbles</span>
         <span className="text-sand-400 font-normal">
-          ({messages.length} message{messages.length !== 1 ? 's' : ''} in DB
+          ({messages.length} message{messages.length !== 1 ? 's' : ''} in view
           {pending.length > 0 ? `, ${pending.length} pending` : ''}
           {posted.length > 0 ? `, ${posted.length} posted` : ''})
         </span>
       </button>
       {showIndexed && (
         <div className="mt-3 space-y-4 pl-4 border-l-2 border-sand-200">
-          <SyncStatus />
           {pending.length > 0 && (
             <div>
               <h4 className="text-sm font-semibold text-sand-600 mb-2">Pending ({pending.length})</h4>
@@ -98,7 +90,7 @@ export function MessageList() {
   );
 }
 
-function MessageCard({ message }: { message: Message }) {
+function MessageCard({ message }: { message: DisplayMessage }) {
   const time = new Date(message.timestamp * 1000).toLocaleTimeString();
 
   return (
