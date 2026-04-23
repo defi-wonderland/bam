@@ -48,8 +48,20 @@ async function walkSource(file, seen = new Set()) {
     for (const ref of refs) {
       if (ref.startsWith('.')) {
         const resolved = path.resolve(path.dirname(file), ref);
-        for (const suffix of ['.ts', '.tsx', '.js', '.mjs', '/index.ts', '/index.js']) {
-          const candidate = resolved + suffix;
+        // Try the path as-is first — imports that already carry an
+        // explicit extension (`./foo.ts`, `./foo.js`) should match the
+        // resolved path directly rather than get `.ts` appended and
+        // fall through to "not found."
+        const candidates = [
+          resolved,
+          resolved + '.ts',
+          resolved + '.tsx',
+          resolved + '.js',
+          resolved + '.mjs',
+          resolved + '/index.ts',
+          resolved + '/index.js',
+        ];
+        for (const candidate of candidates) {
           if (await exists(candidate)) {
             await walkSource(candidate, seen);
             break;

@@ -52,7 +52,7 @@ The Poster itself reads its config from env (`POSTER_SIGNER_PRIVATE_KEY`, `POSTE
 | `NEXT_PUBLIC_RPC_URL` | Sepolia execution RPC (Alchemy/Infura) — used by the client-side sync indexer |
 | `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` | WalletConnect project ID for RainbowKit |
 | `POSTER_URL` | URL of a running `@bam/poster` instance (default `http://localhost:8787`) |
-| `POSTER_PRIVATE_KEY` | Poster signer private key — consumed by the separate `@bam/poster` process, **not** by Vercel |
+| `POSTER_SIGNER_PRIVATE_KEY` | Poster signer private key — consumed by the separate `@bam/poster` process, **not** by this demo or Vercel. Listed here so a local `.env.local` is self-contained when running `pnpm dev`. |
 | `BEACON_API_URL` | Beacon chain API for blob retrieval |
 | `POSTGRES_URL` | Postgres connection string for the sync indexer's confirmed-history table (SQLite locally when unset) |
 

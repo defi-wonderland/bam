@@ -16,7 +16,6 @@ import {
   encodeFunctionData,
   http,
   parseGwei,
-  toBlobs,
   zeroAddress,
   type Kzg,
   type PublicClient,
@@ -79,15 +78,32 @@ export interface BuildAndSubmitBundle {
  * classifying an arbitrary error without going through the full
  * submission flow.
  *
- * Heuristic: a thrown message matching /revert/i or /invalid/i is a
+ * Heuristic: a thrown message matching one of the patterns below is a
  * structural problem (ABI mismatch, contract revert, malformed tx) —
  * retrying won't help. Everything else (RPC down, gas too high,
  * transient nonce conflict) is retryable.
+ *
+ * The patterns were deliberately narrowed after a review flagged that
+ * a bare /invalid/i also matches common transient errors like
+ * "invalid nonce" (node hasn't caught up) or "invalid JSON-RPC
+ * response" (network blip). Prefer false-retryable (we pay one more
+ * round-trip) over false-permanent (we halt the worker forever).
  */
+const PERMANENT_ERROR_PATTERNS: readonly RegExp[] = [
+  /execution reverted/i,
+  /invalid opcode/i,
+  /invalid signature/i,
+  /abi\b/i,
+  /contract does not exist/i,
+  /out of gas/i,
+];
+
 export function classifySubmissionError(err: unknown): SubmitOutcome {
   const msg = err instanceof Error ? err.message : String(err);
-  if (/revert/i.test(msg) || /invalid/i.test(msg)) {
-    return { kind: 'permanent', detail: 'submission_failed' };
+  for (const pattern of PERMANENT_ERROR_PATTERNS) {
+    if (pattern.test(msg)) {
+      return { kind: 'permanent', detail: 'submission_failed' };
+    }
   }
   return { kind: 'retryable', detail: 'submission_failed' };
 }
@@ -152,10 +168,16 @@ export async function buildAndSubmitWithViem(
         args: [0n, 0, 4096, contentTag, decoder, sigRegistry],
       });
 
+      // Send the EXACT blob we committed to. bam-sdk's `createBlob`
+      // and viem's `toBlobs` pack bytes into field elements
+      // differently (viem adds a terminator byte; the SDK leaves
+      // trailing FEs zero). If we let viem re-encode, the on-chain
+      // versioned hash wouldn't match the `versionedHash` we stored
+      // and returned to callers. Pass the SDK-encoded blob directly.
       const txHash = (await transport.sendBlobTransaction({
         to: opts.bamCoreAddress,
         data,
-        blobs: toBlobs({ data: batch.data }),
+        blobs: [blob],
         maxFeePerBlobGas: parseGwei(gwei),
         kzg,
       })) as Bytes32;

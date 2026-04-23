@@ -359,3 +359,42 @@ describe('HTTP transport — bearer-token auth (FU-12)', () => {
     }
   });
 });
+
+describe('HTTP transport — query validation (cubic review)', () => {
+  it('rejects a malformed sinceBlock with 400 instead of 500', async () => {
+    const h = await startHarness();
+    try {
+      const res = await fetch(
+        `${h.baseUrl}/submitted-batches?sinceBlock=abc`
+      );
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error: string; field: string };
+      expect(body.error).toBe('invalid_query');
+      expect(body.field).toBe('sinceBlock');
+    } finally {
+      await h.close();
+    }
+  });
+
+  it('rejects a malformed limit with 400', async () => {
+    const h = await startHarness();
+    try {
+      const res = await fetch(`${h.baseUrl}/submitted-batches?limit=abc`);
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error: string; field: string };
+      expect(body.field).toBe('limit');
+    } finally {
+      await h.close();
+    }
+  });
+
+  it('accepts a well-formed sinceBlock', async () => {
+    const h = await startHarness();
+    try {
+      const res = await fetch(`${h.baseUrl}/submitted-batches?sinceBlock=100`);
+      expect(res.status).toBe(200);
+    } finally {
+      await h.close();
+    }
+  });
+});

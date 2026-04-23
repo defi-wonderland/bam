@@ -57,14 +57,12 @@ describe('error hygiene — stable rejection codes only (G-7)', () => {
         let match: RegExpExecArray | null;
         while ((match = reasonLiteralPattern.exec(line)) !== null) {
           const value = match[1];
-          // `BackoffConfig` uses `reason: string` type-only — ignore
-          // string-typed signature contexts (those lines don't have
-          // quoted string literals, so the regex won't fire).
-          // Health reason strings (e.g. 'wallet balance low') are NOT
-          // PosterRejection values and are allowed — but we only
-          // expect them in surfaces/health.ts, which is a readHealth
-          // construction, not a rejection.
-          if (value === 'wallet balance low' || value === 'RPC slow') continue; // test fixtures
+          // Template literals with interpolations (`${…}`) are
+          // unambiguously NOT `PosterRejection` values — that enum is
+          // a closed set of static strings. Diagnostic strings on the
+          // `Health` surface (e.g. `tag 0x… has failed 7 consecutive
+          // submissions`) are textual and allowed to interpolate.
+          if (value.includes('${')) continue;
           if (!(POSTER_REJECTIONS as readonly string[]).includes(value)) {
             violations.push({ file, literal: value, line: i + 1 });
           }

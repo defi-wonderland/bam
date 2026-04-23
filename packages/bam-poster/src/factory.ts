@@ -188,19 +188,48 @@ export async function createPoster(
     let started = false;
     let stopped = false;
 
-    const aggregateHealth = (): HealthState => {
+    interface HealthSnapshot {
+      state: HealthState;
+      reason?: string;
+    }
+
+    /**
+     * Collapse per-tag loop states into a single health snapshot.
+     * When any loop is non-ok we also surface a short reason so the
+     * `/health` consumer can tell what tripped (e.g. "tag
+     * 0xabc… has failed 7 consecutive submissions"). Strictly textual —
+     * no structured fields, no PII.
+     */
+    const aggregateHealth = (): HealthSnapshot => {
       let worst: HealthState = 'ok';
-      for (const l of loops.values()) {
+      let worstTag: Bytes32 | null = null;
+      let worstAttempts = 0;
+      for (const [tag, l] of loops) {
         const s = l.healthState();
-        if (s === 'unhealthy') return 'unhealthy';
-        if (s === 'degraded') worst = 'degraded';
+        if (s === 'unhealthy') {
+          return {
+            state: 'unhealthy',
+            reason: `tag ${tag} has failed ${l.attempts()} consecutive submissions`,
+          };
+        }
+        if (s === 'degraded' && worst === 'ok') {
+          worst = 'degraded';
+          worstTag = tag;
+          worstAttempts = l.attempts();
+        }
       }
-      return worst;
+      if (worst === 'degraded' && worstTag !== null) {
+        return {
+          state: 'degraded',
+          reason: `tag ${worstTag} has failed ${worstAttempts} consecutive submissions`,
+        };
+      }
+      return { state: 'ok' };
     };
 
     const internal: InternalPoster = {
       async submit(message: Uint8Array, hint?: SubmitHint): Promise<SubmitResult> {
-        const state = aggregateHealth();
+        const { state } = aggregateHealth();
         if (state === 'unhealthy') {
           return { accepted: false, reason: 'unhealthy' };
         }
@@ -223,8 +252,11 @@ export async function createPoster(
         });
       },
       async health(): Promise<Health> {
+        const snap = aggregateHealth();
         return readHealth({
-          submissionState: aggregateHealth(),
+          submissionState: snap.state,
+          reason: snap.reason,
+          since: snap.state === 'ok' ? undefined : now(),
         });
       },
       async start(): Promise<void> {

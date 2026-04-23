@@ -22,11 +22,21 @@ The right place to fix this is the SDK: apps should put whatever structured fiel
 
 1. **ERC-primitive functions in `bam-sdk`.** Replace v1-Message-shaped hashers with signatures that take the ERC triple directly:
    ```ts
+   // keccak256(sender || nonce || contents)
    computeMessageHash(sender: Address, nonce: bigint, contents: Uint8Array): Bytes32
+
+   // keccak256(sender || nonce || contentHash) where contentHash = keccak256(contents).
+   // Matches ERC-8180's §Types: messageId is defined over the hash of contents,
+   // not the raw bytes, so two calls with different contents but identical
+   // (sender, nonce) still hash to distinct message ids.
    computeMessageId(sender: Address, nonce: bigint, contents: Uint8Array): Bytes32
+
+   // keccak256(domain || messageHash) where domain = keccak256("ERC-BAM.v1" || chainId)
    computeSignedHash(messageHash: Bytes32, chainId: number): Bytes32
    ```
-   All three match the ERC formulas exactly.
+   All three match the ERC formulas exactly. Internally `computeMessageId`
+   derives the `contentHash = keccak256(contents)` and then hashes the
+   triple — callers pass raw `contents` and the SDK handles the hash.
 2. **`BAMMessage` as the canonical public shape.** `{ sender: Address, nonce: bigint, contents: Uint8Array }`. Already exists in `types.ts`; promote it to the primary export. Drop the v1-shaped `Message` type (`{ author, timestamp, nonce, content }`) from the public surface.
 3. **Protocol-level batch codec.** `encodeBatch(messages: BAMMessage[], signatures: Uint8Array[]): Uint8Array` and the matching `decodeBatch`. Simpler layout: `(sender || nonce || contents_len || contents || signature)` concatenation with a header, ZSTD-compressed. No per-author tables, no timestamp-delta tricks, no magic bytes — those were v1-social optimizations. Apps that want richer packing provide their own codec via a pluggable interface.
 4. **Signer helpers aligned with the ERC.** `signECDSA` takes a `signedHash` and signs it verbatim; no more "hash a structured message, then personal-sign." Callers compose `computeMessageHash` → `computeSignedHash` → `signECDSA` explicitly.

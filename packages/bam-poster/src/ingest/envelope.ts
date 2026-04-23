@@ -100,15 +100,17 @@ function isAddress(v: unknown): v is Address {
 function parseNonce(v: unknown): bigint | null {
   if (typeof v === 'number' && Number.isInteger(v) && v >= 0) return BigInt(v);
   if (typeof v === 'string') {
-    if (/^(0x)?[0-9a-fA-F]+$/.test(v)) {
+    // Decimal first: "10" is ten, not sixteen. Only treat as hex when
+    // the `0x` prefix is explicit.
+    if (/^[0-9]+$/.test(v)) return BigInt(v);
+    if (/^0x[0-9a-fA-F]+$/.test(v)) {
       try {
-        const n = BigInt(v.startsWith('0x') ? v : `0x${v}`);
+        const n = BigInt(v);
         if (n >= 0n) return n;
       } catch {
         return null;
       }
     }
-    if (/^[0-9]+$/.test(v)) return BigInt(v);
   }
   return null;
 }

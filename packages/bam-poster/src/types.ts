@@ -58,6 +58,14 @@ export interface DecodedMessage {
   messageId: Bytes32;
   /** Original raw bytes as presented to the ingest boundary (size-bound + dedup). */
   raw: Uint8Array;
+  /**
+   * Poster-side ingest time, in ms since epoch. Populated for messages
+   * drawn from the pool via the submission loop; `undefined` for a
+   * fresh decode that hasn't been inserted yet. Used by batch policies
+   * for age-based triggers — the author-signed `timestamp` is
+   * caller-controlled and must not drive submission decisions.
+   */
+  ingestedAt?: number;
 }
 
 // ═══════════════════════════════════════════════════════════════════════

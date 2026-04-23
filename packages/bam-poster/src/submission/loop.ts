@@ -197,5 +197,6 @@ function pendingRowToDecoded(row: StoreTxnPendingRow): DecodedMessage {
     signature: row.signature,
     messageId: row.messageId,
     raw: row.content,
+    ingestedAt: row.ingestedAt,
   };
 }

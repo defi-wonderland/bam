@@ -34,25 +34,34 @@ function bytesToHex(b: Uint8Array): string {
  * otherwise tie up the socket even though we already know we'll
  * reject. Returns `'too_large'` (after responding + destroying) or
  * the full buffer once the client's body has completed.
+ *
+ * Qodo review: also listens for `aborted` + `close` so a client
+ * disconnect mid-upload resolves the promise immediately rather
+ * than leaving the handler hanging (slowloris-ish concern).
  */
 async function readBodyBounded(
   req: IncomingMessage,
   res: ServerResponse,
   cap: number
-): Promise<Buffer | 'too_large'> {
+): Promise<Buffer | 'too_large' | 'aborted'> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     let total = 0;
     let settled = false;
 
+    const cleanup = (): void => {
+      req.removeListener('data', onData);
+      req.removeListener('end', onEnd);
+      req.removeListener('error', onError);
+      req.removeListener('aborted', onAborted);
+      req.removeListener('close', onClose);
+    };
     const onData = (c: Buffer): void => {
       if (settled) return;
       total += c.length;
       if (total > cap) {
         settled = true;
-        req.removeListener('data', onData);
-        req.removeListener('end', onEnd);
-        req.removeListener('error', onError);
+        cleanup();
         // Respond with 413 immediately + sever the socket so the
         // peer's upload stops rather than draining to completion.
         if (!res.headersSent) {
@@ -71,17 +80,35 @@ async function readBodyBounded(
     const onEnd = (): void => {
       if (settled) return;
       settled = true;
+      cleanup();
       resolve(Buffer.concat(chunks));
     };
     const onError = (err: unknown): void => {
       if (settled) return;
       settled = true;
+      cleanup();
       reject(err);
+    };
+    const onAborted = (): void => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve('aborted');
+    };
+    const onClose = (): void => {
+      // `close` fires after every request — only treat as abort if
+      // the stream hasn't ended cleanly.
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve('aborted');
     };
 
     req.on('data', onData);
     req.on('end', onEnd);
     req.on('error', onError);
+    req.on('aborted', onAborted);
+    req.on('close', onClose);
   });
 }
 
@@ -89,6 +116,10 @@ export const submitHandler: Handler = async (req, res, ctx) => {
   const body = await readBodyBounded(req, res, ctx.maxMessageSizeBytes);
   if (body === 'too_large') {
     // Response already sent + socket destroyed inside readBodyBounded.
+    return;
+  }
+  if (body === 'aborted') {
+    // Client disconnected mid-upload. Nothing to respond to.
     return;
   }
   const url = new URL(req.url ?? '/', 'http://local');
@@ -123,10 +154,31 @@ export const submittedHandler: Handler = async (req, res, ctx) => {
   const contentTag = url.searchParams.get('contentTag') ?? undefined;
   const limitStr = url.searchParams.get('limit');
   const sinceBlockStr = url.searchParams.get('sinceBlock');
+
+  let sinceBlock: bigint | undefined;
+  if (sinceBlockStr !== null && sinceBlockStr !== '') {
+    // Validate before handing to BigInt — a malformed value (e.g.
+    // `?sinceBlock=abc`) would throw SyntaxError and bubble up as a
+    // 500. Callers get a controlled 400 with a stable shape instead.
+    if (!/^[0-9]+$/.test(sinceBlockStr)) {
+      return sendJson(res, 400, { error: 'invalid_query', field: 'sinceBlock' });
+    }
+    sinceBlock = BigInt(sinceBlockStr);
+  }
+
+  let limit: number | undefined;
+  if (limitStr !== null && limitStr !== '') {
+    const n = Number(limitStr);
+    if (!Number.isInteger(n) || n < 0) {
+      return sendJson(res, 400, { error: 'invalid_query', field: 'limit' });
+    }
+    limit = n;
+  }
+
   const batches = await ctx.poster.listSubmittedBatches({
     contentTag: contentTag as `0x${string}` | undefined,
-    limit: limitStr ? Number(limitStr) : undefined,
-    sinceBlock: sinceBlockStr ? BigInt(sinceBlockStr) : undefined,
+    limit,
+    sinceBlock,
   });
   return sendJson(res, 200, { batches });
 };

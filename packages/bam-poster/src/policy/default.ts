@@ -75,13 +75,21 @@ export function defaultBatchPolicy(
       }
 
       // Age trigger: oldest picked message has been pending too long.
-      // Callers set `ingestedAt` on the `DecodedMessage` shim supplied
-      // to the policy; we use the message's timestamp as a fallback
-      // (*1000 for seconds → ms) but the runtime wires ingestedAt in
-      // via `PoolView.list`'s return of DecodedMessage.
-      const oldestIngestMs = picked[0].timestamp * 1000;
-      const ageMs = now.getTime() - oldestIngestMs;
-      if (ageMs >= ageTriggerMs) return { msgs: picked };
+      // Use `ingestedAt` (Poster-side, not caller-controlled); the
+      // author-signed `timestamp` is attacker-controlled and would let
+      // a malicious client set a far-future timestamp to prevent the
+      // age trigger from ever firing for their batch.
+      //
+      // `ingestedAt` is absent on a freshly-decoded message (not yet in
+      // the pool). The submission-loop path always reads rows out of
+      // the pool before handing them here, so it's populated in
+      // practice; if it's missing, skip the age trigger rather than
+      // falling back to the signed timestamp.
+      const oldestIngestMs = picked[0].ingestedAt;
+      if (typeof oldestIngestMs === 'number') {
+        const ageMs = now.getTime() - oldestIngestMs;
+        if (ageMs >= ageTriggerMs) return { msgs: picked };
+      }
 
       // Count trigger.
       if (countTrigger > 0 && picked.length >= countTrigger) {

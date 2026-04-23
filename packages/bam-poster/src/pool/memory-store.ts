@@ -44,8 +44,31 @@ export class MemoryPosterStore implements PosterStore {
 
   async withTxn<T>(fn: (txn: StoreTxn) => Promise<T>): Promise<T> {
     return this.lock.run(async () => {
+      // Snapshot every backing map at txn start. On a thrown callback
+      // we restore — matching the DB adapters' ROLLBACK semantics so
+      // the in-memory store doesn't silently retain partial writes.
+      // Shallow copy: row objects themselves are treated as immutable
+      // by the adapter (every setter stores a fresh object).
+      const snapshot = {
+        rows: new Map(this.pending.rows),
+        tagSeq: new Map(this.pending.tagSeq),
+        nonces: new Map(this.nonces),
+        submitted: new Map(this.submitted),
+      };
       const txn = this.makeTxn();
-      return fn(txn);
+      try {
+        return await fn(txn);
+      } catch (err) {
+        this.pending.rows.clear();
+        for (const [k, v] of snapshot.rows) this.pending.rows.set(k, v);
+        this.pending.tagSeq.clear();
+        for (const [k, v] of snapshot.tagSeq) this.pending.tagSeq.set(k, v);
+        this.nonces.clear();
+        for (const [k, v] of snapshot.nonces) this.nonces.set(k, v);
+        this.submitted.clear();
+        for (const [k, v] of snapshot.submitted) this.submitted.set(k, v);
+        throw err;
+      }
     });
   }
 
@@ -143,12 +166,14 @@ export class MemoryPosterStore implements PosterStore {
         const results: StoreTxnSubmittedRow[] = [];
         for (const row of submitted.values()) {
           if (query.contentTag !== undefined && row.contentTag !== query.contentTag) continue;
-          if (
-            query.sinceBlock !== undefined &&
-            row.blockNumber !== null &&
-            BigInt(row.blockNumber) < query.sinceBlock
-          )
-            continue;
+          if (query.sinceBlock !== undefined) {
+            // Rows without a blockNumber haven't landed on chain yet
+            // and therefore aren't "since" any block. Exclude them
+            // from sinceBlock-filtered queries to match the SQL
+            // adapters' semantics.
+            if (row.blockNumber === null) continue;
+            if (BigInt(row.blockNumber) < query.sinceBlock) continue;
+          }
           results.push(cloneSubmitted(row));
         }
         // Newest first by submittedAt.

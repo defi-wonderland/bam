@@ -76,4 +76,23 @@ describe('RateLimiter', () => {
     expect(DEFAULT_RATE_LIMIT.windowMs).toBeGreaterThan(0);
     expect(DEFAULT_RATE_LIMIT.maxPerWindow).toBeGreaterThan(0);
   });
+
+  it('sweeps stale entries so tracked-count stays bounded (cubic review)', () => {
+    const clock = new FakeClock();
+    const rl = new RateLimiter({ windowMs: 1000, maxPerWindow: 1 }, clock.fn());
+    // 1000 unique addresses submit once each.
+    for (let i = 0; i < 1000; i++) {
+      const addr = ('0x' + i.toString(16).padStart(40, '0')) as Address;
+      rl.check(addr);
+    }
+    expect(rl._trackedCount()).toBe(1000);
+    // Advance past the window so every entry's last timestamp is
+    // stale, then trigger a check — the sweep runs at most once per
+    // window and drops everything.
+    clock.tick(1_500);
+    const fresh = ('0xff'.padEnd(42, '0')) as Address;
+    rl.check(fresh);
+    // Only the fresh address remains.
+    expect(rl._trackedCount()).toBe(1);
+  });
 });

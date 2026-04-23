@@ -25,6 +25,8 @@ export const DEFAULT_RATE_LIMIT: RateLimitConfig = {
  */
 export class RateLimiter {
   private readonly timestamps = new Map<Address, number[]>();
+  /** Last time a cleanup sweep dropped empty / stale entries. */
+  private lastSweepMs = 0;
 
   constructor(
     private readonly config: RateLimitConfig,
@@ -46,6 +48,22 @@ export class RateLimiter {
     }
     history.length = writeIdx;
 
+    // Cubic review: a Poster that sees many unique signer addresses
+    // would grow the map unboundedly — entries whose history is now
+    // empty (no submission within the window) are never removed.
+    // Sweep at most once per window to drop them. Cost: O(|map|) on
+    // the cleanup call; amortized O(1) per check.
+    if (now - this.lastSweepMs >= this.config.windowMs) {
+      for (const [addr, hist] of this.timestamps) {
+        // Drop any entry whose *last* timestamp is already outside the
+        // window — nothing useful remains.
+        if (hist.length === 0 || hist[hist.length - 1] <= windowStart) {
+          this.timestamps.delete(addr);
+        }
+      }
+      this.lastSweepMs = now;
+    }
+
     if (history.length >= this.config.maxPerWindow) {
       this.timestamps.set(normalized, history);
       return { ok: false, reason: 'rate_limited' };
@@ -65,5 +83,11 @@ export class RateLimiter {
     const history = this.timestamps.get(normalized);
     if (!history || history.length === 0) return;
     history.pop();
+    if (history.length === 0) this.timestamps.delete(normalized);
+  }
+
+  /** Test-only introspection: count of tracked signer addresses. */
+  _trackedCount(): number {
+    return this.timestamps.size;
   }
 }

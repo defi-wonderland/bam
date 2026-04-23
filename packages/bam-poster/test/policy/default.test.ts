@@ -47,7 +47,7 @@ describe('defaultBatchPolicy — triggers', () => {
 
   it('fires on size trigger', () => {
     const policy = defaultBatchPolicy({
-      sizeTriggerRatio: 0.01, // very low, so any selection triggers
+      sizeTriggerRatio: 0.0001, // threshold ≈ 13 bytes — any selected batch beats it
       ageTriggerMs: 10 ** 9,
       countTrigger: 10 ** 9,
     });
@@ -62,15 +62,54 @@ describe('defaultBatchPolicy — triggers', () => {
       ageTriggerMs: 1000,
       countTrigger: 10 ** 9,
     });
+    const ingestedAt = 1_700_000_000_000;
+    const now = new Date(ingestedAt + 5000);
+    const res = policy.select(
+      TAG,
+      fixedPool([msg({ ingestedAt })]),
+      DEFAULT_BLOB_CAPACITY_BYTES,
+      now
+    );
+    expect(res).not.toBeNull();
+  });
+
+  it('age trigger does NOT fire off the author-signed timestamp (FU-review-cubic)', () => {
+    const policy = defaultBatchPolicy({
+      sizeTriggerRatio: 0.999,
+      ageTriggerMs: 1000,
+      countTrigger: 10 ** 9,
+    });
+    // Author claims a timestamp far in the past, but the message was
+    // ingested now — age trigger should NOT fire.
+    const now = new Date(1_700_000_000_000);
+    const ingestedAt = now.getTime();
+    const res = policy.select(
+      TAG,
+      fixedPool([msg({ timestamp: 1, ingestedAt })]),
+      DEFAULT_BLOB_CAPACITY_BYTES,
+      now
+    );
+    expect(res).toBeNull();
+  });
+
+  it('age trigger does NOT fire when ingestedAt is absent (malformed pool view)', () => {
+    const policy = defaultBatchPolicy({
+      sizeTriggerRatio: 0.999,
+      ageTriggerMs: 1000,
+      countTrigger: 10 ** 9,
+    });
     const ts = 1_700_000_000;
-    const now = new Date(ts * 1000 + 5000);
+    const now = new Date(ts * 1000 + 10_000);
+    // No ingestedAt — the submission loop always populates it from
+    // pool rows, but if it's missing, the age trigger must not fall
+    // back to the author-signed `timestamp` (which is attacker-set).
     const res = policy.select(
       TAG,
       fixedPool([msg({ timestamp: ts })]),
       DEFAULT_BLOB_CAPACITY_BYTES,
       now
     );
-    expect(res).not.toBeNull();
+    expect(res).toBeNull();
   });
 
   it('fires on count trigger', () => {

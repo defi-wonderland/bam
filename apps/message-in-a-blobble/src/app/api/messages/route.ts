@@ -43,7 +43,16 @@ export async function GET(): Promise<NextResponse> {
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
-  const body = await request.json();
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    // Invalid JSON → controlled 400 instead of an unhandled 500.
+    return NextResponse.json(
+      { accepted: false, reason: 'malformed' },
+      { status: 400 }
+    );
+  }
   const envelope = {
     contentTag: MESSAGE_IN_A_BLOBBLE_TAG,
     message: body,

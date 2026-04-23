@@ -246,3 +246,60 @@ describe('IngestPipeline — malformed envelopes', () => {
     if (!res.accepted) expect(res.reason).toBe('malformed');
   });
 });
+
+describe('IngestPipeline — nonce parsing (cubic review)', () => {
+  it('parses decimal-string nonces as decimal, not hex', async () => {
+    const { pipeline, store } = makePipeline();
+    // Sign for nonce 10 (decimal ten), serialize nonce as the
+    // string "10" (what most JSON producers will do).
+    const privateKey = generateECDSAPrivateKey();
+    const author = deriveAddress(privateKey);
+    const timestamp = 1_700_000_000;
+    const nonce = 10;
+    const content = 'ten';
+    const hash = computeMessageHash({ author, timestamp, nonce, content });
+    const sig = await signECDSA(privateKey, bytesToHex(hash) as Bytes32);
+    const env = {
+      contentTag: TAG,
+      message: {
+        author,
+        timestamp,
+        nonce: '10', // decimal string — must parse as 10, not 16
+        content,
+        signature: bytesToHex(sig),
+      },
+    };
+    const raw = new TextEncoder().encode(JSON.stringify(env));
+    const res = await pipeline.ingest(raw);
+    expect(res.accepted).toBe(true);
+    const pending = await store.withTxn(async (txn) => txn.listPendingByTag(TAG));
+    expect(pending).toHaveLength(1);
+    expect(pending[0].nonce).toBe(10n);
+  });
+
+  it('parses 0x-prefixed hex strings as hex', async () => {
+    const { pipeline, store } = makePipeline();
+    const privateKey = generateECDSAPrivateKey();
+    const author = deriveAddress(privateKey);
+    const timestamp = 1_700_000_000;
+    const nonce = 16; // 0x10
+    const content = 'sixteen';
+    const hash = computeMessageHash({ author, timestamp, nonce, content });
+    const sig = await signECDSA(privateKey, bytesToHex(hash) as Bytes32);
+    const env = {
+      contentTag: TAG,
+      message: {
+        author,
+        timestamp,
+        nonce: '0x10', // explicit hex
+        content,
+        signature: bytesToHex(sig),
+      },
+    };
+    const raw = new TextEncoder().encode(JSON.stringify(env));
+    const res = await pipeline.ingest(raw);
+    expect(res.accepted).toBe(true);
+    const pending = await store.withTxn(async (txn) => txn.listPendingByTag(TAG));
+    expect(pending[0].nonce).toBe(16n);
+  });
+});

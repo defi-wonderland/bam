@@ -104,17 +104,41 @@ describe('classifySubmissionError', () => {
       kind: 'permanent',
       detail: 'submission_failed',
     });
-    expect(classifySubmissionError(new Error('Reverted with reason'))).toEqual({
+    expect(classifySubmissionError(new Error('execution reverted with reason'))).toEqual({
       kind: 'permanent',
       detail: 'submission_failed',
     });
   });
 
-  it('classifies /invalid/i-shaped errors as permanent', () => {
-    expect(classifySubmissionError(new Error('invalid sender nonce'))).toEqual({
-      kind: 'permanent',
-      detail: 'submission_failed',
-    });
+  it('classifies specific permanent patterns as permanent', () => {
+    for (const msg of [
+      'invalid opcode',
+      'invalid signature on tx',
+      'ABI encoding error',
+      'contract does not exist at 0x…',
+      'out of gas',
+    ]) {
+      expect(classifySubmissionError(new Error(msg))).toEqual({
+        kind: 'permanent',
+        detail: 'submission_failed',
+      });
+    }
+  });
+
+  it('does NOT treat transient "invalid …" errors as permanent (cubic review)', () => {
+    // These all contain the word "invalid" but are transient / retryable
+    // (node sync lag, network blip). Narrowed patterns must let them
+    // fall through to retryable rather than halt the worker forever.
+    for (const msg of [
+      'invalid nonce',
+      'invalid JSON-RPC response',
+      'invalid argument 0: block not found',
+    ]) {
+      expect(classifySubmissionError(new Error(msg))).toEqual({
+        kind: 'retryable',
+        detail: 'submission_failed',
+      });
+    }
   });
 
   it('classifies transient / network errors as retryable', () => {
@@ -133,7 +157,7 @@ describe('classifySubmissionError', () => {
   });
 
   it('handles non-Error thrown values', () => {
-    expect(classifySubmissionError('revert')).toEqual({
+    expect(classifySubmissionError('execution reverted')).toEqual({
       kind: 'permanent',
       detail: 'submission_failed',
     });
