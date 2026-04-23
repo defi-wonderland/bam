@@ -34,21 +34,44 @@ export interface PosterResponse {
   contentType: string;
 }
 
+/**
+ * Default request timeout for proxying to the Poster. The Poster's
+ * own surfaces are cheap (SQLite/Postgres reads + /health), so a
+ * connection that accepts but stalls is almost certainly a sign the
+ * Poster is wedged — failing fast beats pinning a Next.js route
+ * handler (and its platform-level timeout) waiting.
+ */
+const DEFAULT_POSTER_TIMEOUT_MS = 8_000;
+
 async function rawFetch(
   method: 'GET' | 'POST',
   path: string,
-  init?: { body?: BodyInit; envUrl?: string; signal?: AbortSignal }
+  init?: { body?: BodyInit; envUrl?: string; signal?: AbortSignal; timeoutMs?: number }
 ): Promise<PosterResponse> {
   const base = resolvePosterUrl(init?.envUrl);
   const url = `${base}${path}`;
+  // Compose caller's AbortSignal with a timeout signal so a slow Poster
+  // doesn't hold the route handler open indefinitely. `AbortSignal.any`
+  // + `AbortSignal.timeout` are supported in every runtime the demo
+  // targets (Node ≥ 20, modern browsers).
+  const timeoutMs = init?.timeoutMs ?? DEFAULT_POSTER_TIMEOUT_MS;
+  const timeoutSignal = AbortSignal.timeout(timeoutMs);
+  const signal = init?.signal
+    ? AbortSignal.any([init.signal, timeoutSignal])
+    : timeoutSignal;
   let res: Response;
   try {
     res = await fetch(url, {
       method,
       body: init?.body,
-      signal: init?.signal,
+      signal,
     });
   } catch (err) {
+    if (err instanceof Error && err.name === 'TimeoutError') {
+      throw new PosterUnreachableError(
+        `poster did not respond within ${timeoutMs}ms`
+      );
+    }
     throw new PosterUnreachableError(
       err instanceof Error ? err.message : 'unreachable'
     );

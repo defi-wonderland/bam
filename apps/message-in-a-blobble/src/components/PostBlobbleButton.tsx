@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
+import { MESSAGE_IN_A_BLOBBLE_TAG } from '@/lib/constants';
 
 /**
  * Post-migration, the Poster submits autonomously — its per-tag
@@ -109,12 +110,21 @@ export function PostBlobbleButton() {
       queryClient.invalidateQueries({ queryKey: ['messages'] });
       queryClient.invalidateQueries({ queryKey: ['pendingCount'] });
       queryClient.invalidateQueries({ queryKey: ['posterStatus'] });
+      // Nudge the on-chain audit view so a successful flush lands on
+      // screen immediately rather than on the next 30 s poll.
+      queryClient.invalidateQueries({ queryKey: ['blobbles'] });
     },
   });
 
   const unhealthy = posterHealth?.state === 'unhealthy';
   const canPost = pendingCount > 0 && !mutation.isPending && !unhealthy;
-  const lastTx = posterStatus?.lastSubmittedByTag?.[0];
+  // Filter by this demo's tag. The Poster can serve multiple tags per
+  // process; `lastSubmittedByTag[0]` would surface an unrelated tx in a
+  // multi-tag deployment. Lowercased on both sides because the Poster
+  // canonicalizes tag casing at ingest.
+  const lastTx = posterStatus?.lastSubmittedByTag?.find(
+    (entry) => entry.contentTag.toLowerCase() === MESSAGE_IN_A_BLOBBLE_TAG.toLowerCase()
+  );
 
   if (pendingCount === 0 && !lastTx && !posterStatus) return null;
 
