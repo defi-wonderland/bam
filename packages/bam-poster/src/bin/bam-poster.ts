@@ -11,6 +11,10 @@
  *   1 — any other uncaught error
  */
 
+import { existsSync } from 'node:fs';
+import path from 'node:path';
+import { config as dotenvConfig } from 'dotenv';
+
 import { EnvConfigError, parseEnv } from './env.js';
 import { HttpServer } from '../http/server.js';
 import { createPoster } from '../factory.js';
@@ -19,7 +23,38 @@ import { createDbStore } from '../pool/db-store.js';
 import { StartupReconciliationError } from '../startup/reconcile.js';
 import { DEFAULT_MAX_MESSAGE_SIZE_BYTES } from '../ingest/size-bound.js';
 
+/**
+ * Resolve + load a `.env` file so users don't have to `export` each
+ * POSTER_* var before running. Resolution order:
+ *   1. `POSTER_ENV_FILE` — explicit override (e.g. `POSTER_ENV_FILE=.env.sepolia`).
+ *   2. `./.env` in the current working directory.
+ *   3. Walk up to find a `.env` at a workspace-like ancestor
+ *      (bounded at 5 levels so we don't escape unexpectedly).
+ *
+ * Existing `process.env` values always win — dotenv only fills in
+ * variables that aren't already set, matching standard semantics.
+ */
+function loadDotenv(): void {
+  const explicit = process.env.POSTER_ENV_FILE;
+  if (explicit !== undefined && explicit !== '') {
+    if (existsSync(explicit)) dotenvConfig({ path: explicit });
+    return;
+  }
+  let dir = process.cwd();
+  for (let i = 0; i < 5; i++) {
+    const candidate = path.join(dir, '.env');
+    if (existsSync(candidate)) {
+      dotenvConfig({ path: candidate });
+      return;
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) return;
+    dir = parent;
+  }
+}
+
 export async function runCli(): Promise<void> {
+  loadDotenv();
   let env;
   try {
     env = parseEnv();

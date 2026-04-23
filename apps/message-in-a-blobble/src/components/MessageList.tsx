@@ -5,23 +5,80 @@ import { useState } from 'react';
 import { AddressLink } from '@/components/AddressLink';
 import { SyncStatus } from '@/components/SyncStatus';
 
-interface Message {
-  id: number;
+/**
+ * Post-migration, the UI renders two independent data sources:
+ *  - **pending**: from the Poster's `/pending` surface (via
+ *    `/api/messages`). In flight, not yet on chain.
+ *  - **posted**:  from the demo's own DB, written by the sync
+ *    indexer after it observes `BlobBatchRegistered` events and
+ *    decodes the blobs (via `/api/confirmed-messages`). On chain.
+ *
+ * Both are coerced into a single `DisplayMessage` shape so the
+ * render code stays uniform.
+ */
+interface DisplayMessage {
+  id: string;
+  author: string;
+  timestamp: number;
+  nonce: number;
+  content: string;
+  status: 'pending' | 'posted';
+  tx_hash?: string | null;
+  block_number?: number | null;
+}
+
+interface PosterPendingRow {
+  messageId: string;
+  author: string;
+  nonce: string | number;
+  content: string;
+  timestamp: number;
+  ingestedAt: number;
+}
+
+interface ConfirmedRow {
   message_id: string;
   author: string;
   timestamp: number;
+  nonce: number;
   content: string;
-  status: 'pending' | 'posted';
-  blobble_id: string | null;
   tx_hash: string | null;
   block_number: number | null;
-  created_at: string;
 }
 
-async function fetchMessages(): Promise<Message[]> {
+async function fetchPending(): Promise<DisplayMessage[]> {
   const res = await fetch('/api/messages');
-  const data = await res.json();
-  return data.messages || [];
+  if (!res.ok) return [];
+  const data = (await res.json()) as { pending?: PosterPendingRow[] };
+  return (data.pending ?? []).map((p) => ({
+    id: p.messageId,
+    author: p.author,
+    timestamp: p.timestamp,
+    nonce: typeof p.nonce === 'string' ? Number(p.nonce) : p.nonce,
+    content: p.content,
+    status: 'pending' as const,
+  }));
+}
+
+async function fetchConfirmed(): Promise<DisplayMessage[]> {
+  const res = await fetch('/api/confirmed-messages');
+  if (!res.ok) return [];
+  const data = (await res.json()) as { messages?: ConfirmedRow[] };
+  return (data.messages ?? []).map((m) => ({
+    id: m.message_id,
+    author: m.author,
+    timestamp: m.timestamp,
+    nonce: m.nonce,
+    content: m.content,
+    status: 'posted' as const,
+    tx_hash: m.tx_hash,
+    block_number: m.block_number,
+  }));
+}
+
+async function fetchMessages(): Promise<DisplayMessage[]> {
+  const [pending, confirmed] = await Promise.all([fetchPending(), fetchConfirmed()]);
+  return [...pending, ...confirmed].sort((a, b) => b.timestamp - a.timestamp);
 }
 
 export function MessageList() {
@@ -64,7 +121,7 @@ export function MessageList() {
         </span>
         <span className="font-medium">Indexed blobbles</span>
         <span className="text-sand-400 font-normal">
-          ({messages.length} message{messages.length !== 1 ? 's' : ''} in DB
+          ({messages.length} message{messages.length !== 1 ? 's' : ''} in view
           {pending.length > 0 ? `, ${pending.length} pending` : ''}
           {posted.length > 0 ? `, ${posted.length} posted` : ''})
         </span>
@@ -98,7 +155,7 @@ export function MessageList() {
   );
 }
 
-function MessageCard({ message }: { message: Message }) {
+function MessageCard({ message }: { message: DisplayMessage }) {
   const time = new Date(message.timestamp * 1000).toLocaleTimeString();
 
   return (
