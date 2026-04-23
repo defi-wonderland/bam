@@ -11,15 +11,15 @@ Built by [Wonderland](https://wonderland.xyz).
 | Package | Description |
 |---------|-------------|
 | [`bam-sdk`](packages/bam-sdk) | TypeScript SDK — message/batch encoding, BPE compression, Zstd decompression, BLS/ECDSA signatures, KZG proofs, blob exposure. Browser entrypoint at `bam-sdk/browser`. |
+| [`bam-poster`](packages/bam-poster) | Node library + HTTP service + CLI — ingests signed messages, batches them, and submits EIP-4844 blob transactions to BAM Core |
 | [`bam-cli`](packages/bam-cli) | CLI — key management, message encoding, batch operations, BLS aggregation |
-| [`bam-contracts`](packages/bam-contracts) | Solidity — BlobAuthenticatedMessagingCore, BLSRegistry, BLSExposer, verifiers (Foundry) |
+| [`bam-contracts`](packages/bam-contracts) | Solidity — BlobAuthenticatedMessagingCore, BLSRegistry, ECDSARegistry, BLSExposer, verifiers (Foundry) |
 
 ## Apps
 
 | App | Description |
 |-----|-------------|
-| [`message-in-a-blobble`](apps/message-in-a-blobble) | Demo — sign messages with ECDSA, batch-encode, and post as EIP-4844 blobs on Sepolia |
-| [`exposure-demo`](apps/exposure-demo) | Demo — full on-chain exposure lifecycle: BLS key registration, blob posting, KZG proof generation, and message exposure via BLSExposer |
+| [`message-in-a-blobble`](apps/message-in-a-blobble) | Demo — sign messages with ECDSA and post them as EIP-4844 blobs on Sepolia via a separately-deployed `@bam/poster` service |
 
 ## Getting Started
 
@@ -29,6 +29,14 @@ cd packages/bam-contracts && forge install
 pnpm -r build
 pnpm -r test:run
 ```
+
+To run the demo end-to-end, start the Poster service and the Next.js app together from the workspace root:
+
+```bash
+pnpm dev   # @bam/poster on :8787 + message-in-a-blobble on :3000
+```
+
+See [`apps/message-in-a-blobble/README.md`](apps/message-in-a-blobble/README.md) for env setup.
 
 ### Requirements
 
