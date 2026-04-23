@@ -37,24 +37,6 @@ function getDb(): Database.Database {
   return db;
 }
 
-export function insertMessage(msg: {
-  message_id: string;
-  author: string;
-  timestamp: number;
-  nonce: number;
-  content: string;
-  signature: string;
-}): DbMessage {
-  const db = getDb();
-  db.prepare(`
-    INSERT INTO messages (message_id, author, timestamp, nonce, content, signature)
-    VALUES (@message_id, @author, @timestamp, @nonce, @content, @signature)
-  `).run(msg);
-  return db
-    .prepare('SELECT * FROM messages WHERE message_id = ?')
-    .get(msg.message_id) as DbMessage;
-}
-
 export function getMessages(status?: string): DbMessage[] {
   const db = getDb();
   const query = status
@@ -69,10 +51,6 @@ export function getMessages(status?: string): DbMessage[] {
         ORDER BY m.created_at DESC
       `);
   return (status ? query.all(status) : query.all()) as DbMessage[];
-}
-
-export function getPendingMessages(): DbMessage[] {
-  return getMessages('pending');
 }
 
 export function createBlobble(id: string, messageCount: number): DbBlobble {
@@ -103,14 +81,6 @@ export function getSyncedBlobbleTxHashes(): string[] {
   return rows.map((r) => r.tx_hash);
 }
 
-export function getLastConfirmedBlobble(): DbBlobble | null {
-  const db = getDb();
-  const row = db
-    .prepare("SELECT * FROM blobbles WHERE status = 'confirmed' ORDER BY created_at DESC LIMIT 1")
-    .get();
-  return (row as DbBlobble) ?? null;
-}
-
 export function insertSyncedMessage(msg: {
   message_id: string;
   author: string;
@@ -124,17 +94,4 @@ export function insertSyncedMessage(msg: {
     INSERT OR IGNORE INTO messages (message_id, author, timestamp, nonce, content, signature, status, blobble_id)
     VALUES (@message_id, @author, @timestamp, @nonce, @content, '', 'posted', @blobble_id)
   `).run(msg);
-}
-
-export function markMessagesPosted(messageIds: string[], blobbleId: string): void {
-  const db = getDb();
-  const stmt = db.prepare(
-    'UPDATE messages SET status = ?, blobble_id = ? WHERE message_id = ?'
-  );
-  const tx = db.transaction(() => {
-    for (const id of messageIds) {
-      stmt.run('posted', blobbleId, id);
-    }
-  });
-  tx();
 }

@@ -1,9 +1,8 @@
 export type { DbMessage, DbBlobble } from './types';
 export {
-  insertMessage,
   getMessages,
-  getPendingMessages,
   createBlobble,
   updateBlobbleStatus,
-  markMessagesPosted,
+  getSyncedBlobbleTxHashes,
+  insertSyncedMessage,
 } from './queries';

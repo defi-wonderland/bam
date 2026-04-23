@@ -1,6 +1,11 @@
 import type { DbMessage, DbBlobble } from './types';
 export type { DbMessage, DbBlobble } from './types';
 
+// Pending-pool state (inserts / pending reads / post-blobble markers)
+// now lives in the `@bam/poster` service; these exports were removed
+// during the poster migration. The sync indexer's confirmed-write path
+// is retained below.
+
 const usePostgres = !!process.env.POSTGRES_URL;
 
 async function getImpl() {
@@ -10,26 +15,9 @@ async function getImpl() {
   return await import('./sqlite');
 }
 
-export async function insertMessage(msg: {
-  message_id: string;
-  author: string;
-  timestamp: number;
-  nonce: number;
-  content: string;
-  signature: string;
-}): Promise<DbMessage> {
-  const impl = await getImpl();
-  return impl.insertMessage(msg);
-}
-
 export async function getMessages(status?: string): Promise<DbMessage[]> {
   const impl = await getImpl();
   return impl.getMessages(status);
-}
-
-export async function getPendingMessages(): Promise<DbMessage[]> {
-  const impl = await getImpl();
-  return impl.getPendingMessages();
 }
 
 export async function createBlobble(id: string, messageCount: number): Promise<DbBlobble> {
@@ -52,11 +40,6 @@ export async function getSyncedBlobbleTxHashes(): Promise<string[]> {
   return impl.getSyncedBlobbleTxHashes();
 }
 
-export async function getLastConfirmedBlobble(): Promise<DbBlobble | null> {
-  const impl = await getImpl();
-  return impl.getLastConfirmedBlobble();
-}
-
 export async function insertSyncedMessage(msg: {
   message_id: string;
   author: string;
@@ -67,9 +50,4 @@ export async function insertSyncedMessage(msg: {
 }): Promise<void> {
   const impl = await getImpl();
   return impl.insertSyncedMessage(msg);
-}
-
-export async function markMessagesPosted(messageIds: string[], blobbleId: string): Promise<void> {
-  const impl = await getImpl();
-  return impl.markMessagesPosted(messageIds, blobbleId);
 }

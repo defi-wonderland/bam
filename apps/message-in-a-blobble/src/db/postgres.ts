@@ -32,23 +32,6 @@ async function ensureTables() {
   migrated = true;
 }
 
-export async function insertMessage(msg: {
-  message_id: string;
-  author: string;
-  timestamp: number;
-  nonce: number;
-  content: string;
-  signature: string;
-}): Promise<DbMessage> {
-  await ensureTables();
-  const { rows } = await sql`
-    INSERT INTO messages (message_id, author, timestamp, nonce, content, signature)
-    VALUES (${msg.message_id}, ${msg.author}, ${msg.timestamp}, ${msg.nonce}, ${msg.content}, ${msg.signature})
-    RETURNING *
-  `;
-  return rows[0] as DbMessage;
-}
-
 export async function getMessages(status?: string): Promise<DbMessage[]> {
   await ensureTables();
   if (status) {
@@ -65,10 +48,6 @@ export async function getMessages(status?: string): Promise<DbMessage[]> {
     ORDER BY m.created_at DESC
   `;
   return rows as DbMessage[];
-}
-
-export async function getPendingMessages(): Promise<DbMessage[]> {
-  return getMessages('pending');
 }
 
 export async function createBlobble(id: string, messageCount: number): Promise<DbBlobble> {
@@ -102,14 +81,6 @@ export async function getSyncedBlobbleTxHashes(): Promise<string[]> {
   return rows.map((r) => r.tx_hash as string);
 }
 
-export async function getLastConfirmedBlobble(): Promise<DbBlobble | null> {
-  await ensureTables();
-  const { rows } = await sql`
-    SELECT * FROM blobbles WHERE status = 'confirmed' ORDER BY created_at DESC LIMIT 1
-  `;
-  return (rows[0] as DbBlobble) ?? null;
-}
-
 export async function insertSyncedMessage(msg: {
   message_id: string;
   author: string;
@@ -124,13 +95,4 @@ export async function insertSyncedMessage(msg: {
     VALUES (${msg.message_id}, ${msg.author}, ${msg.timestamp}, ${msg.nonce}, ${msg.content}, '', 'posted', ${msg.blobble_id})
     ON CONFLICT (message_id) DO NOTHING
   `;
-}
-
-export async function markMessagesPosted(messageIds: string[], blobbleId: string): Promise<void> {
-  await ensureTables();
-  for (const id of messageIds) {
-    await sql`
-      UPDATE messages SET status = 'posted', blobble_id = ${blobbleId} WHERE message_id = ${id}
-    `;
-  }
 }
