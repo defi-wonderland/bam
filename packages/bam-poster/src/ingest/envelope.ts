@@ -56,12 +56,17 @@ export function parseEnvelope(raw: Uint8Array): ParseResult {
   }
   const { author, timestamp, nonce, content, signature } = message as Record<string, unknown>;
   if (!isAddress(author)) return { ok: false, result: { ok: false, reason: 'malformed' } };
-  // `Number.isFinite` alone lets floats (`1700000000.5`) and values
-  // above MAX_SAFE_INTEGER slip through — the SDK packs timestamp as
-  // a uint64 via DataView, so a non-integer or lossy value silently
-  // diverges between the signer's payload and what we hash (cubic
-  // review). Require a safe, non-negative integer at parse time.
-  if (typeof timestamp !== 'number' || !Number.isSafeInteger(timestamp) || timestamp < 0) {
+  // The SDK packs `timestamp` as a uint32 via `DataView.setUint32`
+  // (bam-sdk/src/message.ts). Allowing floats, negatives, or values
+  // above 2^32-1 would silently wrap/truncate during hashing and
+  // diverge from what the signer produced (cubic / qodo review).
+  // Reject at parse time with a clear `malformed` reason.
+  if (
+    typeof timestamp !== 'number' ||
+    !Number.isInteger(timestamp) ||
+    timestamp < 0 ||
+    timestamp > 0xffff_ffff
+  ) {
     return { ok: false, result: { ok: false, reason: 'malformed' } };
   }
   const parsedNonce = parseNonce(nonce);

@@ -325,12 +325,19 @@ describe('IngestPipeline — malformed envelopes', () => {
     if (!res.accepted) expect(res.reason).toBe('malformed');
   });
 
-  it('rejects non-integer / unsafe-integer timestamps (cubic review)', async () => {
-    // `Number.isFinite` previously accepted floats and values above
-    // MAX_SAFE_INTEGER. Both would silently coerce during uint64
-    // packing and break signature verification in subtle ways.
+  it('rejects non-integer / out-of-range timestamps (cubic + qodo review)', async () => {
+    // SDK packs timestamp as uint32 via DataView.setUint32. Anything
+    // outside [0, 2^32-1] or non-integer would silently wrap or
+    // truncate during hashing and break signature verification in
+    // subtle ways.
     const { pipeline } = makePipeline();
-    const badTimestamps = [1_700_000_000.5, Number.MAX_SAFE_INTEGER + 2, -1, Number.POSITIVE_INFINITY];
+    const badTimestamps = [
+      1_700_000_000.5,
+      -1,
+      Number.POSITIVE_INFINITY,
+      0x1_0000_0000, // 2^32 — just past uint32
+      Number.MAX_SAFE_INTEGER,
+    ];
     for (const ts of badTimestamps) {
       const env = {
         contentTag: TAG,
