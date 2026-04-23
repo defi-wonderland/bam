@@ -48,6 +48,21 @@ describe('parseEnv', () => {
     ).toThrow(EnvConfigError);
   });
 
+  it('canonicalizes mixed-case tags to lowercase (qodo review)', () => {
+    // Hex casing isn't semantically meaningful, but store adapters
+    // compare tags as case-sensitive TEXT — so the env boundary
+    // must normalize to avoid stranding pending rows under one
+    // casing while the worker queries for another.
+    const env = parseEnv({
+      ...BASE,
+      POSTER_ALLOWED_TAGS: `0x${'AA'.repeat(32)},0x${'Bb'.repeat(32)}`,
+    });
+    expect(env.allowlistedTags).toEqual([
+      `0x${'aa'.repeat(32)}`,
+      `0x${'bb'.repeat(32)}`,
+    ]);
+  });
+
   it('clamps reorg window to [4, 128]', () => {
     expect(parseEnv({ ...BASE, POSTER_REORG_WINDOW_BLOCKS: '1' }).reorgWindowBlocks).toBe(4);
     expect(parseEnv({ ...BASE, POSTER_REORG_WINDOW_BLOCKS: '999' }).reorgWindowBlocks).toBe(128);

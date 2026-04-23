@@ -39,6 +39,7 @@ import { listPending } from './surfaces/pending.js';
 import { listSubmittedBatches } from './surfaces/submitted.js';
 import { readStatus, type StatusRpcReader } from './surfaces/status.js';
 import { readHealth } from './surfaces/health.js';
+import { canonicalTag } from './util/canonical.js';
 
 /**
  * Process-local registry: C-10 shared-signer hazard.
@@ -121,19 +122,27 @@ export async function createPoster(
     const idlePollMs = config.idlePollMs ?? DEFAULT_IDLE_POLL_MS;
     const reorgPollMs = config.reorgPollMs ?? DEFAULT_REORG_POLL_MS;
 
+    // Canonicalize the configured allowlist once; downstream maps,
+    // store queries, and comparisons all operate on this single
+    // representation. `parseEnv` also lowercases, but callers
+    // constructing `PosterConfig` directly (tests, embeds) bypass that.
+    const allowlistedTags: Bytes32[] = config.allowlistedTags.map((t) =>
+      canonicalTag(t)
+    );
+
     const rateLimiter = new RateLimiter(rateLimit, () => now().getTime());
     const pipeline = new IngestPipeline({
       store,
       validator,
       rateLimiter,
-      allowlistedTags: config.allowlistedTags,
+      allowlistedTags,
       maxMessageSizeBytes: maxMessageSize,
       now,
     });
 
     // One submission loop per tag.
     const loops = new Map<Bytes32, SubmissionLoop>();
-    for (const tag of config.allowlistedTags) {
+    for (const tag of allowlistedTags) {
       loops.set(
         tag,
         new SubmissionLoop({
@@ -233,22 +242,38 @@ export async function createPoster(
         if (state === 'unhealthy') {
           return { accepted: false, reason: 'unhealthy' };
         }
-        return pipeline.ingest(message, hint);
+        const canonicalHint: SubmitHint | undefined =
+          hint?.contentTag !== undefined
+            ? { ...hint, contentTag: canonicalTag(hint.contentTag) }
+            : hint;
+        return pipeline.ingest(message, canonicalHint);
       },
       async listPending(query?: PendingQuery): Promise<Pending[]> {
-        return listPending(store, query ?? {});
+        const q: PendingQuery = query ?? {};
+        return listPending(
+          store,
+          q.contentTag !== undefined
+            ? { ...q, contentTag: canonicalTag(q.contentTag) }
+            : q
+        );
       },
       async listSubmittedBatches(
         query?: SubmittedBatchesQuery
       ): Promise<SubmittedBatch[]> {
-        return listSubmittedBatches(store, query ?? {});
+        const q: SubmittedBatchesQuery = query ?? {};
+        return listSubmittedBatches(
+          store,
+          q.contentTag !== undefined
+            ? { ...q, contentTag: canonicalTag(q.contentTag) }
+            : q
+        );
       },
       async status(): Promise<Status> {
         return readStatus({
           store,
           rpc: extras.rpc,
           signer: config.signer,
-          configuredTags: config.allowlistedTags,
+          configuredTags: allowlistedTags,
         });
       },
       async health(): Promise<Health> {
@@ -282,7 +307,7 @@ export async function createPoster(
 
       // ── InternalPoster hooks (test-only) ───────────────────────
       async _tickTag(tag: Bytes32) {
-        return loops.get(tag)?.tick();
+        return loops.get(canonicalTag(tag))?.tick();
       },
       async _tickReorgWatcher() {
         return reorgWatcher.tick();

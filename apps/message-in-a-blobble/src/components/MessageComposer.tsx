@@ -59,12 +59,16 @@ export function MessageComposer() {
       if (!address || !content.trim()) throw new Error('Missing address or content');
 
       const timestamp = Math.floor(Date.now() / 1000);
-      // v1 wire encodes nonce as uint16 — well inside Number range.
-      // We compute next-nonce in BigInt for NEXT_SPEC forward-compat,
-      // then narrow at the network boundary.
+      // v1 wire encodes nonce as uint16 — `bam-sdk`'s computeMessageHash
+      // packs it via `DataView.setUint16`, which silently truncates
+      // anything ≥ 65536 and produces a wrong hash/signature. We compute
+      // next-nonce in BigInt for NEXT_SPEC forward-compat, then enforce
+      // the v1 ceiling at the network boundary.
       const toWire = (n: bigint): number => {
-        if (n < 0n || n > BigInt(Number.MAX_SAFE_INTEGER)) {
-          throw new Error(`nonce ${n} exceeds safe-integer range`);
+        if (n < 0n || n > 0xffffn) {
+          throw new Error(
+            `nonce ${n} exceeds v1 wire uint16 range — demo cannot submit further messages without a protocol upgrade`
+          );
         }
         return Number(n);
       };

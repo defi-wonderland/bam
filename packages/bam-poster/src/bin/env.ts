@@ -1,6 +1,7 @@
 import type { Address, Bytes32 } from 'bam-sdk';
 
 import { clampReorgWindow } from '../submission/reorg-watcher.js';
+import { canonicalTag } from '../util/canonical.js';
 
 /**
  * CLI-level env parsing (plan §Rollout → Configuration). Centralizes
@@ -82,7 +83,9 @@ export function parseEnv(env: NodeJS.ProcessEnv = process.env): ParsedEnv {
   }
 
   return {
-    allowlistedTags: tags as Bytes32[],
+    // Canonicalize casing here so the store adapters, scheduler map,
+    // and allowlist comparisons all see one representation.
+    allowlistedTags: tags.map((t) => canonicalTag(t as Bytes32)),
     chainId,
     bamCoreAddress: bamCoreAddress as Address,
     rpcUrl,

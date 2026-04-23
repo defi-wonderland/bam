@@ -1,6 +1,7 @@
 import type { Address, Bytes32 } from 'bam-sdk';
 import type { Hex } from 'viem';
 import type { ValidationResult } from '../types.js';
+import { canonicalTag } from '../util/canonical.js';
 
 /**
  * Wire format accepted at the Poster's ingest boundary (plan §C-11):
@@ -66,7 +67,9 @@ export function parseEnvelope(raw: Uint8Array): ParseResult {
   return {
     ok: true,
     envelope: {
-      contentTag,
+      // Canonicalize contentTag here so downstream store queries (which
+      // are case-sensitive TEXT equality) always see one representation.
+      contentTag: canonicalTag(contentTag),
       message: {
         author,
         timestamp,

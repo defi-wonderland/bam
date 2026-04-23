@@ -303,3 +303,25 @@ describe('IngestPipeline — nonce parsing (cubic review)', () => {
     expect(pending[0].nonce).toBe(16n);
   });
 });
+
+describe('IngestPipeline — contentTag case normalization (qodo review)', () => {
+  it('persists mixed-case envelope tags under a canonical lowercase form', async () => {
+    // Allowlist is lowercase; envelope sends the tag in uppercase. The
+    // store adapters match tags case-sensitively, so without
+    // canonicalization the per-tag worker query would never see the
+    // inserted row and messages would stall indefinitely.
+    const { pipeline, store } = makePipeline();
+    const upperTag = ('0x' + 'AA'.repeat(32)) as Bytes32;
+    const { raw } = await signedEnvelope({ contentTag: upperTag });
+
+    const res = await pipeline.ingest(raw);
+    expect(res.accepted).toBe(true);
+
+    // Query using the canonical lowercase tag — must find the row.
+    const pending = await store.withTxn(async (txn) =>
+      txn.listPendingByTag(TAG)
+    );
+    expect(pending).toHaveLength(1);
+    expect(pending[0].contentTag).toBe(TAG);
+  });
+});
