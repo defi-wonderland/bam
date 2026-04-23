@@ -2,14 +2,51 @@
 
 import { useState } from 'react';
 import { useAccount, useSignMessage } from 'wagmi';
-import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
+import { useQueryClient, useMutation } from '@tanstack/react-query';
 import { computeMessageHash } from 'bam-sdk/browser';
 import { MAX_MESSAGE_CHARS } from '@/lib/constants';
+import { MESSAGES_QUERY_KEY } from '@/lib/messages';
 
-async function fetchMessages(): Promise<{ author: string; [key: string]: unknown }[]> {
-  const res = await fetch('/api/messages');
-  const data = await res.json();
-  return data.messages || [];
+/**
+ * Per-author next-nonce estimate. Walks the two sources the demo has
+ * visibility into (Poster pending + Poster-backed confirmed) and
+ * picks `max(nonce) + 1`. The Poster enforces strict monotonicity
+ * per ERC-8180, so if our guess collides with an in-flight submit we
+ * get `stale_nonce` back and retry with nonce+1.
+ *
+ * Arithmetic runs in BigInt to support uint64 nonces — v1 wire is
+ * uint16 and well within Number range, but NEXT_SPEC widens to uint64
+ * and the Poster already returns decimal strings.
+ */
+async function nextNonceForAuthor(address: string): Promise<bigint> {
+  const lc = address.toLowerCase();
+  const [pendingRes, confirmedRes] = await Promise.all([
+    fetch('/api/messages').then((r) => (r.ok ? r.json() : { pending: [] })),
+    fetch('/api/confirmed-messages').then((r) => (r.ok ? r.json() : { messages: [] })),
+  ]);
+  const pending = (pendingRes as { pending?: Array<{ author: string; nonce: string | number }> })
+    .pending ?? [];
+  const confirmed = (confirmedRes as { messages?: Array<{ author: string; nonce: string | number }> })
+    .messages ?? [];
+  const parse = (v: string | number): bigint | null => {
+    try {
+      return BigInt(v);
+    } catch {
+      return null;
+    }
+  };
+  let max = -1n;
+  for (const p of pending) {
+    if (p.author.toLowerCase() !== lc) continue;
+    const n = parse(p.nonce);
+    if (n !== null && n > max) max = n;
+  }
+  for (const c of confirmed) {
+    if (c.author.toLowerCase() !== lc) continue;
+    const n = parse(c.nonce);
+    if (n !== null && n > max) max = n;
+  }
+  return max + 1n;
 }
 
 export function MessageComposer() {
@@ -18,49 +55,68 @@ export function MessageComposer() {
   const queryClient = useQueryClient();
   const [content, setContent] = useState('');
 
-  const { data: allMessages = [] } = useQuery({
-    queryKey: ['messages'],
-    queryFn: fetchMessages,
-  });
-
   const mutation = useMutation({
     mutationFn: async () => {
       if (!address || !content.trim()) throw new Error('Missing address or content');
 
       const timestamp = Math.floor(Date.now() / 1000);
-      const existingFromAuthor = allMessages.filter(
-        (m) => m.author.toLowerCase() === address.toLowerCase()
-      );
-      const nonce = existingFromAuthor.length;
+      // v1 wire encodes nonce as uint16 — `bam-sdk`'s computeMessageHash
+      // packs it via `DataView.setUint16`, which silently truncates
+      // anything ≥ 65536 and produces a wrong hash/signature. We compute
+      // next-nonce in BigInt for NEXT_SPEC forward-compat, then enforce
+      // the v1 ceiling at the network boundary.
+      const toWire = (n: bigint): number => {
+        if (n < 0n || n > 0xffffn) {
+          throw new Error(
+            `nonce ${n} exceeds v1 wire uint16 range — demo cannot submit further messages without a protocol upgrade`
+          );
+        }
+        return Number(n);
+      };
+      // Send at a given nonce. On `stale_nonce` we climb from the
+      // Poster's pool — a single +1 retry isn't enough if two or more
+      // concurrent sends (e.g. another tab) accepted between our
+      // scan and this submit (qodo review).
+      const trySend = async (nonce: bigint): Promise<Response> => {
+        const wire = toWire(nonce);
+        const msg = { author: address, timestamp, nonce: wire, content: content.trim() };
+        const messageHash = computeMessageHash(msg);
+        const signature = await signMessageAsync({ message: { raw: messageHash } });
+        return fetch('/api/messages', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            author: address,
+            timestamp,
+            nonce: wire,
+            content: content.trim(),
+            signature,
+          }),
+        });
+      };
 
-      const msg = { author: address, timestamp, nonce, content: content.trim() };
-      const messageHash = computeMessageHash(msg);
-
-      const signature = await signMessageAsync({
-        message: { raw: messageHash },
-      });
-
-      const res = await fetch('/api/messages', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          author: address,
-          timestamp,
-          nonce,
-          content: content.trim(),
-          signature,
-        }),
-      });
-
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error || 'Failed to submit');
+      // Bounded climb: walk nonce forward on each stale_nonce. Cap at
+      // a small number so a persistently-failing condition (e.g. the
+      // Poster is rejecting for a different reason that races with
+      // monotonicity) still surfaces to the user.
+      const MAX_STALE_RETRIES = 8;
+      let nonce = await nextNonceForAuthor(address);
+      for (let attempt = 0; attempt <= MAX_STALE_RETRIES; attempt++) {
+        const res = await trySend(nonce);
+        if (res.ok) return;
+        const data = (await res.json()) as { reason?: string; error?: string };
+        if (data.reason !== 'stale_nonce' || attempt === MAX_STALE_RETRIES) {
+          throw new Error(data.reason ?? data.error ?? 'Failed to submit');
+        }
+        // Re-fetch on every retry so we converge even if *many* new
+        // messages landed while we were signing the previous attempt.
+        nonce = await nextNonceForAuthor(address);
       }
     },
     onSuccess: () => {
       setContent('');
-      queryClient.invalidateQueries({ queryKey: ['messages'] });
-      queryClient.invalidateQueries({ queryKey: ['pendingCount'] });
+      queryClient.invalidateQueries({ queryKey: MESSAGES_QUERY_KEY });
+      queryClient.invalidateQueries({ queryKey: ['posterStatus'] });
     },
   });
 

@@ -1,0 +1,230 @@
+import type { Address, Bytes32 } from 'bam-sdk';
+
+import type {
+  NonceTrackerRow,
+  PosterStore,
+  StoreTxn,
+  StoreTxnPendingRow,
+  StoreTxnSubmittedRow,
+  SubmittedBatchStatus,
+  SubmittedBatchesQuery,
+} from '../types.js';
+
+/**
+ * Process-local async mutex: serializes `withTxn` callers so the
+ * in-memory store has the same linearizable semantics the DB adapters
+ * get from `BEGIN IMMEDIATE` / SERIALIZABLE.
+ */
+class AsyncLock {
+  private chain: Promise<unknown> = Promise.resolve();
+
+  run<T>(fn: () => Promise<T>): Promise<T> {
+    const next = this.chain.then(() => fn());
+    // Swallow rejections in the chain so a failed txn doesn't poison
+    // subsequent acquirers.
+    this.chain = next.catch(() => undefined);
+    return next;
+  }
+}
+
+interface PendingState {
+  rows: Map<Bytes32, StoreTxnPendingRow>;
+  /** Per-tag FIFO counter. Assigned as `ingest_seq`. */
+  tagSeq: Map<Bytes32, number>;
+}
+
+export class MemoryPosterStore implements PosterStore {
+  private readonly lock = new AsyncLock();
+  private readonly pending: PendingState = {
+    rows: new Map(),
+    tagSeq: new Map(),
+  };
+  private readonly nonces = new Map<Address, NonceTrackerRow>();
+  private readonly submitted = new Map<Bytes32, StoreTxnSubmittedRow>();
+
+  async withTxn<T>(fn: (txn: StoreTxn) => Promise<T>): Promise<T> {
+    return this.lock.run(async () => {
+      // Snapshot every backing map at txn start. On a thrown callback
+      // we restore — matching the DB adapters' ROLLBACK semantics so
+      // the in-memory store doesn't silently retain partial writes.
+      // Shallow copy: row objects themselves are treated as immutable
+      // by the adapter (every setter stores a fresh object).
+      const snapshot = {
+        rows: new Map(this.pending.rows),
+        tagSeq: new Map(this.pending.tagSeq),
+        nonces: new Map(this.nonces),
+        submitted: new Map(this.submitted),
+      };
+      const txn = this.makeTxn();
+      try {
+        return await fn(txn);
+      } catch (err) {
+        this.pending.rows.clear();
+        for (const [k, v] of snapshot.rows) this.pending.rows.set(k, v);
+        this.pending.tagSeq.clear();
+        for (const [k, v] of snapshot.tagSeq) this.pending.tagSeq.set(k, v);
+        this.nonces.clear();
+        for (const [k, v] of snapshot.nonces) this.nonces.set(k, v);
+        this.submitted.clear();
+        for (const [k, v] of snapshot.submitted) this.submitted.set(k, v);
+        throw err;
+      }
+    });
+  }
+
+  async close(): Promise<void> {
+    // nothing to release
+  }
+
+  // Test hook — unsafe outside tests.
+  _unsafeClear(): void {
+    this.pending.rows.clear();
+    this.pending.tagSeq.clear();
+    this.nonces.clear();
+    this.submitted.clear();
+  }
+
+  private makeTxn(): StoreTxn {
+    const pending = this.pending;
+    const nonces = this.nonces;
+    const submitted = this.submitted;
+
+    return {
+      insertPending(row: StoreTxnPendingRow): void {
+        if (pending.rows.has(row.messageId)) {
+          throw new Error('insertPending: duplicate message_id');
+        }
+        pending.rows.set(row.messageId, clonePending(row));
+      },
+      getPendingByMessageId(messageId: Bytes32): StoreTxnPendingRow | null {
+        const row = pending.rows.get(messageId);
+        return row ? clonePending(row) : null;
+      },
+      listPendingByTag(tag: Bytes32, limit?: number, sinceSeq?: number): StoreTxnPendingRow[] {
+        const all: StoreTxnPendingRow[] = [];
+        for (const row of pending.rows.values()) {
+          if (row.contentTag !== tag) continue;
+          if (sinceSeq !== undefined && row.ingestSeq <= sinceSeq) continue;
+          all.push(clonePending(row));
+        }
+        all.sort((a, b) => a.ingestSeq - b.ingestSeq);
+        return typeof limit === 'number' ? all.slice(0, limit) : all;
+      },
+      listPendingAll(limit?: number, sinceSeq?: number): StoreTxnPendingRow[] {
+        const all: StoreTxnPendingRow[] = [];
+        for (const row of pending.rows.values()) {
+          if (sinceSeq !== undefined && row.ingestSeq <= sinceSeq) continue;
+          all.push(clonePending(row));
+        }
+        all.sort((a, b) => {
+          if (a.ingestedAt !== b.ingestedAt) return a.ingestedAt - b.ingestedAt;
+          return a.ingestSeq - b.ingestSeq;
+        });
+        return typeof limit === 'number' ? all.slice(0, limit) : all;
+      },
+      deletePending(messageIds: Bytes32[]): void {
+        for (const id of messageIds) pending.rows.delete(id);
+      },
+      countPendingByTag(tag: Bytes32): number {
+        let count = 0;
+        for (const row of pending.rows.values()) {
+          if (row.contentTag === tag) count++;
+        }
+        return count;
+      },
+      nextIngestSeq(tag: Bytes32): number {
+        const cur = pending.tagSeq.get(tag) ?? 0;
+        const next = cur + 1;
+        pending.tagSeq.set(tag, next);
+        return next;
+      },
+
+      getNonce(author: Address): NonceTrackerRow | null {
+        // FU-6: match SqlitePosterStore's behavior — address key is
+        // always lowercased. Without this, an in-memory-backed
+        // Poster would treat mixed-case callers as distinct authors,
+        // which the sqlite adapter merges.
+        const row = nonces.get(author.toLowerCase() as Address);
+        return row ? { ...row } : null;
+      },
+      setNonce(row: NonceTrackerRow): void {
+        const key = row.author.toLowerCase() as Address;
+        nonces.set(key, { ...row, author: key });
+      },
+
+      insertSubmitted(row: StoreTxnSubmittedRow): void {
+        if (submitted.has(row.txHash)) {
+          throw new Error('insertSubmitted: duplicate tx_hash');
+        }
+        submitted.set(row.txHash, cloneSubmitted(row));
+      },
+      getSubmittedByTx(txHash: Bytes32): StoreTxnSubmittedRow | null {
+        const row = submitted.get(txHash);
+        return row ? cloneSubmitted(row) : null;
+      },
+      listSubmitted(query: SubmittedBatchesQuery): StoreTxnSubmittedRow[] {
+        const results: StoreTxnSubmittedRow[] = [];
+        for (const row of submitted.values()) {
+          if (query.contentTag !== undefined && row.contentTag !== query.contentTag) continue;
+          if (query.sinceBlock !== undefined) {
+            // Rows without a blockNumber haven't landed on chain yet
+            // and therefore aren't "since" any block. Exclude them
+            // from sinceBlock-filtered queries to match the SQL
+            // adapters' semantics.
+            if (row.blockNumber === null) continue;
+            if (BigInt(row.blockNumber) < query.sinceBlock) continue;
+          }
+          results.push(cloneSubmitted(row));
+        }
+        // Newest first by submittedAt.
+        results.sort((a, b) => b.submittedAt - a.submittedAt);
+        return typeof query.limit === 'number' ? results.slice(0, query.limit) : results;
+      },
+      updateSubmittedStatus(
+        txHash: Bytes32,
+        status: SubmittedBatchStatus,
+        replacedByTxHash: Bytes32 | null,
+        blockNumber: number | null
+      ): void {
+        const row = submitted.get(txHash);
+        if (!row) throw new Error('updateSubmittedStatus: no row for tx_hash');
+        // Replace the row object rather than mutating in place. The
+        // `withTxn` rollback snapshots the outer Map with a shallow
+        // copy; an in-place mutation on a row would survive the
+        // rollback because both snapshots reference the same object.
+        submitted.set(txHash, {
+          ...row,
+          status,
+          replacedByTxHash,
+          blockNumber: blockNumber !== null ? blockNumber : row.blockNumber,
+        });
+      },
+    };
+  }
+}
+
+export function createMemoryStore(): PosterStore {
+  return new MemoryPosterStore();
+}
+
+function clonePending(row: StoreTxnPendingRow): StoreTxnPendingRow {
+  // Spread preserves Uint8Array references. Without these explicit
+  // copies, a caller mutating the returned `content` / `signature`
+  // bytes would mutate the store's internal state (cubic review).
+  return {
+    ...row,
+    content: new Uint8Array(row.content),
+    signature: new Uint8Array(row.signature),
+  };
+}
+
+function cloneSubmitted(row: StoreTxnSubmittedRow): StoreTxnSubmittedRow {
+  return {
+    ...row,
+    messageIds: [...row.messageIds],
+    messages: row.messages.map((m) => ({
+      ...m,
+      signature: new Uint8Array(m.signature),
+    })),
+  };
+}

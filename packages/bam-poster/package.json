@@ -1,0 +1,45 @@
+{
+  "name": "@bam/poster",
+  "version": "0.0.1",
+  "description": "BAM Poster — Node-only library + HTTP service + CLI that batches ingested messages and submits them to L1 as blob batches via BAM Core.",
+  "type": "module",
+  "main": "dist/esm/index.js",
+  "module": "dist/esm/index.js",
+  "types": "dist/types/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/esm/index.js",
+      "types": "./dist/types/index.d.ts"
+    }
+  },
+  "bin": {
+    "bam-poster": "./dist/esm/bin/bam-poster.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.esm.json && tsc -p tsconfig.types.json",
+    "clean": "rm -rf dist",
+    "dev": "pnpm build && node dist/esm/bin/bam-poster.js",
+    "test": "vitest",
+    "test:run": "vitest --run",
+    "lint": "eslint src test"
+  },
+  "dependencies": {
+    "@vercel/postgres": "^0.10.0",
+    "bam-sdk": "workspace:*",
+    "better-sqlite3": "^11.5.0",
+    "c-kzg": "^4.1.0",
+    "dotenv": "^16.4.5",
+    "viem": "^2.21.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.11",
+    "@types/node": "^20.11.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "license": "MIT"
+}

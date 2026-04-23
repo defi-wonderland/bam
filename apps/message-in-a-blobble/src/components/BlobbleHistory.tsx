@@ -44,6 +44,14 @@ export function OnChainBlobbles() {
   const { data: blobbles = [], isLoading } = useQuery({
     queryKey: ['blobbles'],
     queryFn: fetchBlobbles,
+    // Only poll when the section is expanded. `/api/blobbles` does
+    // eth_getLogs + one eth_getBlock per unique block, so gating on
+    // `expanded` avoids unnecessary RPC load while the user has the
+    // audit view collapsed. `PostBlobbleButton` invalidates the
+    // `['blobbles']` query on flush success so a manual post still
+    // surfaces immediately.
+    enabled: expanded,
+    refetchInterval: 30_000,
   });
 
   return (
