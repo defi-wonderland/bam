@@ -149,6 +149,13 @@ export async function buildAndSubmitWithViem(
 
   const buildAndSubmit: BuildAndSubmit = async ({ contentTag, messages }) => {
     try {
+      // Load the KZG trusted setup before `commitToBlob` — the default
+      // loader in `ensureKzg` calls bam-sdk's `loadTrustedSetup()`,
+      // which primes the native c-kzg state that `commitToBlob` then
+      // reads. Without this running first, `commitToBlob` throws
+      // "KZG trusted setup not loaded. Call loadTrustedSetup() first."
+      const kzg = await ensureKzg();
+
       const signed: SignedMessage[] = messages.map((m) => ({
         author: m.author,
         timestamp: m.timestamp,
@@ -160,8 +167,6 @@ export async function buildAndSubmitWithViem(
       const batch = encodeBatch(signed);
       const blob = createBlob(batch.data);
       const { versionedHash } = commitToBlob(blob);
-
-      const kzg = await ensureKzg();
       const data = encodeFunctionData({
         abi: BAM_CORE_ABI,
         functionName: 'registerBlobBatch',

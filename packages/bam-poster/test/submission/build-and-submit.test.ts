@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import {
   bytesToHex,
   computeMessageHash,
@@ -23,12 +23,13 @@ import type { DecodedMessage } from '../../src/types.js';
 const TAG = ('0x' + 'aa'.repeat(32)) as Bytes32;
 const BAM_CORE = '0x9C4b230066a6808D83F5FBa0c040E0Df2Fcc7314' as Address;
 
-// `commitToBlob` (in bam-sdk) needs the KZG trusted setup. Load once
-// for all tests in this file. Safe to call repeatedly — the sdk
-// short-circuits if the native setup is already loaded.
-beforeAll(() => {
-  loadTrustedSetup();
-});
+// NOTE: we intentionally do NOT call `loadTrustedSetup` in a `beforeAll`
+// here. An earlier version of this file did, which masked a real bug
+// (buildAndSubmit was calling `commitToBlob` before the trusted setup
+// was primed). Now the stub `kzgLoader` below calls `loadTrustedSetup`
+// itself — matching what the default production loader does — so every
+// test exercises the same load-before-commit ordering, and a
+// regression would surface as "KZG trusted setup not loaded."
 
 async function signedDecoded(): Promise<DecodedMessage> {
   const pk = generateECDSAPrivateKey() as `0x${string}`;
@@ -79,14 +80,29 @@ function makeTransport(
   return { ...base, ...overrides };
 }
 
+/**
+ * Test double for the viem-side `Kzg` interface. Every stub loader
+ * that returns this also calls the real `loadTrustedSetup()` (via
+ * `stubLoader` below) — that's what the production default loader
+ * does, so tests exercise the same load-before-commit sequence.
+ */
 const STUB_KZG: Kzg = {
   blobToKzgCommitment: () => new Uint8Array(48),
   computeBlobKzgProof: () => new Uint8Array(48),
 };
 
+/**
+ * Stub loader: primes the SDK's trusted-setup state (same as the
+ * production default loader does) and returns a no-op Kzg for viem.
+ */
+const stubLoader = async (): Promise<Kzg> => {
+  loadTrustedSetup();
+  return STUB_KZG;
+};
+
 async function factory(
   transport: BuildAndSubmitTransport,
-  kzgLoader: () => Promise<Kzg> = async () => STUB_KZG
+  kzgLoader: () => Promise<Kzg> = stubLoader
 ): Promise<ReturnType<typeof buildAndSubmitWithViem>> {
   return buildAndSubmitWithViem({
     rpcUrl: 'http://unused',

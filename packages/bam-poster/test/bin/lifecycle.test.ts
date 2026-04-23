@@ -44,8 +44,16 @@ describe('bam-poster CLI — env validation lifecycle', () => {
     };
   }
 
+  // `POSTER_ENV_FILE=/dev/null/bam-poster-none` routes the dotenv
+  // loader through its explicit-override branch + then skips because
+  // the path doesn't exist. Prevents an ambient `.env.local` in any
+  // ancestor of the cwd from polluting the in-process test's view of
+  // process.env (which is what the CLI reads).
+  const skipDotenv = { POSTER_ENV_FILE: '/dev/null/bam-poster-none-xyz' };
+
   it('exits with code 2 when POSTER_SIGNER_PRIVATE_KEY is missing', async () => {
     const restoreEnv = withEnv({
+      ...skipDotenv,
       POSTER_ALLOWED_TAGS: '0x' + 'aa'.repeat(32),
       POSTER_CHAIN_ID: '1',
       POSTER_BAM_CORE_ADDRESS: '0x9C4b230066a6808D83F5FBa0c040E0Df2Fcc7314',
@@ -65,6 +73,7 @@ describe('bam-poster CLI — env validation lifecycle', () => {
 
   it('exits with code 2 when POSTER_ALLOWED_TAGS is empty', async () => {
     const restoreEnv = withEnv({
+      ...skipDotenv,
       POSTER_ALLOWED_TAGS: '',
       POSTER_CHAIN_ID: '1',
       POSTER_BAM_CORE_ADDRESS: '0x9C4b230066a6808D83F5FBa0c040E0Df2Fcc7314',
