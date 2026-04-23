@@ -6,7 +6,11 @@
  * Uses c-kzg-4844 library for cryptographic operations.
  */
 
-import * as cKzg from 'c-kzg';
+// Node's CJS→ESM bridge treats c-kzg's `module.exports = { ... }` as a
+// default export, not a flat namespace. `import *` leaves
+// `cKzg.loadTrustedSetup` undefined at runtime; `import cKzg from`
+// (under esModuleInterop) gives us the object directly.
+import cKzg from 'c-kzg';
 import { keccak_256 } from '@noble/hashes/sha3';
 import type {
   Blob,
