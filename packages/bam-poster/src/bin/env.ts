@@ -30,12 +30,23 @@ export interface ParsedEnv {
   authToken?: string;
 }
 
+const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
+
 function requireEnv(env: NodeJS.ProcessEnv, key: string): string {
   const v = env[key];
   if (v === undefined || v === '') {
     throw new EnvConfigError(`missing required env ${key}`);
   }
   return v;
+}
+
+function optionalAddressEnv(env: NodeJS.ProcessEnv, key: string): Address | undefined {
+  const v = env[key];
+  if (v === undefined || v === '') return undefined;
+  if (!ADDRESS_RE.test(v)) {
+    throw new EnvConfigError(`${key} must be a 20-byte hex address`);
+  }
+  return v as Address;
 }
 
 export function parseEnv(env: NodeJS.ProcessEnv = process.env): ParsedEnv {
@@ -60,9 +71,12 @@ export function parseEnv(env: NodeJS.ProcessEnv = process.env): ParsedEnv {
   }
 
   const bamCoreAddress = requireEnv(env, 'POSTER_BAM_CORE_ADDRESS');
-  if (!/^0x[0-9a-fA-F]{40}$/.test(bamCoreAddress)) {
+  if (!ADDRESS_RE.test(bamCoreAddress)) {
     throw new EnvConfigError('POSTER_BAM_CORE_ADDRESS must be a 20-byte hex address');
   }
+
+  const decoderAddress = optionalAddressEnv(env, 'POSTER_DECODER_ADDRESS');
+  const signatureRegistryAddress = optionalAddressEnv(env, 'POSTER_SIGNATURE_REGISTRY');
 
   const rpcUrl = requireEnv(env, 'POSTER_RPC_URL');
 
@@ -95,8 +109,8 @@ export function parseEnv(env: NodeJS.ProcessEnv = process.env): ParsedEnv {
     port,
     sqlitePath: env.POSTER_SQLITE_PATH,
     postgresUrl: env.POSTGRES_URL,
-    decoderAddress: env.POSTER_DECODER_ADDRESS as Address | undefined,
-    signatureRegistryAddress: env.POSTER_SIGNATURE_REGISTRY as Address | undefined,
+    decoderAddress,
+    signatureRegistryAddress,
     authToken: env.POSTER_AUTH_TOKEN && env.POSTER_AUTH_TOKEN.length > 0
       ? env.POSTER_AUTH_TOKEN
       : undefined,

@@ -84,11 +84,21 @@ async function rawFetch(
   const signal = init?.signal
     ? AbortSignal.any([init.signal, timeoutSignal])
     : timeoutSignal;
+  // Forward the operator's bearer token when POSTER_AUTH_TOKEN is set
+  // on the demo process (must match the token the Poster is running
+  // with). Without this, enabling auth on the Poster 401s every demo
+  // proxy call (qodo review).
+  const headers: Record<string, string> = {};
+  const token = process.env.POSTER_AUTH_TOKEN;
+  if (token && token.length > 0) {
+    headers.Authorization = `Bearer ${token}`;
+  }
   let res: Response;
   try {
     res = await fetch(url, {
       method,
       body: init?.body,
+      headers,
       signal,
     });
   } catch (err) {

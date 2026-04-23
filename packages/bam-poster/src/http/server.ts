@@ -124,7 +124,22 @@ export class HttpServer {
   }
 
   listen(port: number, host = '127.0.0.1'): Promise<void> {
-    return new Promise((resolve) => this.server.listen(port, host, () => resolve()));
+    // Reject on startup errors (EADDRINUSE, EACCES, …) so the CLI /
+    // tests surface a failed bind as a rejected promise rather than an
+    // unhandled 'error' event (qodo review).
+    return new Promise((resolve, reject) => {
+      const onError = (err: Error): void => {
+        this.server.removeListener('listening', onListening);
+        reject(err);
+      };
+      const onListening = (): void => {
+        this.server.removeListener('error', onError);
+        resolve();
+      };
+      this.server.once('error', onError);
+      this.server.once('listening', onListening);
+      this.server.listen(port, host);
+    });
   }
 
   address(): { address: string; port: number } | null {
