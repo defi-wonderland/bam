@@ -81,7 +81,16 @@ async function fetchConfirmed(): Promise<DisplayMessage[]> {
 }
 
 async function fetchMessages(): Promise<DisplayMessage[]> {
-  const [pending, confirmed] = await Promise.all([fetchPending(), fetchConfirmed()]);
+  // allSettled, not all: pending and confirmed come from independent
+  // backends (/api/messages → Poster vs /api/confirmed-messages →
+  // demo DB). One flaky endpoint should degrade the corresponding
+  // list, not blank both (cubic review).
+  const [pendingRes, confirmedRes] = await Promise.allSettled([
+    fetchPending(),
+    fetchConfirmed(),
+  ]);
+  const pending = pendingRes.status === 'fulfilled' ? pendingRes.value : [];
+  const confirmed = confirmedRes.status === 'fulfilled' ? confirmedRes.value : [];
   return [...pending, ...confirmed].sort((a, b) => b.timestamp - a.timestamp);
 }
 

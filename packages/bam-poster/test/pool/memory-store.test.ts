@@ -52,6 +52,39 @@ describe('MemoryPosterStore — pending CRUD', () => {
     expect(back!.nonce).toBe(1n);
   });
 
+  it('isolates Uint8Array fields from external mutation (cubic review)', async () => {
+    // Pre-fix, insertPending / getPendingByMessageId / listPending*
+    // spread the row with `{ ...row }` which preserves the same
+    // Uint8Array reference. A caller mutating the returned bytes
+    // corrupted the store. Clone on both boundaries.
+    const store = new MemoryPosterStore();
+    const content = new Uint8Array([9, 9, 9]);
+    const signature = new Uint8Array(65);
+    signature[0] = 0xde;
+    await store.withTxn(async (txn) => {
+      await txn.insertPending(makePending({ content, signature }));
+    });
+    // Mutate the caller-side buffers after insert — must not leak.
+    content[0] = 0xff;
+    signature[0] = 0xff;
+
+    const back = await store.withTxn(async (txn) =>
+      txn.getPendingByMessageId(('0x' + '11'.repeat(32)) as Bytes32)
+    );
+    expect(back).not.toBeNull();
+    expect(back!.content[0]).toBe(9);
+    expect(back!.signature[0]).toBe(0xde);
+
+    // And mutating the returned row must not leak back into the store.
+    back!.content[0] = 0xaa;
+    back!.signature[0] = 0xaa;
+    const back2 = await store.withTxn(async (txn) =>
+      txn.getPendingByMessageId(('0x' + '11'.repeat(32)) as Bytes32)
+    );
+    expect(back2!.content[0]).toBe(9);
+    expect(back2!.signature[0]).toBe(0xde);
+  });
+
   it('rejects duplicate message_id inserts', async () => {
     const store = new MemoryPosterStore();
     const row = makePending();

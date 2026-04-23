@@ -107,6 +107,7 @@ describe('IngestPipeline — cheap gates before crypto', () => {
         verifyCount++;
         return realEcdsa.validate(m);
       },
+      recoverSigner: realEcdsa.recoverSigner?.bind(realEcdsa),
     };
     // Fixed author (all garbage uses i=0) so rate-limit accumulates
     // against the same key.
@@ -122,6 +123,51 @@ describe('IngestPipeline — cheap gates before crypto', () => {
     // Validator budget: exactly `maxPerWindow` attempts reach the
     // signature check before rate-limit absorbs the rest.
     expect(verifyCount).toBeLessThanOrEqual(3);
+  });
+
+  it('rate-limit keys on recovered signer — rotating claimed author does not multiply budget', async () => {
+    // One real signing key, N rotating claimed-author values. Each
+    // envelope signs against the real key (so recovery yields the
+    // same address every time) while the envelope's `author` field
+    // rotates — the bypass cubic flagged: pre-fix, every rotation
+    // would land in a fresh rate-limit bucket. Post-fix, recovery
+    // collapses them into one bucket.
+    const { pipeline } = makePipeline({
+      rateLimit: { windowMs: 60_000, maxPerWindow: 2 },
+    });
+    const privateKey = generateECDSAPrivateKey();
+    const realAuthor = deriveAddress(privateKey);
+    const timestamp = 1_700_000_000;
+
+    // Build N envelopes that all recover to `realAuthor` but declare
+    // a rotating claimed author. They'll fail the ECDSA verify (since
+    // claimed != recovered) — but that's after monotonicity and after
+    // the rate-limit check. Rate-limit must still absorb them.
+    const envelopes: Uint8Array[] = [];
+    for (let i = 0; i < 20; i++) {
+      const claimedAuthor = ('0x' + (i + 1).toString(16).padStart(40, '0')) as Address;
+      const hash = computeMessageHash({ author: realAuthor, timestamp, nonce: i + 1, content: 'x' });
+      const sig = await signECDSA(privateKey, bytesToHex(hash) as Bytes32);
+      const env = {
+        contentTag: TAG,
+        message: {
+          author: claimedAuthor,
+          timestamp,
+          nonce: i + 1,
+          content: 'x',
+          signature: bytesToHex(sig),
+        },
+      };
+      envelopes.push(new TextEncoder().encode(JSON.stringify(env)));
+    }
+
+    let rateLimited = 0;
+    for (const raw of envelopes) {
+      const res = await pipeline.ingest(raw);
+      if (!res.accepted && res.reason === 'rate_limited') rateLimited++;
+    }
+    // maxPerWindow=2 ⇒ 18 of the 20 must be rate-limited.
+    expect(rateLimited).toBe(18);
   });
 
   it('rejects oversized payloads before parsing', async () => {

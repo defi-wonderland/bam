@@ -137,8 +137,37 @@ describe('SqlitePosterStore — pending CRUD', () => {
       );
     });
     await store.withTxn(async (txn) => {
-      expect(await txn.nextIngestSeq(TAG_A)).toBe(2);
+      expect(await txn.nextIngestSeq(TAG_A)).toBe(3);
       expect(await txn.nextIngestSeq(TAG_B)).toBe(1);
+    });
+  });
+
+  it('nextIngestSeq stays monotonic across deletes (cubic review)', async () => {
+    // Pre-fix, the counter was derived from MAX(ingest_seq) over
+    // poster_pending — so DELETE-ing every row (e.g. after a flush)
+    // reset the sequence and made sinceSeq cursors re-see ids they'd
+    // already consumed. Now the counter lives in poster_tag_seq and
+    // must keep climbing even when the pending table is empty.
+    store = new SqlitePosterStore(':memory:');
+    await store.withTxn(async (txn) => {
+      const s1 = await txn.nextIngestSeq(TAG_A);
+      await txn.insertPending(
+        pending({ messageId: ('0x' + '01'.repeat(32)) as Bytes32, ingestSeq: s1 })
+      );
+      const s2 = await txn.nextIngestSeq(TAG_A);
+      await txn.insertPending(
+        pending({ messageId: ('0x' + '02'.repeat(32)) as Bytes32, ingestSeq: s2 })
+      );
+      await txn.deletePending([
+        ('0x' + '01'.repeat(32)) as Bytes32,
+        ('0x' + '02'.repeat(32)) as Bytes32,
+      ]);
+      expect(await txn.countPendingByTag(TAG_A)).toBe(0);
+    });
+    await store.withTxn(async (txn) => {
+      // Pre-fix this was 1. Post-fix the counter carries across the
+      // flush and hands out 3 next.
+      expect(await txn.nextIngestSeq(TAG_A)).toBe(3);
     });
   });
 });

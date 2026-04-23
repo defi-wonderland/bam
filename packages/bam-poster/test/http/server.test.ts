@@ -388,6 +388,25 @@ describe('HTTP transport — query validation (cubic review)', () => {
     }
   });
 
+  it('rejects a malformed limit on /pending with 400 (cubic review)', async () => {
+    // Pre-fix, /pending accepted arbitrary limit strings — `?limit=abc`
+    // flowed NaN into the store. Now parsing mirrors submittedHandler.
+    const h = await startHarness();
+    try {
+      for (const bad of ['abc', '-1', '3.5']) {
+        const res = await fetch(`${h.baseUrl}/pending?limit=${bad}`);
+        expect(res.status).toBe(400);
+        const body = (await res.json()) as { error: string; field: string };
+        expect(body.error).toBe('invalid_query');
+        expect(body.field).toBe('limit');
+      }
+      const ok = await fetch(`${h.baseUrl}/pending?limit=10`);
+      expect(ok.status).toBe(200);
+    } finally {
+      await h.close();
+    }
+  });
+
   it('accepts a well-formed sinceBlock', async () => {
     const h = await startHarness();
     try {

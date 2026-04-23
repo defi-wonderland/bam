@@ -94,18 +94,18 @@ export class MemoryPosterStore implements PosterStore {
         if (pending.rows.has(row.messageId)) {
           throw new Error('insertPending: duplicate message_id');
         }
-        pending.rows.set(row.messageId, { ...row });
+        pending.rows.set(row.messageId, clonePending(row));
       },
       getPendingByMessageId(messageId: Bytes32): StoreTxnPendingRow | null {
         const row = pending.rows.get(messageId);
-        return row ? { ...row } : null;
+        return row ? clonePending(row) : null;
       },
       listPendingByTag(tag: Bytes32, limit?: number, sinceSeq?: number): StoreTxnPendingRow[] {
         const all: StoreTxnPendingRow[] = [];
         for (const row of pending.rows.values()) {
           if (row.contentTag !== tag) continue;
           if (sinceSeq !== undefined && row.ingestSeq <= sinceSeq) continue;
-          all.push({ ...row });
+          all.push(clonePending(row));
         }
         all.sort((a, b) => a.ingestSeq - b.ingestSeq);
         return typeof limit === 'number' ? all.slice(0, limit) : all;
@@ -114,7 +114,7 @@ export class MemoryPosterStore implements PosterStore {
         const all: StoreTxnPendingRow[] = [];
         for (const row of pending.rows.values()) {
           if (sinceSeq !== undefined && row.ingestSeq <= sinceSeq) continue;
-          all.push({ ...row });
+          all.push(clonePending(row));
         }
         all.sort((a, b) => {
           if (a.ingestedAt !== b.ingestedAt) return a.ingestedAt - b.ingestedAt;
@@ -205,6 +205,17 @@ export class MemoryPosterStore implements PosterStore {
 
 export function createMemoryStore(): PosterStore {
   return new MemoryPosterStore();
+}
+
+function clonePending(row: StoreTxnPendingRow): StoreTxnPendingRow {
+  // Spread preserves Uint8Array references. Without these explicit
+  // copies, a caller mutating the returned `content` / `signature`
+  // bytes would mutate the store's internal state (cubic review).
+  return {
+    ...row,
+    content: new Uint8Array(row.content),
+    signature: new Uint8Array(row.signature),
+  };
 }
 
 function cloneSubmitted(row: StoreTxnSubmittedRow): StoreTxnSubmittedRow {

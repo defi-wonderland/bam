@@ -20,6 +20,14 @@ export const SQL_CREATE_SQLITE = [
   )`,
   `CREATE INDEX IF NOT EXISTS idx_poster_pending_tag_seq
     ON poster_pending (content_tag, ingest_seq)`,
+  // Persistent per-tag ingest-seq counter. Decoupled from
+  // poster_pending so DELETEs on that table can't walk the sequence
+  // backwards (cubic review) — sinceSeq-based incremental reads stay
+  // monotonic across flushes.
+  `CREATE TABLE IF NOT EXISTS poster_tag_seq (
+    content_tag   TEXT PRIMARY KEY,
+    last_seq      INTEGER NOT NULL
+  )`,
   `CREATE TABLE IF NOT EXISTS poster_nonces (
     author             TEXT PRIMARY KEY,
     last_nonce         TEXT NOT NULL,
@@ -59,6 +67,12 @@ export const SQL_CREATE_POSTGRES = [
   )`,
   `CREATE INDEX IF NOT EXISTS idx_poster_pending_tag_seq
     ON poster_pending (content_tag, ingest_seq)`,
+  // See SQLite flavor: persistent per-tag ingest_seq counter so
+  // DELETE on poster_pending can't reset the sequence.
+  `CREATE TABLE IF NOT EXISTS poster_tag_seq (
+    content_tag   TEXT PRIMARY KEY,
+    last_seq      BIGINT NOT NULL
+  )`,
   `CREATE TABLE IF NOT EXISTS poster_nonces (
     author             TEXT PRIMARY KEY,
     last_nonce         TEXT NOT NULL,

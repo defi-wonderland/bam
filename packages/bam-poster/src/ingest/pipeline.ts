@@ -28,19 +28,30 @@ export interface IngestPipelineOptions {
 }
 
 /**
+ * Recovery failures (malformed signatures, oversized nonces, etc.) all
+ * land in this sentinel bucket so rotating `author` across bad inputs
+ * can't multiply the attacker's effective budget — every un-recoverable
+ * envelope competes for the same slots.
+ */
+const RECOVER_FAILED_KEY = '0x0000000000000000000000000000000000000000' as Address;
+
+/**
  * Enforces the exact ingest order (plan §C-1):
  *
- *     size → rate-limit → signed-tag → monotonicity → validator → insert
+ *     size → signed-tag → recover → rate-limit → monotonicity → validator → insert
  *
  * The full sequence runs under a single `PosterStore.withTxn` so
  * concurrent ingests of the same `(author, nonce)` race cleanly:
  * exactly one wins (plan §C-3). Rate-limit state is separate — it
- * doesn't need to roll back on a later-stage reject (pre-crypto
- * overhead is the whole point).
+ * doesn't need to roll back on a later-stage reject.
  *
- * The validator is only called after every cheap gate and the
- * monotonicity read; CPU-grief spam is absorbed at rate-limit and
- * never reaches `verifyECDSA`.
+ * The rate-limit key is the **recovered** signer (via
+ * `validator.recoverSigner`), not the claimed `author` from the
+ * envelope: otherwise a spammer can cycle the `author` field to land
+ * in fresh buckets and force the validator to run on every request
+ * (cubic review). `verifyECDSA` only runs after monotonicity, same as
+ * before — the recover step is cheap enough that doing it up-front
+ * closes the amplification without giving up the CPU-grief ordering.
  */
 export class IngestPipeline {
   constructor(private readonly opts: IngestPipelineOptions) {}
@@ -56,14 +67,9 @@ export class IngestPipeline {
     if (!parsed.ok) return { accepted: false, reason: parsed.result.reason };
     const { contentTag, message } = parsed.envelope;
 
-    // 2. Rate-limit — keyed on the claimed signer address. Cheap.
-    const rl = this.opts.rateLimiter.check(message.author);
-    if (!rl.ok) return { accepted: false, reason: rl.reason };
-
-    // 3. Signed-tag authority vs hint + allowlist.
-    //    Rate-limit slots are NOT released on reject — the spam floor
-    //    is what stops CPU-grief, and a caller that keeps resubmitting
-    //    something we reject IS spamming.
+    // 2. Signed-tag authority vs hint + allowlist. Structural, cheap,
+    //    and independent of crypto — do it before the recover step so
+    //    hint/tag misuse never forces an ecrecover.
     const tag = checkSignedTag(contentTag, hint?.contentTag, this.opts.allowlistedTags);
     if (!tag.ok) return { accepted: false, reason: tag.reason };
 
@@ -92,6 +98,18 @@ export class IngestPipeline {
       messageId,
       raw,
     };
+
+    // 3. Rate-limit, keyed on the recovered signer when the validator
+    //    exposes that capability. Fallback to claimed author preserves
+    //    behavior for custom validators that don't implement signer
+    //    recovery, and the garbage-signature path routes to the
+    //    sentinel bucket so it can't be amplified by rotating author.
+    //    Slots are NOT released on reject — the spam floor is what
+    //    stops CPU-grief, and a caller that keeps resubmitting
+    //    something we reject IS spamming.
+    const rateLimitKey = this.rateLimitKey(decoded);
+    const rl = this.opts.rateLimiter.check(rateLimitKey);
+    if (!rl.ok) return { accepted: false, reason: rl.reason };
 
     // 4-6. Monotonicity, validator, insert — all inside one txn so
     // two concurrent ingests on `(author, nonce, content)` resolve to
@@ -132,5 +150,20 @@ export class IngestPipeline {
       });
       return { accepted: true, messageId };
     });
+  }
+
+  private rateLimitKey(decoded: DecodedMessage): Address {
+    const recoverSigner = this.opts.validator.recoverSigner;
+    if (!recoverSigner) return decoded.author;
+    const recovered = recoverSigner.call(this.opts.validator, decoded);
+    if (recovered === null) return RECOVER_FAILED_KEY;
+    // Unauthenticated envelopes (claimed !== recovered) share the
+    // sentinel bucket so rotation across either field can't multiply
+    // the attacker's budget. Recovered addresses that match the
+    // claimed author key on the authenticated identity.
+    if (recovered.toLowerCase() !== decoded.author.toLowerCase()) {
+      return RECOVER_FAILED_KEY;
+    }
+    return recovered;
   }
 }

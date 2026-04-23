@@ -171,6 +171,18 @@ export type ValidationResult = { ok: true } | { ok: false; reason: PosterRejecti
 
 export interface MessageValidator {
   validate(msg: DecodedMessage): ValidationResult;
+  /**
+   * Optional: recover the *authenticated* signer identity from the
+   * message's signature. Used by the ingest pipeline to key the rate
+   * limiter on a value the client can't spoof — if this is absent (or
+   * returns `null`), rate-limit falls back to the claimed author and
+   * an attacker can multiply their effective budget by rotating the
+   * envelope's `author` field (cubic review).
+   *
+   * Must be side-effect free and cheap enough to run on every accepted
+   * envelope: the default ECDSA validator calls `recoverAddress` once.
+   */
+  recoverSigner?(msg: DecodedMessage): Address | null;
 }
 
 export interface PoolView {

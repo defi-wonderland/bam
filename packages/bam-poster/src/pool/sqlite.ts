@@ -189,10 +189,21 @@ export class SqlitePosterStore implements PosterStore {
         return row?.c ?? 0;
       },
       nextIngestSeq(tag: Bytes32): number {
+        // Counter lives in its own table so DELETE on poster_pending
+        // (e.g. after a flush) can't reset the sequence — without this,
+        // sinceSeq-based incremental reads would re-see old ingest_seq
+        // values and skip rows inserted after the flush (cubic review).
         const row = db
-          .prepare('SELECT COALESCE(MAX(ingest_seq), 0) AS m FROM poster_pending WHERE content_tag = ?')
-          .get(tag) as { m: number } | undefined;
-        return (row?.m ?? 0) + 1;
+          .prepare(
+            `INSERT INTO poster_tag_seq (content_tag, last_seq) VALUES (?, 1)
+             ON CONFLICT(content_tag) DO UPDATE SET last_seq = last_seq + 1
+             RETURNING last_seq`
+          )
+          .get(tag) as { last_seq: number } | undefined;
+        if (row === undefined) {
+          throw new Error('nextIngestSeq: INSERT ... RETURNING produced no row');
+        }
+        return row.last_seq;
       },
 
       getNonce(author: Address): NonceTrackerRow | null {

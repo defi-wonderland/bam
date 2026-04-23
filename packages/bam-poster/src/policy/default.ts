@@ -91,8 +91,12 @@ export function defaultBatchPolicy(
         if (ageMs >= ageTriggerMs) return { msgs: picked };
       }
 
-      // Count trigger.
-      if (countTrigger > 0 && picked.length >= countTrigger) {
+      // Count trigger — evaluated against the whole pending pool for
+      // the tag, not the greedy-selected batch. Selecting can be
+      // capped by blob capacity while the pool keeps growing; firing
+      // on `pending.length` matches the documented behavior ("pool
+      // holds at least this many messages", cubic review).
+      if (countTrigger > 0 && pending.length >= countTrigger) {
         return { msgs: picked };
       }
 

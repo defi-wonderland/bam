@@ -200,12 +200,17 @@ function makePgTxn(client: VercelPoolClient): StoreTxn {
       return Number(res.rows[0]?.c ?? 0);
     },
     async nextIngestSeq(tag: Bytes32): Promise<number> {
-      const res = await client.query<{ m: string | number | null }>(
-        'SELECT COALESCE(MAX(ingest_seq), 0) AS m FROM poster_pending WHERE content_tag = $1',
+      // Persistent per-tag counter (see SQLite flavor): DELETEs on
+      // poster_pending can't walk ingest_seq backwards.
+      const res = await client.query<{ last_seq: string | number }>(
+        `INSERT INTO poster_tag_seq (content_tag, last_seq) VALUES ($1, 1)
+         ON CONFLICT (content_tag) DO UPDATE SET last_seq = poster_tag_seq.last_seq + 1
+         RETURNING last_seq`,
         [tag]
       );
-      const cur = res.rows[0]?.m;
-      return (cur === null || cur === undefined ? 0 : Number(cur)) + 1;
+      const row = res.rows[0];
+      if (!row) throw new Error('nextIngestSeq: INSERT ... RETURNING produced no row');
+      return Number(row.last_seq);
     },
 
     async getNonce(author: Address): Promise<NonceTrackerRow | null> {

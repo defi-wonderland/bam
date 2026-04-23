@@ -137,14 +137,28 @@ export const submitHandler: Handler = async (req, res, ctx) => {
   });
 };
 
+type ParsedLimit =
+  | { ok: true; value: number | undefined }
+  | { ok: false };
+
+function parseLimit(limitStr: string | null): ParsedLimit {
+  if (limitStr === null || limitStr === '') return { ok: true, value: undefined };
+  if (!/^[0-9]+$/.test(limitStr)) return { ok: false };
+  const n = Number(limitStr);
+  if (!Number.isInteger(n) || n < 0) return { ok: false };
+  return { ok: true, value: n };
+}
+
 export const pendingHandler: Handler = async (req, res, ctx) => {
   const url = new URL(req.url ?? '/', 'http://local');
   const contentTag = url.searchParams.get('contentTag') ?? undefined;
-  const limitStr = url.searchParams.get('limit');
-  const limit = limitStr ? Number(limitStr) : undefined;
+  const limit = parseLimit(url.searchParams.get('limit'));
+  if (!limit.ok) {
+    return sendJson(res, 400, { error: 'invalid_query', field: 'limit' });
+  }
   const pending = await ctx.poster.listPending({
     contentTag: contentTag as `0x${string}` | undefined,
-    limit,
+    limit: limit.value,
   });
   return sendJson(res, 200, { pending });
 };
@@ -152,7 +166,6 @@ export const pendingHandler: Handler = async (req, res, ctx) => {
 export const submittedHandler: Handler = async (req, res, ctx) => {
   const url = new URL(req.url ?? '/', 'http://local');
   const contentTag = url.searchParams.get('contentTag') ?? undefined;
-  const limitStr = url.searchParams.get('limit');
   const sinceBlockStr = url.searchParams.get('sinceBlock');
 
   let sinceBlock: bigint | undefined;
@@ -166,18 +179,14 @@ export const submittedHandler: Handler = async (req, res, ctx) => {
     sinceBlock = BigInt(sinceBlockStr);
   }
 
-  let limit: number | undefined;
-  if (limitStr !== null && limitStr !== '') {
-    const n = Number(limitStr);
-    if (!Number.isInteger(n) || n < 0) {
-      return sendJson(res, 400, { error: 'invalid_query', field: 'limit' });
-    }
-    limit = n;
+  const limit = parseLimit(url.searchParams.get('limit'));
+  if (!limit.ok) {
+    return sendJson(res, 400, { error: 'invalid_query', field: 'limit' });
   }
 
   const batches = await ctx.poster.listSubmittedBatches({
     contentTag: contentTag as `0x${string}` | undefined,
-    limit,
+    limit: limit.value,
     sinceBlock,
   });
   return sendJson(res, 200, { batches });

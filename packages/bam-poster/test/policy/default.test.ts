@@ -124,6 +124,33 @@ describe('defaultBatchPolicy — triggers', () => {
     if (res) expect(res.msgs).toHaveLength(3);
   });
 
+  it('count trigger evaluates the pool, not the blob-capped selection (cubic review)', () => {
+    // Pool of 5 large messages; blob capacity only fits 2 per tick.
+    // Pre-fix the count-trigger read `picked.length` (2) and returned
+    // null when compared against countTrigger=3 — flushing never
+    // fired on count until size or age kicked in. Post-fix we
+    // compare against `pending.length` (5) and fire immediately.
+    const policy = defaultBatchPolicy({
+      sizeTriggerRatio: 0.999,
+      ageTriggerMs: 10 ** 9,
+      countTrigger: 3,
+    });
+    // Moderate content sizes so the blob-capacity cap bites after a
+    // few messages — estimateBatchSize compresses aggressively, so
+    // use a tight capacity here instead of huge payloads.
+    const msgs = Array.from({ length: 10 }, (_, i) => {
+      const payload = (i.toString(16) + Math.random().toString(36).slice(2)).repeat(200);
+      return msg({ nonce: BigInt(i + 1), content: payload });
+    });
+    const res = policy.select(TAG, fixedPool(msgs), 2000, new Date());
+    expect(res).not.toBeNull();
+    // The picked subset is still size-capped; we fire with whatever
+    // fits, and the submission loop drains the remainder next tick.
+    expect(res!.msgs.length).toBeGreaterThan(0);
+    expect(res!.msgs.length).toBeLessThan(10);
+    expect(res!.msgs[0].nonce).toBe(1n);
+  });
+
   it('forceFlush trumps every trigger threshold', () => {
     const policy = defaultBatchPolicy({ forceFlush: true });
     const msgs = [msg()];
