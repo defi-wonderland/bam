@@ -130,17 +130,19 @@ export class SqliteBamStore implements BamStore {
   }
 
   private initSchemaVersion(): void {
-    const row = this.db
-      .prepare('SELECT version FROM bam_store_schema LIMIT 1')
-      .get() as { version: number } | undefined;
-    if (row === undefined) {
-      this.db.prepare('INSERT INTO bam_store_schema (version) VALUES (?)').run(SCHEMA_VERSION);
-    }
+    // The singleton row pattern (id=1) plus ON CONFLICT means concurrent
+    // initialisations and mixed-version writers cannot grow the table
+    // beyond one row.
+    this.db
+      .prepare(
+        'INSERT INTO bam_store_schema (id, version) VALUES (1, ?) ON CONFLICT(id) DO NOTHING'
+      )
+      .run(SCHEMA_VERSION);
   }
 
   readSchemaVersion(): number {
     const row = this.db
-      .prepare('SELECT version FROM bam_store_schema LIMIT 1')
+      .prepare('SELECT version FROM bam_store_schema WHERE id = 1')
       .get() as { version: number } | undefined;
     return row?.version ?? SCHEMA_VERSION;
   }

@@ -37,17 +37,24 @@ export async function listSubmittedBatches(
   query: SubmittedBatchesQuery
 ): Promise<SubmittedBatch[]> {
   return store.withTxn(async (txn) => {
+    // Don't apply the caller's `limit` at the SQL layer. The
+    // null-`submittedAt` filter (the "is this our row?" discriminator)
+    // is applied locally; if we limited at SQL we could fill the entire
+    // window with Reader-observed rows and end up returning fewer
+    // Poster-submitted rows than the caller asked for, even though
+    // more exist further down. Over-fetch (no SQL limit), filter,
+    // then slice.
     const batches = await txn.listBatches({
       chainId,
       contentTag: query.contentTag,
       sinceBlock: query.sinceBlock,
-      limit: query.limit,
     });
     const out: SubmittedBatch[] = [];
     for (const b of batches) {
       if (b.submittedAt === null) continue;
       const msgs = await readSnapshotMessages(txn, b);
       out.push(mapBatch(b, msgs));
+      if (typeof query.limit === 'number' && out.length >= query.limit) break;
     }
     return out;
   });

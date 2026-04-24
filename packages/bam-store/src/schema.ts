@@ -18,8 +18,13 @@
 export const SCHEMA_VERSION = 4;
 
 export const SQL_CREATE_SQLITE = [
+  // Singleton row by design — `id` PK with a CHECK forces the table to
+  // hold at most one row regardless of how many writers race the seed
+  // INSERT or what SCHEMA_VERSION values they carry. A multi-row
+  // bam_store_schema would make the version read nondeterministic.
   `CREATE TABLE IF NOT EXISTS bam_store_schema (
-    version       INTEGER PRIMARY KEY
+    id            INTEGER NOT NULL PRIMARY KEY CHECK (id = 1),
+    version       INTEGER NOT NULL
   )`,
   `CREATE TABLE IF NOT EXISTS messages (
     author                      TEXT NOT NULL,
@@ -89,7 +94,8 @@ export const SQL_CREATE_SQLITE = [
  */
 export const SQL_CREATE_POSTGRES = [
   `CREATE TABLE IF NOT EXISTS bam_store_schema (
-    version       INTEGER PRIMARY KEY
+    id            INTEGER NOT NULL PRIMARY KEY CHECK (id = 1),
+    version       INTEGER NOT NULL
   )`,
   `CREATE TABLE IF NOT EXISTS messages (
     author                      TEXT NOT NULL,

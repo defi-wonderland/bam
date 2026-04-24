@@ -151,13 +151,13 @@ export class PostgresBamStore implements BamStore {
       for (const stmt of SQL_CREATE_POSTGRES) {
         await client.query(stmt);
       }
-      // Two processes starting concurrently against the same DB can both
-      // observe zero rows and then both attempt the INSERT. ON CONFLICT
-      // DO NOTHING makes the second writer a no-op without crashing. We
-      // do not check the existing version here — that's the schema-version
-      // guard's job (`reconcileSchemaVersion`), which runs separately.
+      // The singleton row pattern (id=1 with CHECK) plus ON CONFLICT
+      // means concurrent initialisations and mixed-version writers
+      // cannot grow the table beyond one row, so reads are
+      // deterministic. The version-mismatch check itself is owned by
+      // `reconcileSchemaVersion`, which runs separately.
       await client.query(
-        'INSERT INTO bam_store_schema (version) VALUES ($1) ON CONFLICT DO NOTHING',
+        'INSERT INTO bam_store_schema (id, version) VALUES (1, $1) ON CONFLICT (id) DO NOTHING',
         [SCHEMA_VERSION]
       );
     } finally {
@@ -170,7 +170,7 @@ export class PostgresBamStore implements BamStore {
     const client = await this.pool.connect();
     try {
       const res = await client.query<{ version: number }>(
-        'SELECT version FROM bam_store_schema LIMIT 1'
+        'SELECT version FROM bam_store_schema WHERE id = 1'
       );
       return res.rows[0]?.version ?? SCHEMA_VERSION;
     } finally {
