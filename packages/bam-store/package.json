@@ -1,0 +1,36 @@
+{
+  "name": "bam-store",
+  "version": "0.1.0",
+  "description": "BAM storage substrate — shared persistence layer for Poster and Reader.",
+  "type": "module",
+  "main": "dist/esm/index.js",
+  "module": "dist/esm/index.js",
+  "types": "dist/types/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/esm/index.js",
+      "types": "./dist/types/index.d.ts"
+    },
+    "./browser": {
+      "import": "./dist/esm/browser.js",
+      "types": "./dist/types/browser.d.ts"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.esm.json && tsc -p tsconfig.types.json",
+    "clean": "rm -rf dist",
+    "test": "vitest",
+    "test:run": "vitest --run",
+    "lint": "eslint src tests"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "license": "MIT"
+}
