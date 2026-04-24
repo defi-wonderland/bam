@@ -2,9 +2,12 @@ import Database from 'better-sqlite3';
 import type { Address, Bytes32 } from 'bam-sdk';
 
 import type {
+  BamStore,
+  BatchRow,
+  MessageRow,
   NonceTrackerRow,
   PendingKey,
-  BamStore,
+  ReaderCursorRow,
   StoreTxn,
   StoreTxnPendingRow,
   StoreTxnSubmittedRow,
@@ -317,6 +320,44 @@ export class SqliteBamStore implements BamStore {
         db.prepare(
           `UPDATE poster_submitted_batches SET ${setClauses.join(', ')} WHERE tx_hash = ?`
         ).run(...setParams, txHash);
+      },
+
+      // ── unified-schema methods: stubbed until T006 ────────────────────
+      markSubmitted(): void {
+        throw new Error('markSubmitted not implemented (T006)');
+      },
+      upsertObserved(): void {
+        throw new Error('upsertObserved not implemented (T006)');
+      },
+      markDuplicate(): void {
+        throw new Error('markDuplicate not implemented (T006)');
+      },
+      markReorged(): void {
+        throw new Error('markReorged not implemented (T006)');
+      },
+      listMessages(): MessageRow[] {
+        throw new Error('listMessages not implemented (T006)');
+      },
+      getByMessageId(): MessageRow | null {
+        throw new Error('getByMessageId not implemented (T006)');
+      },
+      getByAuthorNonce(): MessageRow | null {
+        throw new Error('getByAuthorNonce not implemented (T006)');
+      },
+      upsertBatch(): void {
+        throw new Error('upsertBatch not implemented (T006)');
+      },
+      updateBatchStatus(): void {
+        throw new Error('updateBatchStatus not implemented (T006)');
+      },
+      listBatches(): BatchRow[] {
+        throw new Error('listBatches not implemented (T006)');
+      },
+      getCursor(): ReaderCursorRow | null {
+        throw new Error('getCursor not implemented (T006)');
+      },
+      setCursor(): void {
+        throw new Error('setCursor not implemented (T006)');
       },
     };
   }

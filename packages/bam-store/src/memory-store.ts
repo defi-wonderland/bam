@@ -1,9 +1,12 @@
 import type { Address, Bytes32 } from 'bam-sdk';
 
 import type {
+  BamStore,
+  BatchRow,
+  MessageRow,
   NonceTrackerRow,
   PendingKey,
-  BamStore,
+  ReaderCursorRow,
   StoreTxn,
   StoreTxnPendingRow,
   StoreTxnSubmittedRow,
@@ -182,6 +185,44 @@ export class MemoryBamStore implements BamStore {
           invalidatedAt:
             invalidatedAt === undefined ? row.invalidatedAt : invalidatedAt,
         });
+      },
+
+      // ── unified-schema methods: stubbed until T005 ────────────────────
+      markSubmitted(): void {
+        throw new Error('markSubmitted not implemented (T005)');
+      },
+      upsertObserved(): void {
+        throw new Error('upsertObserved not implemented (T005)');
+      },
+      markDuplicate(): void {
+        throw new Error('markDuplicate not implemented (T005)');
+      },
+      markReorged(): void {
+        throw new Error('markReorged not implemented (T005)');
+      },
+      listMessages(): MessageRow[] {
+        throw new Error('listMessages not implemented (T005)');
+      },
+      getByMessageId(): MessageRow | null {
+        throw new Error('getByMessageId not implemented (T005)');
+      },
+      getByAuthorNonce(): MessageRow | null {
+        throw new Error('getByAuthorNonce not implemented (T005)');
+      },
+      upsertBatch(): void {
+        throw new Error('upsertBatch not implemented (T005)');
+      },
+      updateBatchStatus(): void {
+        throw new Error('updateBatchStatus not implemented (T005)');
+      },
+      listBatches(): BatchRow[] {
+        throw new Error('listBatches not implemented (T005)');
+      },
+      getCursor(): ReaderCursorRow | null {
+        throw new Error('getCursor not implemented (T005)');
+      },
+      setCursor(): void {
+        throw new Error('setCursor not implemented (T005)');
       },
     };
   }

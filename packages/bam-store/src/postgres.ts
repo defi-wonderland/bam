@@ -2,9 +2,12 @@ import { createPool, type VercelPool, type VercelPoolClient } from '@vercel/post
 import type { Address, Bytes32 } from 'bam-sdk';
 
 import type {
+  BamStore,
+  BatchRow,
+  MessageRow,
   NonceTrackerRow,
   PendingKey,
-  BamStore,
+  ReaderCursorRow,
   StoreTxn,
   StoreTxnPendingRow,
   StoreTxnSubmittedRow,
@@ -353,6 +356,44 @@ function makePgTxn(client: VercelPoolClient): StoreTxn {
         `UPDATE poster_submitted_batches SET ${sets.join(', ')} WHERE tx_hash = $${params.length}`,
         params
       );
+    },
+
+    // ── unified-schema methods: stubbed until T007 ────────────────────
+    async markSubmitted(): Promise<void> {
+      throw new Error('markSubmitted not implemented (T007)');
+    },
+    async upsertObserved(): Promise<void> {
+      throw new Error('upsertObserved not implemented (T007)');
+    },
+    async markDuplicate(): Promise<void> {
+      throw new Error('markDuplicate not implemented (T007)');
+    },
+    async markReorged(): Promise<void> {
+      throw new Error('markReorged not implemented (T007)');
+    },
+    async listMessages(): Promise<MessageRow[]> {
+      throw new Error('listMessages not implemented (T007)');
+    },
+    async getByMessageId(): Promise<MessageRow | null> {
+      throw new Error('getByMessageId not implemented (T007)');
+    },
+    async getByAuthorNonce(): Promise<MessageRow | null> {
+      throw new Error('getByAuthorNonce not implemented (T007)');
+    },
+    async upsertBatch(): Promise<void> {
+      throw new Error('upsertBatch not implemented (T007)');
+    },
+    async updateBatchStatus(): Promise<void> {
+      throw new Error('updateBatchStatus not implemented (T007)');
+    },
+    async listBatches(): Promise<BatchRow[]> {
+      throw new Error('listBatches not implemented (T007)');
+    },
+    async getCursor(): Promise<ReaderCursorRow | null> {
+      throw new Error('getCursor not implemented (T007)');
+    },
+    async setCursor(): Promise<void> {
+      throw new Error('setCursor not implemented (T007)');
     },
   };
 }
