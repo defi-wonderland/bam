@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import type { Address, Bytes32 } from 'bam-sdk';
 
-import { SqlitePosterStore } from '../src/sqlite.js';
-import type { PosterStore } from '../src/types.js';
+import { SqliteBamStore } from '../src/sqlite.js';
+import type { BamStore } from '../src/types.js';
 
 const TAG_A = ('0x' + 'aa'.repeat(32)) as Bytes32;
 const TAG_B = ('0x' + 'bb'.repeat(32)) as Bytes32;
@@ -10,10 +10,10 @@ const ADDR_1 = ('0x' + '11'.repeat(20)) as Address;
 const ADDR_2 = ('0x' + '22'.repeat(20)) as Address;
 const HASH_1 = ('0x' + '77'.repeat(32)) as Bytes32;
 
-const stores: PosterStore[] = [];
+const stores: BamStore[] = [];
 
-function newStore(): SqlitePosterStore {
-  const s = new SqlitePosterStore(':memory:');
+function newStore(): SqliteBamStore {
+  const s = new SqliteBamStore(':memory:');
   stores.push(s);
   return s;
 }
@@ -23,7 +23,7 @@ afterEach(async () => {
 });
 
 function pendingRow(overrides = {}): Parameters<
-  Parameters<PosterStore['withTxn']>[0] extends (txn: infer T) => unknown
+  Parameters<BamStore['withTxn']>[0] extends (txn: infer T) => unknown
     ? T extends { insertPending: (row: infer R) => unknown }
       ? (row: R) => unknown
       : never
@@ -44,7 +44,7 @@ function pendingRow(overrides = {}): Parameters<
   };
 }
 
-describe('SqlitePosterStore — schema + schema version', () => {
+describe('SqliteBamStore — schema + schema version', () => {
   it('fresh DB self-initialises schema version to 2', () => {
     const store = newStore();
     expect(store.readSchemaVersion()).toBe(2);
@@ -70,7 +70,7 @@ describe('SqlitePosterStore — schema + schema version', () => {
   });
 });
 
-describe('SqlitePosterStore — pending CRUD', () => {
+describe('SqliteBamStore — pending CRUD', () => {
   it('insert + getPendingByKey round-trip', async () => {
     const store = newStore();
     await store.withTxn(async (txn) => txn.insertPending(pendingRow()));
@@ -142,7 +142,7 @@ describe('SqlitePosterStore — pending CRUD', () => {
   });
 });
 
-describe('SqlitePosterStore — nonce tracker', () => {
+describe('SqliteBamStore — nonce tracker', () => {
   it('set + get round-trip with lowercase normalisation', async () => {
     const store = newStore();
     const sender = ('0x' + 'AA'.repeat(20)) as Address;
@@ -166,7 +166,7 @@ describe('SqlitePosterStore — nonce tracker', () => {
   });
 });
 
-describe('SqlitePosterStore — submitted batches', () => {
+describe('SqliteBamStore — submitted batches', () => {
   it('insert + getSubmittedByTx round-trip (incl. batchContentHash)', async () => {
     const store = newStore();
     const row = {

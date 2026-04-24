@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Address } from 'bam-sdk';
 
-import { SqlitePosterStore } from 'bam-store';
+import { SqliteBamStore } from 'bam-store';
 import {
   StartupReconciliationError,
   reconcileSchemaVersion,
@@ -15,13 +15,13 @@ import {
  */
 describe('reconcileSchemaVersion', () => {
   it('accepts a fresh v2 sqlite store', async () => {
-    const store = new SqlitePosterStore(':memory:');
+    const store = new SqliteBamStore(':memory:');
     await expect(reconcileSchemaVersion(store)).resolves.toBeUndefined();
     await store.close();
   });
 
   it('rejects a v1-shaped sqlite store with a StartupReconciliationError', async () => {
-    const store = new SqlitePosterStore(':memory:');
+    const store = new SqliteBamStore(':memory:');
     // Force the persisted version to v1 to simulate an upgrade from a
     // 001-era Poster.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -41,7 +41,7 @@ describe('reconcileSchemaVersion', () => {
   });
 
   it('error message points operators at the drop-and-recreate remedy', async () => {
-    const store = new SqlitePosterStore(':memory:');
+    const store = new SqliteBamStore(':memory:');
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const db = (store as unknown as { db: any }).db;
     db.prepare('UPDATE poster_schema SET version = 1').run();

@@ -1,6 +1,6 @@
-import type { PosterStore } from './types.js';
-import { PostgresPosterStore } from './postgres.js';
-import { SqlitePosterStore } from './sqlite.js';
+import type { BamStore } from './types.js';
+import { PostgresBamStore } from './postgres.js';
+import { SqliteBamStore } from './sqlite.js';
 
 export interface DbStoreOptions {
   /** Path for SQLite ("./poster.db", ":memory:", etc). Used when `postgresUrl` is absent. */
@@ -13,11 +13,11 @@ export interface DbStoreOptions {
  * Selects the DB adapter at startup: POSTGRES_URL wins; otherwise
  * SQLite.
  */
-export function createDbStore(options: DbStoreOptions): PosterStore {
+export function createDbStore(options: DbStoreOptions): BamStore {
   const pgUrl = options.postgresUrl ?? process.env.POSTGRES_URL;
   if (pgUrl && pgUrl.length > 0) {
-    return new PostgresPosterStore(pgUrl);
+    return new PostgresBamStore(pgUrl);
   }
   const path = options.sqlitePath ?? process.env.POSTER_SQLITE_PATH ?? './poster.db';
-  return new SqlitePosterStore(path);
+  return new SqliteBamStore(path);
 }

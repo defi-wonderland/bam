@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Address, Bytes32 } from 'bam-sdk';
 
-import { createMemoryStore, MemoryPosterStore } from '../src/memory-store.js';
+import { createMemoryStore, MemoryBamStore } from '../src/memory-store.js';
 import type {
   MessageSnapshot,
   StoreTxnPendingRow,
@@ -58,7 +58,7 @@ function submittedRow(overrides: Partial<StoreTxnSubmittedRow> = {}): StoreTxnSu
   };
 }
 
-describe('MemoryPosterStore — pending CRUD', () => {
+describe('MemoryBamStore — pending CRUD', () => {
   it('insertPending + getPendingByKey round-trip', async () => {
     const store = createMemoryStore();
     const row = pendingRow();
@@ -174,7 +174,7 @@ describe('MemoryPosterStore — pending CRUD', () => {
   });
 });
 
-describe('MemoryPosterStore — nonce tracker', () => {
+describe('MemoryBamStore — nonce tracker', () => {
   it('setNonce + getNonce round-trip (lowercased sender)', async () => {
     const store = createMemoryStore();
     const sender = ('0x' + 'AA'.repeat(20)) as Address;
@@ -207,7 +207,7 @@ describe('MemoryPosterStore — nonce tracker', () => {
   });
 });
 
-describe('MemoryPosterStore — submitted batches', () => {
+describe('MemoryBamStore — submitted batches', () => {
   it('insertSubmitted + getSubmittedByTx round-trip (contents preserved)', async () => {
     const store = createMemoryStore();
     const row = submittedRow();
@@ -277,7 +277,7 @@ describe('MemoryPosterStore — submitted batches', () => {
   });
 });
 
-describe('MemoryPosterStore — transaction rollback', () => {
+describe('MemoryBamStore — transaction rollback', () => {
   it('throws inside withTxn roll back pending inserts', async () => {
     const store = createMemoryStore();
     await store.withTxn(async (txn) => {
@@ -340,9 +340,9 @@ describe('MemoryPosterStore — transaction rollback', () => {
   });
 });
 
-describe('MemoryPosterStore — signature returned by clonePending', () => {
+describe('MemoryBamStore — signature returned by clonePending', () => {
   it('caller mutating returned bytes does not corrupt the store', async () => {
-    const store = new MemoryPosterStore();
+    const store = new MemoryBamStore();
     await store.withTxn(async (txn) => txn.insertPending(pendingRow()));
     const first = await store.withTxn((txn) =>
       Promise.resolve(txn.getPendingByKey({ sender: ADDR_1, nonce: 1n }))

@@ -1,5 +1,5 @@
 import type {
-  PosterStore,
+  BamStore,
   StoreTxnSubmittedRow,
   SubmittedBatch,
   SubmittedBatchesQuery,
@@ -15,7 +15,7 @@ import type {
  * (batch-scoped; nulled when the parent batch has been reorged out).
  */
 export async function listSubmittedBatches(
-  store: PosterStore,
+  store: BamStore,
   query: SubmittedBatchesQuery
 ): Promise<SubmittedBatch[]> {
   const rows = await store.withTxn(async (txn) => txn.listSubmitted(query));

@@ -9,7 +9,7 @@ import {
   DEFAULT_REORG_WINDOW,
   type BlockSource,
 } from '../../src/submission/reorg-watcher.js';
-import { MemoryPosterStore } from 'bam-store';
+import { MemoryBamStore } from 'bam-store';
 import type { MessageSnapshot } from '../../src/types.js';
 
 const TAG = ('0x' + 'aa'.repeat(32)) as Bytes32;
@@ -59,7 +59,7 @@ describe('clampReorgWindow', () => {
 
 describe('ReorgWatcher', () => {
   it('in-window reorg marks included row as reorged with invalidatedAt set', async () => {
-    const store = new MemoryPosterStore();
+    const store = new MemoryBamStore();
     const submittedAt = 1_000;
     await store.withTxn(async (txn) =>
       txn.insertSubmitted({
@@ -90,7 +90,7 @@ describe('ReorgWatcher', () => {
   });
 
   it('in-window reorg re-enqueues messages in original ingest order', async () => {
-    const store = new MemoryPosterStore();
+    const store = new MemoryBamStore();
     await store.withTxn(async (txn) =>
       txn.insertSubmitted({
         txHash: TX_A,
@@ -120,7 +120,7 @@ describe('ReorgWatcher', () => {
   });
 
   it('last-accepted-nonce tracker does NOT regress on reorg', async () => {
-    const store = new MemoryPosterStore();
+    const store = new MemoryBamStore();
     await store.withTxn(async (txn) => {
       txn.setNonce({
         sender: SENDER,
@@ -152,7 +152,7 @@ describe('ReorgWatcher', () => {
   });
 
   it('out-of-window reorg is ignored (row stays included)', async () => {
-    const store = new MemoryPosterStore();
+    const store = new MemoryBamStore();
     await store.withTxn(async (txn) =>
       txn.insertSubmitted({
         txHash: TX_A,
@@ -182,7 +182,7 @@ describe('ReorgWatcher', () => {
   });
 
   it('tx still on chain keeps status included', async () => {
-    const store = new MemoryPosterStore();
+    const store = new MemoryBamStore();
     await store.withTxn(async (txn) =>
       txn.insertSubmitted({
         txHash: TX_A,
@@ -209,7 +209,7 @@ describe('ReorgWatcher', () => {
   });
 
   it('re-enqueued messages become listable via listPendingByTag', async () => {
-    const store = new MemoryPosterStore();
+    const store = new MemoryBamStore();
     await store.withTxn(async (txn) =>
       txn.insertSubmitted({
         txHash: TX_A,

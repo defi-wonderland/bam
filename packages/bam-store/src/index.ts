@@ -10,7 +10,7 @@ export type {
   MessageSnapshot,
   NonceTrackerRow,
   PendingKey,
-  PosterStore,
+  BamStore,
   StoreTxn,
   StoreTxnPendingRow,
   StoreTxnSubmittedRow,
@@ -18,8 +18,8 @@ export type {
   SubmittedBatchesQuery,
 } from './types.js';
 
-export { createMemoryStore, MemoryPosterStore } from './memory-store.js';
+export { createMemoryStore, MemoryBamStore } from './memory-store.js';
 export { createDbStore, type DbStoreOptions } from './db-store.js';
-export { SqlitePosterStore } from './sqlite.js';
-export { PostgresPosterStore } from './postgres.js';
+export { SqliteBamStore } from './sqlite.js';
+export { PostgresBamStore } from './postgres.js';
 export { SCHEMA_VERSION } from './schema.js';

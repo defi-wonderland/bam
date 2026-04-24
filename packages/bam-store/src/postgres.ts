@@ -4,7 +4,7 @@ import type { Address, Bytes32 } from 'bam-sdk';
 import type {
   NonceTrackerRow,
   PendingKey,
-  PosterStore,
+  BamStore,
   StoreTxn,
   StoreTxnPendingRow,
   StoreTxnSubmittedRow,
@@ -86,7 +86,7 @@ function mapSubmitted(raw: SubmittedRowRaw): StoreTxnSubmittedRow {
   };
 }
 
-export class PostgresPosterStore implements PosterStore {
+export class PostgresBamStore implements BamStore {
   private readonly pool: VercelPool;
   private ready: Promise<void>;
 

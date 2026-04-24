@@ -3,7 +3,7 @@ import type { Address, Bytes32 } from 'bam-sdk';
 import type {
   NonceTrackerRow,
   PendingKey,
-  PosterStore,
+  BamStore,
   StoreTxn,
   StoreTxnPendingRow,
   StoreTxnSubmittedRow,
@@ -31,7 +31,7 @@ interface PendingState {
   tagSeq: Map<Bytes32, number>;
 }
 
-export class MemoryPosterStore implements PosterStore {
+export class MemoryBamStore implements BamStore {
   private readonly lock = new AsyncLock();
   private readonly pending: PendingState = {
     rows: new Map(),
@@ -187,8 +187,8 @@ export class MemoryPosterStore implements PosterStore {
   }
 }
 
-export function createMemoryStore(): PosterStore {
-  return new MemoryPosterStore();
+export function createMemoryStore(): BamStore {
+  return new MemoryBamStore();
 }
 
 function clonePending(row: StoreTxnPendingRow): StoreTxnPendingRow {

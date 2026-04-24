@@ -1,7 +1,7 @@
 import type {
   Pending,
   PendingQuery,
-  PosterStore,
+  BamStore,
   StoreTxnPendingRow,
 } from '../types.js';
 
@@ -10,7 +10,7 @@ import type {
  * tag the Poster serves; returns in per-tag FIFO order.
  */
 export async function listPending(
-  store: PosterStore,
+  store: BamStore,
   query: PendingQuery
 ): Promise<Pending[]> {
   const rows = await store.withTxn(async (txn) => {

@@ -1,13 +1,13 @@
 import type { Address, Bytes32 } from 'bam-sdk';
 
-import type { PosterStore, Signer, Status } from '../types.js';
+import type { BamStore, Signer, Status } from '../types.js';
 
 export interface StatusRpcReader {
   getBalance(address: Address): Promise<bigint>;
 }
 
 export interface StatusOptions {
-  store: PosterStore;
+  store: BamStore;
   rpc: StatusRpcReader;
   signer: Signer;
   configuredTags: readonly Bytes32[];

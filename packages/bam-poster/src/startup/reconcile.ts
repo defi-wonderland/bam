@@ -1,7 +1,7 @@
 import type { Address } from 'bam-sdk';
 
-import { SCHEMA_VERSION, SqlitePosterStore, PostgresPosterStore } from 'bam-store';
-import type { PosterStore } from '../types.js';
+import { SCHEMA_VERSION, SqliteBamStore, PostgresBamStore } from 'bam-store';
+import type { BamStore } from '../types.js';
 
 /**
  * Minimal Ethereum JSON-RPC surface the startup reconciliation needs.
@@ -57,14 +57,14 @@ export async function reconcileStartup(
  * pool tables; no auto-migration. The error message points operators
  * at the remedy.
  */
-export async function reconcileSchemaVersion(store: PosterStore): Promise<void> {
+export async function reconcileSchemaVersion(store: BamStore): Promise<void> {
   // Duck-type the adapters that expose a schema-version read. The
   // in-memory store has no persisted schema (always current), so we
   // skip it silently.
   let found: number | null = null;
-  if (store instanceof SqlitePosterStore) {
+  if (store instanceof SqliteBamStore) {
     found = store.readSchemaVersion();
-  } else if (store instanceof PostgresPosterStore) {
+  } else if (store instanceof PostgresBamStore) {
     found = await store.readSchemaVersion();
   } else {
     return;

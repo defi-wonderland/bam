@@ -21,7 +21,7 @@ export interface SubmittedBatchesQuery {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// PosterStore — single durable substrate for pool + dedup + submitted
+// BamStore — single durable substrate for pool + dedup + submitted
 // ═══════════════════════════════════════════════════════════════════════
 
 export interface StoreTxnPendingRow {
@@ -115,7 +115,7 @@ export interface StoreTxn {
   ): void | Promise<void>;
 }
 
-export interface PosterStore {
+export interface BamStore {
   withTxn<T>(fn: (txn: StoreTxn) => Promise<T>): Promise<T>;
   close(): Promise<void>;
 }

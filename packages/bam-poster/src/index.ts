@@ -30,7 +30,7 @@ export type {
   PoolView,
   Signer,
   DecodedMessage,
-  PosterStore,
+  BamStore,
   StoreTxn,
   StoreTxnPendingRow,
   StoreTxnSubmittedRow,
@@ -45,10 +45,10 @@ export type { PosterRejection } from './errors.js';
 export { POSTER_REJECTIONS } from './errors.js';
 
 export { LocalEcdsaSigner } from './signer/local.js';
-export { createMemoryStore, MemoryPosterStore } from 'bam-store';
+export { createMemoryStore, MemoryBamStore } from 'bam-store';
 export { createDbStore, type DbStoreOptions } from 'bam-store';
-export { SqlitePosterStore } from 'bam-store';
-export { PostgresPosterStore } from 'bam-store';
+export { SqliteBamStore } from 'bam-store';
+export { PostgresBamStore } from 'bam-store';
 
 export { defaultEcdsaValidator } from './validator/default-ecdsa.js';
 export {

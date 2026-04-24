@@ -2,7 +2,7 @@ import type { Bytes32 } from 'bam-sdk';
 
 import type {
   MessageSnapshot,
-  PosterStore,
+  BamStore,
   StoreTxnSubmittedRow,
 } from '../types.js';
 
@@ -22,7 +22,7 @@ export interface BlockSource {
 }
 
 export interface ReorgWatcherOptions {
-  store: PosterStore;
+  store: BamStore;
   blockSource: BlockSource;
   /** Window within which reorgs are re-enqueued. Clamped [4, 128]. */
   reorgWindowBlocks: number;

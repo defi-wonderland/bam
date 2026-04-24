@@ -9,7 +9,7 @@ import {
 
 import { IngestPipeline } from '../../src/ingest/pipeline.js';
 import { RateLimiter } from '../../src/ingest/rate-limit.js';
-import { MemoryPosterStore } from 'bam-store';
+import { MemoryBamStore } from 'bam-store';
 import type { MessageValidator } from '../../src/types.js';
 
 const CHAIN_ID = 31337;
@@ -55,7 +55,7 @@ function signedEnvelope(opts: {
 
 interface Harness {
   pipeline: IngestPipeline;
-  store: MemoryPosterStore;
+  store: MemoryBamStore;
   validator: MessageValidator;
   verifyCalls: { count: number };
 }
@@ -68,7 +68,7 @@ function mkHarness(opts?: {
   maxMessageSizeBytes?: number;
   maxContentsSizeBytes?: number;
 }): Harness {
-  const store = new MemoryPosterStore();
+  const store = new MemoryBamStore();
   const rate = opts?.rate ?? { windowMs: 60_000, maxPerWindow: 1_000 };
   const limiter = new RateLimiter(rate);
   const counter = opts?.verifyCallCounter ?? { count: 0 };

@@ -7,7 +7,7 @@ import type {
   MessageSnapshot,
   PoolView,
   PosterLogger,
-  PosterStore,
+  BamStore,
   StoreTxnPendingRow,
 } from '../types.js';
 import { BackoffState } from './backoff.js';
@@ -18,7 +18,7 @@ const NOOP_LOGGER: PosterLogger = () => undefined;
 
 export interface SubmissionLoopOptions {
   tag: Bytes32;
-  store: PosterStore;
+  store: BamStore;
   policy: BatchPolicy;
   blobCapacityBytes: number;
   buildAndSubmit: BuildAndSubmit;

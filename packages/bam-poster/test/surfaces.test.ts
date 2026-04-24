@@ -5,7 +5,7 @@ import { listPending } from '../src/surfaces/pending.js';
 import { listSubmittedBatches } from '../src/surfaces/submitted.js';
 import { readStatus } from '../src/surfaces/status.js';
 import { readHealth } from '../src/surfaces/health.js';
-import { MemoryPosterStore } from 'bam-store';
+import { MemoryBamStore } from 'bam-store';
 import type {
   MessageSnapshot,
   Signer,
@@ -73,7 +73,7 @@ class StubSigner implements Signer {
 
 describe('listPending', () => {
   it('returns BAMMessage-shaped rows with messageHash (no v1 content/timestamp)', async () => {
-    const store = new MemoryPosterStore();
+    const store = new MemoryBamStore();
     await store.withTxn(async (txn) => txn.insertPending(pendingRow()));
     const rows = await listPending(store, {});
     expect(rows.length).toBe(1);
@@ -84,7 +84,7 @@ describe('listPending', () => {
   });
 
   it('filters by contentTag', async () => {
-    const store = new MemoryPosterStore();
+    const store = new MemoryBamStore();
     await store.withTxn(async (txn) => {
       txn.insertPending(pendingRow({ nonce: 1n, ingestSeq: 1 }));
       txn.insertPending(pendingRow({ nonce: 2n, ingestSeq: 2, contentTag: TAG_B }));
@@ -98,7 +98,7 @@ describe('listPending', () => {
 
 describe('listSubmittedBatches', () => {
   it('status "included" → messageId is populated, invalidatedAt null', async () => {
-    const store = new MemoryPosterStore();
+    const store = new MemoryBamStore();
     await store.withTxn(async (txn) => txn.insertSubmitted(submittedRow()));
     const rows = await listSubmittedBatches(store, {});
     expect(rows.length).toBe(1);
@@ -108,7 +108,7 @@ describe('listSubmittedBatches', () => {
   });
 
   it('status "reorged" → messageId is surfaced as null on every message', async () => {
-    const store = new MemoryPosterStore();
+    const store = new MemoryBamStore();
     await store.withTxn(async (txn) =>
       txn.insertSubmitted(
         submittedRow({ status: 'reorged', invalidatedAt: 3_000 })
@@ -121,14 +121,14 @@ describe('listSubmittedBatches', () => {
   });
 
   it('returns batchContentHash on every entry', async () => {
-    const store = new MemoryPosterStore();
+    const store = new MemoryBamStore();
     await store.withTxn(async (txn) => txn.insertSubmitted(submittedRow()));
     const rows = await listSubmittedBatches(store, {});
     expect(rows[0].batchContentHash).toBe('0x' + '03'.repeat(32));
   });
 
   it('filters by sinceBlock', async () => {
-    const store = new MemoryPosterStore();
+    const store = new MemoryBamStore();
     await store.withTxn(async (txn) => {
       txn.insertSubmitted(
         submittedRow({ txHash: ('0x' + '01'.repeat(32)) as Bytes32, blockNumber: 10 })
@@ -145,7 +145,7 @@ describe('listSubmittedBatches', () => {
 
 describe('readStatus', () => {
   it('returns wallet address + balance + per-tag pending counts', async () => {
-    const store = new MemoryPosterStore();
+    const store = new MemoryBamStore();
     await store.withTxn(async (txn) => {
       txn.insertPending(pendingRow({ nonce: 1n, ingestSeq: 1 }));
       txn.insertPending(pendingRow({ nonce: 2n, ingestSeq: 2 }));
@@ -168,7 +168,7 @@ describe('readStatus', () => {
   });
 
   it('surfaces lastSubmittedByTag', async () => {
-    const store = new MemoryPosterStore();
+    const store = new MemoryBamStore();
     await store.withTxn(async (txn) => txn.insertSubmitted(submittedRow()));
     const rpc: StatusRpcReader = {
       async getBalance() {

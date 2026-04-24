@@ -11,7 +11,7 @@ import type {
   MessageSnapshot,
   NonceTrackerRow,
   PendingKey,
-  PosterStore,
+  BamStore,
   StoreTxn,
   StoreTxnPendingRow,
   StoreTxnSubmittedRow,
@@ -28,7 +28,7 @@ export type {
   MessageSnapshot,
   NonceTrackerRow,
   PendingKey,
-  PosterStore,
+  BamStore,
   StoreTxn,
   StoreTxnPendingRow,
   StoreTxnSubmittedRow,
@@ -238,7 +238,7 @@ export interface PosterConfig {
   reorgWindowBlocks?: number;
   rateLimit?: RateLimitConfig;
   backoff?: BackoffConfig;
-  store?: PosterStore;
+  store?: BamStore;
   now?: () => Date;
   idlePollMs?: number;
   reorgPollMs?: number;

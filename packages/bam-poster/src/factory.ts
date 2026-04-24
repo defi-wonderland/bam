@@ -10,7 +10,7 @@ import type {
   Poster,
   PosterConfig,
   PosterLogger,
-  PosterStore,
+  BamStore,
   Status,
   SubmitHint,
   SubmitResult,
@@ -128,7 +128,7 @@ export async function createPoster(
       bamCoreAddress: config.bamCoreAddress,
     });
 
-    const store: PosterStore = config.store ?? createMemoryStore();
+    const store: BamStore = config.store ?? createMemoryStore();
     await reconcileSchemaVersion(store);
     const validator: MessageValidator = config.validator ?? defaultEcdsaValidator(config.chainId);
     const batchPolicy: BatchPolicy = config.batchPolicy ?? defaultBatchPolicy();

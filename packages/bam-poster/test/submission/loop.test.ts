@@ -3,7 +3,7 @@ import type { Address, Bytes32 } from 'bam-sdk';
 
 import { SubmissionLoop } from '../../src/submission/loop.js';
 import { DEFAULT_BACKOFF } from '../../src/submission/backoff.js';
-import { MemoryPosterStore } from 'bam-store';
+import { MemoryBamStore } from 'bam-store';
 import type { BuildAndSubmit, SubmitOutcome } from '../../src/submission/types.js';
 import type { BatchPolicy, DecodedMessage, PoolView } from '../../src/types.js';
 
@@ -34,7 +34,7 @@ function mkPolicy(select: (pool: PoolView) => DecodedMessage[] | null): BatchPol
 }
 
 interface Harness {
-  store: MemoryPosterStore;
+  store: MemoryBamStore;
   loop: SubmissionLoop;
   outcomes: SubmitOutcome[];
   build: BuildAndSubmit;
@@ -45,7 +45,7 @@ function mkHarness(opts: {
   sequence?: SubmitOutcome[];
   policyPicks?: number;
 }): Harness {
-  const store = new MemoryPosterStore();
+  const store = new MemoryBamStore();
   const picks = opts.policyPicks ?? 2;
   const policy = mkPolicy((pool) => {
     const msgs = pool.list(TAG);
@@ -73,7 +73,7 @@ function mkHarness(opts: {
   return { store, loop, outcomes: calls, build };
 }
 
-async function seedPending(store: MemoryPosterStore, count: number): Promise<void> {
+async function seedPending(store: MemoryBamStore, count: number): Promise<void> {
   await store.withTxn(async (txn) => {
     for (let i = 1; i <= count; i++) {
       const contents = new Uint8Array(40);

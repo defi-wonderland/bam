@@ -4,7 +4,7 @@ import type { Address, Bytes32 } from 'bam-sdk';
 import type {
   NonceTrackerRow,
   PendingKey,
-  PosterStore,
+  BamStore,
   StoreTxn,
   StoreTxnPendingRow,
   StoreTxnSubmittedRow,
@@ -73,7 +73,7 @@ function mapSubmitted(raw: SubmittedRowRaw): StoreTxnSubmittedRow {
   };
 }
 
-export class SqlitePosterStore implements PosterStore {
+export class SqliteBamStore implements BamStore {
   private readonly db: Database.Database;
   private txnChain: Promise<unknown> = Promise.resolve();
 
