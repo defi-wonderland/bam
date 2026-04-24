@@ -14,9 +14,9 @@ export interface StatusOptions {
 }
 
 /**
- * `status()` read surface — quantitative (plan §C-9). Disjoint from
- * `health()`: this surface returns numbers and refs to last-submitted
- * batches; it never returns `state` / `reason`.
+ * `status()` read surface — quantitative. Disjoint from `health()`:
+ * this surface returns numbers and refs to last-submitted batches; it
+ * never returns `state` / `reason`.
  */
 export async function readStatus(opts: StatusOptions): Promise<Status> {
   const walletAddress = opts.signer.account().address;

@@ -1,6 +1,6 @@
 {
   "name": "@bam/poster",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "BAM Poster — Node-only library + HTTP service + CLI that batches ingested messages and submits them to L1 as blob batches via BAM Core.",
   "type": "module",
   "main": "dist/esm/index.js",

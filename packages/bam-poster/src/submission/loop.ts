@@ -1,4 +1,4 @@
-import type { Bytes32 } from 'bam-sdk';
+import { computeMessageId, type Bytes32 } from 'bam-sdk';
 
 import type {
   BatchPolicy,
@@ -14,10 +14,6 @@ import { BackoffState } from './backoff.js';
 import type { BackoffConfig } from '../types.js';
 import type { BuildAndSubmit } from './types.js';
 
-// Hoisted so decoding pending-row bytes doesn't allocate a fresh
-// TextDecoder per message on the tick path.
-const TEXT_DECODER = new TextDecoder();
-
 const NOOP_LOGGER: PosterLogger = () => undefined;
 
 export interface SubmissionLoopOptions {
@@ -30,10 +26,9 @@ export interface SubmissionLoopOptions {
   now: () => Date;
   /**
    * Reorg-tolerance window, in blocks. Used to bound the
-   * `replacedByTxHash` link walk (FU-2 / R2) — any `reorged` row
-   * older than `includedBlockNumber - reorgWindowBlocks` is past the
-   * window where a reorg could have affected it and needn't be
-   * considered.
+   * `replacedByTxHash` link walk — any `reorged` row older than
+   * `includedBlockNumber - reorgWindowBlocks` is past the window where
+   * a reorg could have affected it and needn't be considered.
    */
   reorgWindowBlocks: number;
   /**
@@ -102,28 +97,26 @@ export class SubmissionLoop {
     if (outcome.kind === 'included') {
       // 4. Snapshot payloads + insert submitted row + prune pending +
       //    link any prior `reorged` rows whose messages we just
-      //    resubmitted — all in ONE `withTxn` (FU-3). The snapshot is
-      //    retained on the submitted row so the reorg watcher can
-      //    re-enqueue without depending on the pending pool surviving
-      //    past inclusion.
-      const includedMessageIds = picked.map((m) => m.messageId);
+      //    resubmitted — all in ONE `withTxn`. Each message gets its
+      //    batch-scoped `messageId` computed from the blob-versioned
+      //    hash (ERC-8180 messageId = keccak256(sender, nonce,
+      //    batchContentHash)).
+      const batchContentHash = outcome.blobVersionedHash;
+      const pickedKeys = picked.map((m) => ({ sender: m.sender, nonce: m.nonce }));
       const submittedAt = this.opts.now().getTime();
       await this.opts.store.withTxn(async (txn) => {
-        // Snapshot the full pending rows for the messages we picked.
-        // If any have already been pruned (shouldn't happen inside the
-        // same txn, but defensively), skip — the submission still lands,
-        // we just can't recover that payload on reorg.
         const snaps: MessageSnapshot[] = [];
         for (const m of picked) {
-          const row = await txn.getPendingByMessageId(m.messageId);
+          const row = await txn.getPendingByKey({ sender: m.sender, nonce: m.nonce });
           if (row === null) continue;
+          const messageId = computeMessageId(row.sender, row.nonce, batchContentHash);
           snaps.push({
-            messageId: row.messageId,
-            author: row.author,
+            sender: row.sender,
             nonce: row.nonce,
-            timestamp: row.timestamp,
-            content: TEXT_DECODER.decode(row.content),
+            contents: new Uint8Array(row.contents),
             signature: new Uint8Array(row.signature),
+            messageHash: row.messageHash,
+            messageId,
             originalIngestSeq: row.ingestSeq,
           });
         }
@@ -132,21 +125,22 @@ export class SubmissionLoop {
           txHash: outcome.txHash,
           contentTag: this.opts.tag,
           blobVersionedHash: outcome.blobVersionedHash,
+          batchContentHash,
           blockNumber: outcome.blockNumber,
           status: 'included',
           replacedByTxHash: null,
           submittedAt,
-          messageIds: includedMessageIds,
+          invalidatedAt: null,
           messages: snaps,
         });
-        await txn.deletePending(includedMessageIds);
+        await txn.deletePending(pickedKeys);
 
-        // FU-2: any prior `reorged` row for this tag whose messageIds
-        // overlap with the batch we just submitted now has its
-        // `replacedByTxHash` link. R2: bound the walk to the reorg
-        // window so this stays O(window) on a Poster that's been
-        // running for months.
-        const includedSet = new Set(includedMessageIds.map((id) => id.toLowerCase()));
+        // Chain any prior `reorged` row whose messageHash set
+        // overlaps with this submission: transition it to
+        // `resubmitted` and link via `replacedByTxHash`.
+        const includedHashSet = new Set(
+          snaps.map((s) => s.messageHash.toLowerCase())
+        );
         const windowStart = BigInt(
           Math.max(0, outcome.blockNumber - this.opts.reorgWindowBlocks)
         );
@@ -156,14 +150,14 @@ export class SubmissionLoop {
         });
         for (const entry of recent) {
           if (entry.status !== 'reorged') continue;
-          if (entry.replacedByTxHash !== null) continue; // already chained
-          const overlaps = entry.messageIds.some((id) =>
-            includedSet.has(id.toLowerCase())
+          if (entry.replacedByTxHash !== null) continue;
+          const overlaps = entry.messages.some((m) =>
+            includedHashSet.has(m.messageHash.toLowerCase())
           );
           if (overlaps) {
             await txn.updateSubmittedStatus(
               entry.txHash,
-              'reorged',
+              'resubmitted',
               outcome.txHash,
               entry.blockNumber
             );
@@ -173,7 +167,7 @@ export class SubmissionLoop {
       this.backoff.recordSuccess();
       this.log(
         'info',
-        `tag ${this.opts.tag} submitted ${includedMessageIds.length} message(s) → ` +
+        `tag ${this.opts.tag} submitted ${picked.length} message(s) → ` +
           `tx ${outcome.txHash} (block ${outcome.blockNumber}, ` +
           `versionedHash ${outcome.blobVersionedHash})`
       );
@@ -218,13 +212,12 @@ export class SubmissionLoop {
 
 function pendingRowToDecoded(row: StoreTxnPendingRow): DecodedMessage {
   return {
-    author: row.author,
-    timestamp: row.timestamp,
+    sender: row.sender,
     nonce: row.nonce,
-    content: TEXT_DECODER.decode(row.content),
+    contents: row.contents,
     contentTag: row.contentTag,
     signature: row.signature,
-    messageId: row.messageId,
+    messageHash: row.messageHash,
     ingestedAt: row.ingestedAt,
   };
 }

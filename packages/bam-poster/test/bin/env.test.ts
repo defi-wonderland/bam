@@ -84,7 +84,7 @@ describe('parseEnv', () => {
     expect(env.port).toBe(8787);
   });
 
-  it('exposes POSTER_AUTH_TOKEN when set (FU-12)', () => {
+  it('exposes POSTER_AUTH_TOKEN when set', () => {
     const env = parseEnv({ ...BASE, POSTER_AUTH_TOKEN: 'secret-xyz' });
     expect(env.authToken).toBe('secret-xyz');
   });

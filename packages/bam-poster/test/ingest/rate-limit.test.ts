@@ -62,7 +62,7 @@ describe('RateLimiter', () => {
     expect(rl.check(('0x' + 'a'.repeat(40)) as Address).ok).toBe(false);
   });
 
-  it('exposes a non-DoS default aligned with spec §Non-goals', () => {
+  it('exposes a positive default window and cap (spam floor, not DoS mitigation)', () => {
     expect(DEFAULT_RATE_LIMIT.windowMs).toBeGreaterThan(0);
     expect(DEFAULT_RATE_LIMIT.maxPerWindow).toBeGreaterThan(0);
   });

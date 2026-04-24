@@ -10,7 +10,7 @@ import { LocalEcdsaSigner } from '../../src/signer/local.js';
  */
 const PRIVATE_KEY_PATTERN = /(?<![0-9a-fA-F])0x[0-9a-fA-F]{64}(?![0-9a-fA-F])/;
 
-describe('LocalEcdsaSigner — leak grep (gate G-6)', () => {
+describe('LocalEcdsaSigner — private-key leak grep', () => {
   it('never leaks the private key through toString / toJSON / util.inspect over 1000 fuzzed configs', async () => {
     const util = await import('node:util');
     for (let i = 0; i < 1000; i++) {

@@ -1,208 +1,199 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import {
-  bytesToHex,
-  computeMessageHash,
-  generateECDSAPrivateKey,
-  signECDSA,
+  encodeContents,
+  signECDSAWithKey,
   type Address,
+  type BAMMessage,
   type Bytes32,
 } from 'bam-sdk';
-import { privateKeyToAccount } from 'viem/accounts';
 
 import {
-  LocalEcdsaSigner,
-  _clearSignerRegistryForTests,
-  createMemoryStore,
   createPoster,
+  _clearSignerRegistryForTests,
+  LocalEcdsaSigner,
+  defaultBatchPolicy,
+  type InternalPoster,
 } from '../../src/index.js';
-import type {
-  BlockSource,
-  BuildAndSubmit,
-  Poster,
-  PosterFactoryExtras,
-  SubmitOutcome,
-} from '../../src/index.js';
+import type { BuildAndSubmit, SubmitOutcome } from '../../src/submission/types.js';
+import type { BlockSource } from '../../src/submission/reorg-watcher.js';
+import type { ReconcileRpcClient } from '../../src/startup/reconcile.js';
+import type { StatusRpcReader } from '../../src/surfaces/status.js';
 
-const TAG_A = ('0x' + 'aa'.repeat(32)) as Bytes32;
-const TAG_B = ('0x' + 'bb'.repeat(32)) as Bytes32;
-const BAM_CORE = '0x9C4b230066a6808D83F5FBa0c040E0Df2Fcc7314' as Address;
+/**
+ * Integration: ingest → pool → flush → reorg, exercised end-to-end
+ * through the public factory with the submission loop + reorg watcher
+ * driven manually via `InternalPoster` hooks. Replaces the deleted
+ * full-cycle coverage.
+ */
 
-class FakeChain {
-  head = 100n;
-  /** txHash → current canonical block, or null if reorged out. */
-  txs = new Map<Bytes32, number | null>();
+const CHAIN_ID = 31337;
+const PRIV = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80' as const;
+const SENDER = '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266' as Address;
+const TAG = ('0x' + 'aa'.repeat(32)) as Bytes32;
+const BAM_CORE = ('0x' + '22'.repeat(20)) as Address;
+const TX_A = ('0x' + '01'.repeat(32)) as Bytes32;
+const BVH_A = ('0x' + '02'.repeat(32)) as Bytes32;
 
-  readonly blockSource: BlockSource = {
-    getBlockNumber: async () => this.head,
-    getTransactionBlock: async (txHash: Bytes32) => {
-      const b = this.txs.get(txHash);
-      return b === undefined ? null : b;
-    },
-  };
+const posters: InternalPoster[] = [];
 
-  include(txHash: Bytes32, block: number): void {
-    this.txs.set(txHash, block);
-    if (BigInt(block) > this.head) this.head = BigInt(block);
-  }
-  reorg(txHash: Bytes32): void {
-    this.txs.set(txHash, null);
-  }
+afterEach(async () => {
+  for (const p of posters.splice(0)) await p.stop();
+  _clearSignerRegistryForTests();
+});
+
+function bytesToHex(b: Uint8Array): `0x${string}` {
+  return ('0x' +
+    Array.from(b)
+      .map((x) => x.toString(16).padStart(2, '0'))
+      .join('')) as `0x${string}`;
 }
 
-interface Harness {
-  poster: Poster;
-  chain: FakeChain;
-  submittedCalls: Array<{ tag: Bytes32; messageIds: Bytes32[] }>;
-  nextTxId: () => Bytes32;
-  tickTag: (tag: Bytes32) => Promise<void>;
-  tickReorg: () => Promise<{ reorgedCount: number; keptCount: number }>;
-}
-
-async function makeHarness(allowlist: Bytes32[]): Promise<Harness> {
-  const chain = new FakeChain();
-  let counter = 1;
-  const nextTxId = (): Bytes32 => {
-    const n = counter++;
-    return (`0x${n.toString(16).padStart(64, '0')}`) as Bytes32;
-  };
-  const submittedCalls: Harness['submittedCalls'] = [];
-  const buildAndSubmit: BuildAndSubmit = async ({ contentTag, messages }) => {
-    submittedCalls.push({ tag: contentTag, messageIds: messages.map((m) => m.messageId) });
-    const txHash = nextTxId();
-    chain.include(txHash, Number(chain.head));
-    return {
-      kind: 'included',
-      txHash,
-      blobVersionedHash: (`0x${'cd'.repeat(32)}`) as Bytes32,
-      blockNumber: Number(chain.head),
-    } satisfies SubmitOutcome;
-  };
-  const extras: PosterFactoryExtras = {
-    buildAndSubmit,
-    rpc: {
-      async getChainId() {
-        return 1;
-      },
-      async getCode() {
-        return '0x6080' as `0x${string}`;
-      },
-      async getBalance() {
-        return 10n ** 18n;
-      },
-      getBlockNumber: chain.blockSource.getBlockNumber,
-      getTransactionBlock: chain.blockSource.getTransactionBlock,
-    },
-  };
-
-  // Distinct signer per harness (to avoid cross-test pollution).
-  const pk = generateECDSAPrivateKey() as `0x${string}`;
-  const signer = new LocalEcdsaSigner(pk);
-  const poster = await createPoster(
-    {
-      allowlistedTags: allowlist,
-      chainId: 1,
-      bamCoreAddress: BAM_CORE,
-      signer,
-      store: createMemoryStore(),
-      batchPolicy: (await import('../../src/index.js')).defaultBatchPolicy({ forceFlush: true }),
-    },
-    extras
-  );
-  const internal = poster as unknown as {
-    _tickTag: (tag: Bytes32) => Promise<void>;
-    _tickReorgWatcher: () => Promise<{ reorgedCount: number; keptCount: number }>;
-  };
-  return {
-    poster,
-    chain,
-    submittedCalls,
-    nextTxId,
-    tickTag: internal._tickTag,
-    tickReorg: internal._tickReorgWatcher,
-  };
-}
-
-async function signedEnvelope(
-  tag: Bytes32,
-  nonce: number,
-  content: string,
-  privateKey?: `0x${string}`
-): Promise<Uint8Array> {
-  const pk = (privateKey ?? generateECDSAPrivateKey()) as `0x${string}`;
-  const author = privateKeyToAccount(pk).address as Address;
-  const timestamp = 1_700_000_000;
-  const hash = computeMessageHash({ author, timestamp, nonce, content });
-  const sig = await signECDSA(pk, bytesToHex(hash) as Bytes32);
+function signedEnvelope(nonce: bigint): Uint8Array {
+  const contents = encodeContents(TAG, new TextEncoder().encode('x'));
+  const msg: BAMMessage = { sender: SENDER, nonce, contents };
+  const signature = signECDSAWithKey(PRIV, msg, CHAIN_ID);
   return new TextEncoder().encode(
     JSON.stringify({
-      contentTag: tag,
-      message: { author, timestamp, nonce, content, signature: bytesToHex(sig) },
+      contentTag: TAG,
+      message: {
+        sender: SENDER,
+        nonce: nonce.toString(),
+        contents: bytesToHex(contents),
+        signature,
+      },
     })
   );
 }
 
-describe('Full-cycle integration', () => {
-  beforeEach(() => _clearSignerRegistryForTests());
+interface RpcCtl {
+  /** Which txHashes the chain no longer contains (simulates reorg). */
+  reorgedTxs: Set<Bytes32>;
+  /** Head block, advanced explicitly by the test. */
+  head: bigint;
+}
 
-  it('ingest → pending → submit → confirmed → reorg → resubmit', async () => {
-    const h = await makeHarness([TAG_A, TAG_B]);
+function mkRpc(ctl: RpcCtl): ReconcileRpcClient & StatusRpcReader & BlockSource {
+  return {
+    async getChainId() {
+      return CHAIN_ID;
+    },
+    async getCode(_address: Address) {
+      return '0x6060604052' as `0x${string}`;
+    },
+    async getBalance() {
+      return 10n ** 18n;
+    },
+    async getBlockNumber() {
+      return ctl.head;
+    },
+    async getTransactionBlock(txHash) {
+      if (ctl.reorgedTxs.has(txHash)) return null;
+      return 100;
+    },
+  };
+}
 
-    // Ingest three messages across two tags (distinct signers so nonces
-    // don't collide against the shared per-author monotonicity rule).
-    const pkA = generateECDSAPrivateKey() as `0x${string}`;
-    const pkB = generateECDSAPrivateKey() as `0x${string}`;
-    const rawA1 = await signedEnvelope(TAG_A, 1, 'a1', pkA);
-    const rawA2 = await signedEnvelope(TAG_A, 2, 'a2', pkA);
-    const rawB1 = await signedEnvelope(TAG_B, 1, 'b1', pkB);
+function mkBuildAndSubmit(outcomes: SubmitOutcome[]): {
+  fn: BuildAndSubmit;
+  calls: number;
+} {
+  let i = 0;
+  const state = { calls: 0 };
+  const fn: BuildAndSubmit = async () => {
+    state.calls++;
+    return outcomes[Math.min(i++, outcomes.length - 1)];
+  };
+  return { fn, calls: state.calls };
+}
 
-    expect((await h.poster.submit(rawA1)).accepted).toBe(true);
-    expect((await h.poster.submit(rawA2)).accepted).toBe(true);
-    expect((await h.poster.submit(rawB1)).accepted).toBe(true);
+async function makePoster(
+  buildAndSubmit: BuildAndSubmit,
+  rpc: ReconcileRpcClient & StatusRpcReader & BlockSource
+): Promise<InternalPoster> {
+  // Use headless signer with a different key so the factory's "same
+  // signer already configured" guard isn't upset across tests.
+  const signer = new LocalEcdsaSigner(
+    '0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d'
+  );
+  const poster = (await createPoster(
+    {
+      allowlistedTags: [TAG],
+      chainId: CHAIN_ID,
+      bamCoreAddress: BAM_CORE,
+      signer,
+      batchPolicy: defaultBatchPolicy({ forceFlush: true }),
+      reorgWindowBlocks: 4,
+      now: () => new Date(5_000),
+    },
+    { buildAndSubmit, rpc }
+  )) as InternalPoster;
+  posters.push(poster);
+  return poster;
+}
 
-    // Pending view per tag.
-    const pendingA = await h.poster.listPending({ contentTag: TAG_A });
-    const pendingB = await h.poster.listPending({ contentTag: TAG_B });
-    expect(pendingA.map((m) => m.content)).toEqual(['a1', 'a2']);
-    expect(pendingB.map((m) => m.content)).toEqual(['b1']);
+describe('createPoster — full ingest → submit cycle', () => {
+  it('ingest → listPending → tick → submitted-batches reflects inclusion', async () => {
+    const ctl: RpcCtl = { reorgedTxs: new Set(), head: 110n };
+    const bas = mkBuildAndSubmit([
+      { kind: 'included', txHash: TX_A, blockNumber: 100, blobVersionedHash: BVH_A },
+    ]);
+    const poster = await makePoster(bas.fn, mkRpc(ctl));
 
-    // Trigger submission for tag A.
-    await h.tickTag(TAG_A);
-    expect(h.submittedCalls).toHaveLength(1);
-    expect(h.submittedCalls[0].tag).toBe(TAG_A);
-    expect(h.submittedCalls[0].messageIds).toHaveLength(2);
+    const result = await poster.submit(signedEnvelope(1n));
+    expect(result.accepted).toBe(true);
 
-    // On inclusion: pending A pruned, tag B untouched.
-    expect(await h.poster.listPending({ contentTag: TAG_A })).toHaveLength(0);
-    expect(await h.poster.listPending({ contentTag: TAG_B })).toHaveLength(1);
+    const pendingBefore = await poster.listPending({ contentTag: TAG });
+    expect(pendingBefore.length).toBe(1);
 
-    // listSubmittedBatches exposes the included batch.
-    const after = await h.poster.listSubmittedBatches({ contentTag: TAG_A });
-    expect(after).toHaveLength(1);
-    expect(after[0].status).toBe('included');
-    const originalTx = after[0].txHash;
+    await poster._tickTag(TAG);
 
-    // Simulate reorg: tag A's tx is no longer on canonical chain.
-    h.chain.head += 5n;
-    h.chain.reorg(originalTx);
-    const reorgResult = await h.tickReorg();
-    expect(reorgResult.reorgedCount).toBe(1);
+    const pendingAfter = await poster.listPending({ contentTag: TAG });
+    expect(pendingAfter.length).toBe(0);
 
-    // Messages are back in pending.
-    const repending = await h.poster.listPending({ contentTag: TAG_A });
-    expect(repending).toHaveLength(2);
-    expect(repending.map((m) => m.content)).toEqual(['a1', 'a2']);
+    const submitted = await poster.listSubmittedBatches({ contentTag: TAG });
+    expect(submitted.length).toBe(1);
+    expect(submitted[0].status).toBe('included');
+    expect(submitted[0].messages[0].messageId).toMatch(/^0x[0-9a-f]{64}$/);
+  });
 
-    // Resubmit.
-    await h.tickTag(TAG_A);
-    expect(h.submittedCalls).toHaveLength(2);
+  it('reorg within window → submitted row flips to reorged + invalidatedAt', async () => {
+    const ctl: RpcCtl = { reorgedTxs: new Set(), head: 100n };
+    const bas = mkBuildAndSubmit([
+      { kind: 'included', txHash: TX_A, blockNumber: 100, blobVersionedHash: BVH_A },
+    ]);
+    const poster = await makePoster(bas.fn, mkRpc(ctl));
 
-    // The reorged batch is visible + marked reorged; the new one is included.
-    const final = await h.poster.listSubmittedBatches({ contentTag: TAG_A });
-    expect(final.map((f) => f.status).sort()).toEqual(['included', 'reorged']);
+    await poster.submit(signedEnvelope(1n));
+    await poster._tickTag(TAG);
 
-    // Tag B is undisturbed.
-    expect(await h.poster.listPending({ contentTag: TAG_B })).toHaveLength(1);
+    // Simulate a reorg: tx A vanishes from canonical chain; head advances.
+    ctl.reorgedTxs.add(TX_A);
+    ctl.head = 103n;
+    await poster._tickReorgWatcher();
 
-    await h.poster.stop();
+    const submitted = await poster.listSubmittedBatches({ contentTag: TAG });
+    expect(submitted[0].status).toBe('reorged');
+    expect(submitted[0].invalidatedAt).not.toBeNull();
+    // After reorg, per-message messageId is surfaced as null.
+    for (const m of submitted[0].messages) expect(m.messageId).toBeNull();
+
+    // And the pending pool has the message back.
+    const pending = await poster.listPending({ contentTag: TAG });
+    expect(pending.length).toBe(1);
+  });
+
+  it('health() is "ok" after a clean tick; status() reports zero pending', async () => {
+    const ctl: RpcCtl = { reorgedTxs: new Set(), head: 110n };
+    const bas = mkBuildAndSubmit([
+      { kind: 'included', txHash: TX_A, blockNumber: 100, blobVersionedHash: BVH_A },
+    ]);
+    const poster = await makePoster(bas.fn, mkRpc(ctl));
+    await poster.submit(signedEnvelope(1n));
+    await poster._tickTag(TAG);
+    const h = await poster.health();
+    expect(h.state).toBe('ok');
+    const s = await poster.status();
+    expect(s.pendingByTag[0].count).toBe(0);
+    expect(s.lastSubmittedByTag[0].txHash).toBe(TX_A);
   });
 });

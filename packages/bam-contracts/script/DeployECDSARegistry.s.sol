@@ -16,7 +16,7 @@ import { SignatureRegistryDispatcher } from "../src/core/SignatureRegistryDispat
 ///         first-come-first-served, so `vm.startBroadcast` does NOT make the
 ///         two txs atomic: another account could still claim the `0x01` slot
 ///         between the deploy and the register tx. To keep the slot from being
-///         griefed (red-team C-7), submit through a private mempool / bundler
+///         griefed, submit through a private mempool / bundler
 ///         (e.g. Flashbots) or otherwise hide the txs from the public mempool.
 ///         The script also fails fast if `0x01` is already claimed, and
 ///         asserts the post-condition after broadcast.

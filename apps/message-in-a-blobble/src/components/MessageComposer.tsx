@@ -1,32 +1,35 @@
 'use client';
 
 import { useState } from 'react';
-import { useAccount, useSignMessage } from 'wagmi';
+import { useAccount, useSignTypedData } from 'wagmi';
 import { useQueryClient, useMutation } from '@tanstack/react-query';
-import { computeMessageHash } from 'bam-sdk/browser';
-import { MAX_MESSAGE_CHARS } from '@/lib/constants';
+import {
+  EIP712_DOMAIN_NAME,
+  EIP712_DOMAIN_VERSION,
+  EIP712_TYPES,
+  computeMessageHash,
+} from 'bam-sdk/browser';
+import type { Address } from 'viem';
+
+import { MAX_MESSAGE_CHARS, MESSAGE_IN_A_BLOBBLE_TAG, SEPOLIA_CHAIN_ID } from '@/lib/constants';
+import { encodeSocialContents } from '@/lib/contents-codec';
 import { MESSAGES_QUERY_KEY } from '@/lib/messages';
 
 /**
- * Per-author next-nonce estimate. Walks the two sources the demo has
- * visibility into (Poster pending + Poster-backed confirmed) and
- * picks `max(nonce) + 1`. The Poster enforces strict monotonicity
- * per ERC-8180, so if our guess collides with an in-flight submit we
- * get `stale_nonce` back and retry with nonce+1.
- *
- * Arithmetic runs in BigInt to support uint64 nonces — v1 wire is
- * uint16 and well within Number range, but NEXT_SPEC widens to uint64
- * and the Poster already returns decimal strings.
+ * Per-sender next-nonce estimate. Walks the two Poster-backed sources
+ * (pending + confirmed) and picks `max(nonce) + 1`. Feature 002's
+ * pool enforces strict monotonicity per ERC-8180; on collision we
+ * see `stale_nonce` and retry.
  */
-async function nextNonceForAuthor(address: string): Promise<bigint> {
+async function nextNonceForSender(address: string): Promise<bigint> {
   const lc = address.toLowerCase();
   const [pendingRes, confirmedRes] = await Promise.all([
     fetch('/api/messages').then((r) => (r.ok ? r.json() : { pending: [] })),
     fetch('/api/confirmed-messages').then((r) => (r.ok ? r.json() : { messages: [] })),
   ]);
-  const pending = (pendingRes as { pending?: Array<{ author: string; nonce: string | number }> })
+  const pending = (pendingRes as { pending?: Array<{ sender: string; nonce: string | number }> })
     .pending ?? [];
-  const confirmed = (confirmedRes as { messages?: Array<{ author: string; nonce: string | number }> })
+  const confirmed = (confirmedRes as { messages?: Array<{ sender: string; nonce: string | number }> })
     .messages ?? [];
   const parse = (v: string | number): bigint | null => {
     try {
@@ -37,21 +40,28 @@ async function nextNonceForAuthor(address: string): Promise<bigint> {
   };
   let max = -1n;
   for (const p of pending) {
-    if (p.author.toLowerCase() !== lc) continue;
+    if (p.sender.toLowerCase() !== lc) continue;
     const n = parse(p.nonce);
     if (n !== null && n > max) max = n;
   }
   for (const c of confirmed) {
-    if (c.author.toLowerCase() !== lc) continue;
+    if (c.sender.toLowerCase() !== lc) continue;
     const n = parse(c.nonce);
     if (n !== null && n > max) max = n;
   }
   return max + 1n;
 }
 
+function bytesToHex(b: Uint8Array): `0x${string}` {
+  return ('0x' +
+    Array.from(b)
+      .map((x) => x.toString(16).padStart(2, '0'))
+      .join('')) as `0x${string}`;
+}
+
 export function MessageComposer() {
-  const { address, isConnected } = useAccount();
-  const { signMessageAsync } = useSignMessage();
+  const { address, isConnected, chainId } = useAccount();
+  const { signTypedDataAsync } = useSignTypedData();
   const queryClient = useQueryClient();
   const [content, setContent] = useState('');
 
@@ -59,48 +69,54 @@ export function MessageComposer() {
     mutationFn: async () => {
       if (!address || !content.trim()) throw new Error('Missing address or content');
 
-      const timestamp = Math.floor(Date.now() / 1000);
-      // v1 wire encodes nonce as uint16 — `bam-sdk`'s computeMessageHash
-      // packs it via `DataView.setUint16`, which silently truncates
-      // anything ≥ 65536 and produces a wrong hash/signature. We compute
-      // next-nonce in BigInt for NEXT_SPEC forward-compat, then enforce
-      // the v1 ceiling at the network boundary.
-      const toWire = (n: bigint): number => {
-        if (n < 0n || n > 0xffffn) {
-          throw new Error(
-            `nonce ${n} exceeds v1 wire uint16 range — demo cannot submit further messages without a protocol upgrade`
-          );
-        }
-        return Number(n);
-      };
-      // Send at a given nonce. On `stale_nonce` we climb from the
-      // Poster's pool — a single +1 retry isn't enough if two or more
-      // concurrent sends (e.g. another tab) accepted between our
-      // scan and this submit (qodo review).
       const trySend = async (nonce: bigint): Promise<Response> => {
-        const wire = toWire(nonce);
-        const msg = { author: address, timestamp, nonce: wire, content: content.trim() };
-        const messageHash = computeMessageHash(msg);
-        const signature = await signMessageAsync({ message: { raw: messageHash } });
+        const timestamp = Math.floor(Date.now() / 1000);
+        const contents = encodeSocialContents(MESSAGE_IN_A_BLOBBLE_TAG, {
+          timestamp,
+          content: content.trim(),
+        });
+        // Wallet-path ECDSA sign via EIP-712 typed data. `useSignTypedData`
+        // returns the same 65-byte signature (after viem's internal
+        // normalization) that `signECDSAWithKey` produces headless;
+        // the SDK has a cross-runtime parity test that locks this.
+        const signature = await signTypedDataAsync({
+          domain: {
+            name: EIP712_DOMAIN_NAME,
+            version: EIP712_DOMAIN_VERSION,
+            chainId: chainId ?? SEPOLIA_CHAIN_ID,
+          },
+          types: EIP712_TYPES,
+          primaryType: 'BAMMessage',
+          message: {
+            sender: address as Address,
+            nonce,
+            contents: bytesToHex(contents),
+          },
+        });
+
+        // Sanity-check the pre-batch identifier against what the
+        // Poster will compute — lets us lift the messageHash into the
+        // UI optimistically. Not required for correctness; the
+        // Poster recomputes it on accept.
+        void computeMessageHash(address as Address, nonce, contents);
+
         return fetch('/api/messages', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            author: address,
-            timestamp,
-            nonce: wire,
-            content: content.trim(),
-            signature,
+            contentTag: MESSAGE_IN_A_BLOBBLE_TAG,
+            message: {
+              sender: address,
+              nonce: nonce.toString(),
+              contents: bytesToHex(contents),
+              signature,
+            },
           }),
         });
       };
 
-      // Bounded climb: walk nonce forward on each stale_nonce. Cap at
-      // a small number so a persistently-failing condition (e.g. the
-      // Poster is rejecting for a different reason that races with
-      // monotonicity) still surfaces to the user.
       const MAX_STALE_RETRIES = 8;
-      let nonce = await nextNonceForAuthor(address);
+      let nonce = await nextNonceForSender(address);
       for (let attempt = 0; attempt <= MAX_STALE_RETRIES; attempt++) {
         const res = await trySend(nonce);
         if (res.ok) return;
@@ -108,9 +124,7 @@ export function MessageComposer() {
         if (data.reason !== 'stale_nonce' || attempt === MAX_STALE_RETRIES) {
           throw new Error(data.reason ?? data.error ?? 'Failed to submit');
         }
-        // Re-fetch on every retry so we converge even if *many* new
-        // messages landed while we were signing the previous attempt.
-        nonce = await nextNonceForAuthor(address);
+        nonce = await nextNonceForSender(address);
       }
     },
     onSuccess: () => {

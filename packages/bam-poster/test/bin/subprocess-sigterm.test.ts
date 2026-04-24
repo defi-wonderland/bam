@@ -9,8 +9,8 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 /**
- * FU-10: spawn the compiled `bam-poster` binary as a real subprocess
- * with a mocked JSON-RPC upstream, send SIGTERM, and assert:
+ * Spawn the compiled `bam-poster` binary as a real subprocess with a
+ * mocked JSON-RPC upstream, send SIGTERM, and assert:
  *   - process exits 0 within a short timeout
  *   - stdout contains a "shutting down" line (graceful, not killed)
  *   - the HTTP listen port has been released (server closed)
@@ -19,7 +19,7 @@ const __dirname = path.dirname(__filename);
  * missing, the test fails fast with a clear message rather than
  * silently skipping.
  */
-describe('bam-poster CLI — SIGTERM graceful shutdown (FU-10)', () => {
+describe('bam-poster CLI — SIGTERM graceful shutdown', () => {
   it('loads POSTER_* vars from a cwd-local .env file (dotenv integration)', async () => {
     const binPath = path.resolve(__dirname, '../../dist/esm/bin/bam-poster.js');
     if (!existsSync(binPath)) {
@@ -122,7 +122,7 @@ describe('bam-poster CLI — SIGTERM graceful shutdown (FU-10)', () => {
     const binPath = path.resolve(__dirname, '../../dist/esm/bin/bam-poster.js');
     if (!existsSync(binPath)) {
       throw new Error(
-        `FU-10 requires the build output at ${binPath}. Run \`pnpm --filter @bam/poster build\` first.`
+        `SIGTERM subprocess test requires the build output at ${binPath}. Run \`pnpm --filter @bam/poster build\` first.`
       );
     }
 

@@ -217,7 +217,7 @@ describe('BAM core contentTag round-trip (SDK ABI + types)', () => {
     });
   });
 
-  describe('Topic-filter ergonomics (red-team C-7 mirror)', () => {
+  describe('Topic-filter ergonomics', () => {
     it('filtering synthetic logs by contentTag topic[3] isolates the matching subset', () => {
       const logs = [
         encodeCalldataBatchLog(CONTENT_HASH, ALICE, SOCIAL_BLOBS_TAG, DECODER, SIG_REGISTRY),

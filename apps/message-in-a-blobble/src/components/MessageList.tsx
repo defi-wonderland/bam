@@ -96,7 +96,7 @@ function MessageCard({ message }: { message: DisplayMessage }) {
   return (
     <div className="message-card">
       <div className="flex items-center justify-between mb-2">
-        <AddressLink address={message.author} className="text-sm" />
+        <AddressLink address={message.sender} className="text-sm" />
         <div className="flex items-center gap-2">
           <span className="text-xs text-sand-500">{time}</span>
           <span

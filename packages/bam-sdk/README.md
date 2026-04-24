@@ -4,6 +4,42 @@ Reference TypeScript SDK for the BAM (Blob Authenticated Messaging) protocol, bu
 [Wonderland](https://wonderland.xyz). Encode messages, compress batches, sign with BLS/ECDSA,
 generate KZG proofs, and interact with on-chain contracts.
 
+## Signature schemes
+
+BAM messages are signed under ERC-8180's
+`messageHash = keccak256(sender ‖ nonce ‖ contents)` (chain-agnostic,
+exported as `computeMessageHash`). The wire format mandates a
+32-byte `contentTag` prefix in `contents`; every scheme that signs over
+`contents` therefore binds the tag.
+
+- **Scheme 0x01 (ECDSA-secp256k1).** All ECDSA signing in this SDK
+  uses **EIP-712 typed data over `BAMMessage`** with domain
+  `{ name: "BAM", version: "1", chainId }`. Wallet callers use
+  `signECDSA(walletClient, message)`; headless callers use
+  `signECDSAWithKey(privateKey, message, chainId)`. Both paths
+  produce byte-identical 65-byte signatures over the same digest;
+  a single `verifyECDSA(message, signature, expectedSender,
+  chainId)` rebuilds the digest and `ecrecover`s. Low-s is enforced;
+  `v ∈ {27, 28}`. Cross-chain replay is blocked by the chainId field
+  in the signing domain.
+
+  This is a reference-implementation choice within the space
+  ERC-8180 §Rationale 847–852 already permits — the ERC's default
+  `signedHash = keccak256(domain ‖ messageHash)` construction is
+  **not** used here for scheme 0x01. The choice is deliberate: EIP-712
+  gives consistent wallet / headless UX without an
+  EIP-191-vs-raw-hash digest fork.
+
+- **Scheme 0x02 (BLS-12-381) building blocks.** `signBLS`,
+  `verifyBLS`, `aggregateBLS`, `verifyAggregateBLS`, and the BLS
+  (de)serializers are retained so non-ECDSA schemes can be wired up
+  later. No BLS validator is wired into any Poster or ingest path
+  in this feature.
+
+- **Registry lookup.** The default Poster validator is
+  `ecrecover`-native per ERC-8180 §Signature Registry #8 and does
+  not read any on-chain registry.
+
 ## Install
 
 ```bash
@@ -14,40 +50,44 @@ pnpm add bam-sdk
 
 ```typescript
 import {
-  encodeMessage,
+  computeMessageHash,
   encodeBatch,
-  signECDSA,
+  encodeContents,
+  signECDSAWithKey,
+  verifyECDSA,
   generateECDSAPrivateKey,
   deriveAddress,
-  computeMessageHash,
+  type BAMMessage,
+  type Bytes32,
 } from 'bam-sdk';
 
-// Generate keys — the author address is derived from your signing key
+// Generate keys — the sender address is derived from your signing key.
 const privateKey = generateECDSAPrivateKey();
-const author = deriveAddress(privateKey);
+const sender = deriveAddress(privateKey);
 
-const message = {
-  author,
-  timestamp: Math.floor(Date.now() / 1000),
-  nonce: 0,
-  content: 'Hello from BAM!',
+// BAM messages carry a 32-byte `contentTag` prefix at the start of
+// `contents`; everything after the prefix is app-opaque.
+const contentTag = ('0x' + '01'.repeat(32)) as Bytes32;
+const appBytes = new TextEncoder().encode('Hello from BAM!');
+
+const message: BAMMessage = {
+  sender,
+  nonce: 0n,
+  contents: encodeContents(contentTag, appBytes),
 };
 
-const hash = computeMessageHash(message);
-const signature = await signECDSA(privateKey, hash);
+// Pre-batch identifier — chain-agnostic; stable across the message's lifetime.
+const messageHash = computeMessageHash(message.sender, message.nonce, message.contents);
 
-// Encode for wire format
-const encoded = encodeMessage({
-  ...message,
-  signature,
-  signatureType: 'ecdsa',
-});
+// Sign under ERC-8180 scheme 0x01 (EIP-712 typed data over BAMMessage).
+const chainId = 11_155_111; // Sepolia
+const signature = signECDSAWithKey(privateKey as `0x${string}`, message, chainId);
 
-// Batch multiple messages with BPE compression
-const batch = encodeBatch(signedMessages, {
-  codec: 'bpe',
-  dictionary: bpeDictionaryBytes,
-});
+// Verify — returns `false` on tamper, length != 65, wrong chain id, high-s, etc.
+const valid = verifyECDSA(message, signature, sender, chainId);
+
+// Encode a batch for blob submission. Signatures are parallel to messages.
+const batch = encodeBatch([message], [hexToBytes(signature)]);
 ```
 
 ### Contract Client
@@ -81,7 +121,7 @@ The SDK provides a browser-safe entrypoint that excludes modules depending on No
 (`node:fs`, `node:crypto`) and native addons (`c-kzg`):
 
 ```typescript
-import { computeMessageHash, verifyECDSA, encodeMessage } from 'bam-sdk/browser';
+import { computeMessageHash, verifyECDSA, encodeBatch } from 'bam-sdk/browser';
 ```
 
 The `bam-sdk/browser` entrypoint re-exports everything from the main barrel except:
@@ -97,13 +137,14 @@ This works in Next.js client components, Vite, and other browser bundlers withou
 
 | Module | Exports |
 |--------|---------|
-| **Message** | `encodeMessage`, `decodeMessage`, `computeMessageHash`, `computeMessageId` |
-| **Batch (Compact)** | `encodeBatch`, `decodeBatch`, `estimateBatchSize`, `validateBatch`, `buildAuthorTable` |
+| **Message** | `computeMessageHash`, `computeMessageId`, `encodeContents`, `splitContents`, `hexToBytes`, `bytesToHex` |
+| **Batch** | `encodeBatch`, `decodeBatch`, `estimateBatchSize` — operate on `BAMMessage[]` + parallel signatures |
 | **Batch (Exposure)** | `encodeExposureBatch`, `decodeExposureBatch`, `buildRawMessageBytes` |
 | **BPE Codec** | `bpeEncode`, `bpeDecode`, `buildBPEDictionary`, `serializeBPEDictionary`, `deserializeBPEDictionary` |
 | **Compression (Zstd)** | `compress`, `decompress`, `loadDictionary`, `isCompressed`, `compressionRatio` |
 | **Compression (Node)** | `loadBundledDictionary`, `loadDictionaryFromFile` — requires `node:fs`, `node:crypto` |
-| **Signatures** | `signBLS`, `verifyBLS`, `aggregateBLS`, `signECDSA`, `verifyECDSA`, `recoverAddress` |
+| **Signatures (ECDSA scheme 0x01)** | `signECDSA` (wallet), `signECDSAWithKey` (headless), `verifyECDSA`, `computeECDSADigest`, `EIP712_DOMAIN_NAME`, `EIP712_DOMAIN_VERSION`, `EIP712_TYPES` |
+| **Signatures (BLS scheme 0x02, building blocks)** | `signBLS`, `verifyBLS`, `aggregateBLS`, `verifyAggregateBLS` |
 | **Key Management** | `generateBLSPrivateKey`, `deriveBLSPublicKey`, `generateECDSAPrivateKey`, `deriveAddress` |
 
 ### On-Chain Layer

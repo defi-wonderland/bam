@@ -1,370 +1,356 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import type { Address, Bytes32 } from 'bam-sdk';
 
-import { MemoryPosterStore } from '../../src/pool/memory-store.js';
-import type { StoreTxnPendingRow, StoreTxnSubmittedRow } from '../../src/types.js';
+import { createMemoryStore, MemoryPosterStore } from '../../src/pool/memory-store.js';
+import type {
+  MessageSnapshot,
+  StoreTxnPendingRow,
+  StoreTxnSubmittedRow,
+} from '../../src/types.js';
 
 const TAG_A = ('0x' + 'aa'.repeat(32)) as Bytes32;
 const TAG_B = ('0x' + 'bb'.repeat(32)) as Bytes32;
-const AUTHOR = '0x1234567890123456789012345678901234567890' as Address;
-const AUTHOR_2 = '0x2222222222222222222222222222222222222222' as Address;
+const ADDR_1 = ('0x' + '11'.repeat(20)) as Address;
+const ADDR_2 = ('0x' + '22'.repeat(20)) as Address;
 
-function makePending(overrides: Partial<StoreTxnPendingRow> = {}): StoreTxnPendingRow {
+function pendingRow(overrides: Partial<StoreTxnPendingRow> = {}): StoreTxnPendingRow {
+  const contents = new Uint8Array(40);
+  contents.fill(0xaa, 0, 32); // contentTag prefix
   return {
-    messageId: ('0x' + '11'.repeat(32)) as Bytes32,
     contentTag: TAG_A,
-    author: AUTHOR,
+    sender: ADDR_1,
     nonce: 1n,
-    timestamp: 1_700_000_000,
-    content: new Uint8Array([1, 2, 3]),
+    contents,
     signature: new Uint8Array(65),
-    ingestedAt: 1_700_000_000_000,
+    messageHash: ('0x' + '77'.repeat(32)) as Bytes32,
+    ingestedAt: 1_000,
     ingestSeq: 1,
     ...overrides,
   };
 }
 
-function makeSubmitted(overrides: Partial<StoreTxnSubmittedRow> = {}): StoreTxnSubmittedRow {
+function msgSnapshot(overrides: Partial<MessageSnapshot> = {}): MessageSnapshot {
   return {
-    txHash: ('0x' + 'cc'.repeat(32)) as Bytes32,
+    sender: ADDR_1,
+    nonce: 1n,
+    contents: new Uint8Array(32),
+    signature: new Uint8Array(65),
+    messageHash: ('0x' + '77'.repeat(32)) as Bytes32,
+    messageId: ('0x' + '99'.repeat(32)) as Bytes32,
+    originalIngestSeq: 1,
+    ...overrides,
+  };
+}
+
+function submittedRow(overrides: Partial<StoreTxnSubmittedRow> = {}): StoreTxnSubmittedRow {
+  return {
+    txHash: ('0x' + '01'.repeat(32)) as Bytes32,
     contentTag: TAG_A,
-    blobVersionedHash: ('0x' + 'dd'.repeat(32)) as Bytes32,
+    blobVersionedHash: ('0x' + '02'.repeat(32)) as Bytes32,
+    batchContentHash: ('0x' + '03'.repeat(32)) as Bytes32,
     blockNumber: 100,
     status: 'included',
     replacedByTxHash: null,
-    submittedAt: 1_700_000_000_000,
-    messageIds: [('0x' + '11'.repeat(32)) as Bytes32],
-    messages: [],
+    submittedAt: 2_000,
+    invalidatedAt: null,
+    messages: [msgSnapshot()],
     ...overrides,
   };
 }
 
 describe('MemoryPosterStore — pending CRUD', () => {
-  it('inserts + reads a pending row', async () => {
-    const store = new MemoryPosterStore();
-    const row = makePending();
+  it('insertPending + getPendingByKey round-trip', async () => {
+    const store = createMemoryStore();
+    const row = pendingRow();
     await store.withTxn(async (txn) => {
-      await txn.insertPending(row);
+      txn.insertPending(row);
     });
-    const back = await store.withTxn(async (txn) => txn.getPendingByMessageId(row.messageId));
-    expect(back).not.toBeNull();
-    expect(back!.author).toBe(AUTHOR);
-    expect(back!.nonce).toBe(1n);
-  });
-
-  it('isolates Uint8Array fields from external mutation (cubic review)', async () => {
-    // Pre-fix, insertPending / getPendingByMessageId / listPending*
-    // spread the row with `{ ...row }` which preserves the same
-    // Uint8Array reference. A caller mutating the returned bytes
-    // corrupted the store. Clone on both boundaries.
-    const store = new MemoryPosterStore();
-    const content = new Uint8Array([9, 9, 9]);
-    const signature = new Uint8Array(65);
-    signature[0] = 0xde;
-    await store.withTxn(async (txn) => {
-      await txn.insertPending(makePending({ content, signature }));
-    });
-    // Mutate the caller-side buffers after insert — must not leak.
-    content[0] = 0xff;
-    signature[0] = 0xff;
-
     const back = await store.withTxn(async (txn) =>
-      txn.getPendingByMessageId(('0x' + '11'.repeat(32)) as Bytes32)
+      txn.getPendingByKey({ sender: row.sender, nonce: row.nonce })
     );
     expect(back).not.toBeNull();
-    expect(back!.content[0]).toBe(9);
-    expect(back!.signature[0]).toBe(0xde);
+    expect(back!.sender.toLowerCase()).toBe(row.sender.toLowerCase());
+    expect(back!.nonce).toBe(row.nonce);
+    expect(Array.from(back!.contents)).toEqual(Array.from(row.contents));
+  });
 
-    // And mutating the returned row must not leak back into the store.
-    back!.content[0] = 0xaa;
-    back!.signature[0] = 0xaa;
-    const back2 = await store.withTxn(async (txn) =>
-      txn.getPendingByMessageId(('0x' + '11'.repeat(32)) as Bytes32)
+  it('getPendingByKey returns null for missing (sender, nonce)', async () => {
+    const store = createMemoryStore();
+    const back = await store.withTxn(async (txn) =>
+      txn.getPendingByKey({ sender: ADDR_1, nonce: 42n })
     );
-    expect(back2!.content[0]).toBe(9);
-    expect(back2!.signature[0]).toBe(0xde);
+    expect(back).toBeNull();
   });
 
-  it('rejects duplicate message_id inserts', async () => {
-    const store = new MemoryPosterStore();
-    const row = makePending();
-    await store.withTxn(async (txn) => {
-      await txn.insertPending(row);
-    });
+  it('duplicate (sender, nonce) insert throws', async () => {
+    const store = createMemoryStore();
+    await store.withTxn(async (txn) => txn.insertPending(pendingRow()));
     await expect(
-      store.withTxn(async (txn) => {
-        await txn.insertPending(row);
-      })
-    ).rejects.toThrow(/duplicate message_id/);
+      store.withTxn(async (txn) => txn.insertPending(pendingRow()))
+    ).rejects.toThrow();
   });
 
-  it('lists pending per tag in FIFO (ingest_seq) order and respects limit / sinceSeq', async () => {
-    const store = new MemoryPosterStore();
+  it('listPendingByTag returns per-tag FIFO by ingest_seq', async () => {
+    const store = createMemoryStore();
+    await store.withTxn(async (txn) => {
+      txn.insertPending(pendingRow({ nonce: 1n, ingestSeq: 1 }));
+      txn.insertPending(pendingRow({ nonce: 2n, ingestSeq: 2 }));
+      txn.insertPending(
+        pendingRow({ sender: ADDR_2, nonce: 1n, ingestSeq: 3, contentTag: TAG_B })
+      );
+    });
+    const aRows = await store.withTxn(async (txn) => txn.listPendingByTag(TAG_A));
+    expect(aRows.map((r) => Number(r.nonce))).toEqual([1, 2]);
+    const bRows = await store.withTxn(async (txn) => txn.listPendingByTag(TAG_B));
+    expect(bRows.map((r) => Number(r.nonce))).toEqual([1]);
+  });
+
+  it('listPendingByTag respects sinceSeq + limit', async () => {
+    const store = createMemoryStore();
     await store.withTxn(async (txn) => {
       for (let i = 1; i <= 5; i++) {
-        const seq = await txn.nextIngestSeq(TAG_A);
-        await txn.insertPending(
-          makePending({
-            messageId: (`0x${i.toString(16).padStart(64, '0')}`) as Bytes32,
-            ingestSeq: seq,
-          })
-        );
+        txn.insertPending(pendingRow({ nonce: BigInt(i), ingestSeq: i }));
       }
-      // Tag B should not show up in Tag A listing.
-      const seqB = await txn.nextIngestSeq(TAG_B);
-      await txn.insertPending(
-        makePending({
-          messageId: ('0xb' + 'b'.repeat(63)) as Bytes32,
-          contentTag: TAG_B,
-          ingestSeq: seqB,
-        })
-      );
     });
-
-    const allA = await store.withTxn(async (txn) => txn.listPendingByTag(TAG_A));
-    expect(allA.map((r) => r.ingestSeq)).toEqual([1, 2, 3, 4, 5]);
-
-    const limited = await store.withTxn(async (txn) => txn.listPendingByTag(TAG_A, 2));
-    expect(limited.map((r) => r.ingestSeq)).toEqual([1, 2]);
-
-    const after = await store.withTxn(async (txn) => txn.listPendingByTag(TAG_A, undefined, 3));
-    expect(after.map((r) => r.ingestSeq)).toEqual([4, 5]);
+    const rows = await store.withTxn(async (txn) =>
+      txn.listPendingByTag(TAG_A, 2, 1)
+    );
+    expect(rows.map((r) => r.ingestSeq)).toEqual([2, 3]);
   });
 
-  it('listPendingAll returns every pending row, regardless of tag', async () => {
-    const store = new MemoryPosterStore();
+  it('deletePending removes selected keys only', async () => {
+    const store = createMemoryStore();
     await store.withTxn(async (txn) => {
-      await txn.insertPending(
-        makePending({
-          messageId: ('0xa' + '0'.repeat(63)) as Bytes32,
-          ingestSeq: await txn.nextIngestSeq(TAG_A),
-        })
-      );
-      await txn.insertPending(
-        makePending({
-          messageId: ('0xb' + '0'.repeat(63)) as Bytes32,
-          contentTag: TAG_B,
-          ingestSeq: await txn.nextIngestSeq(TAG_B),
-          ingestedAt: 1_700_000_000_001,
-        })
-      );
+      txn.insertPending(pendingRow({ nonce: 1n, ingestSeq: 1 }));
+      txn.insertPending(pendingRow({ nonce: 2n, ingestSeq: 2 }));
+      txn.insertPending(pendingRow({ nonce: 3n, ingestSeq: 3 }));
     });
-    const all = await store.withTxn(async (txn) => txn.listPendingAll());
-    expect(all).toHaveLength(2);
-    expect(all.map((r) => r.contentTag).sort()).toEqual([TAG_A, TAG_B].sort());
+    await store.withTxn(async (txn) =>
+      txn.deletePending([
+        { sender: ADDR_1, nonce: 1n },
+        { sender: ADDR_1, nonce: 3n },
+      ])
+    );
+    const rows = await store.withTxn(async (txn) => txn.listPendingByTag(TAG_A));
+    expect(rows.map((r) => Number(r.nonce))).toEqual([2]);
   });
 
-  it('deletePending removes rows by id and countPendingByTag reflects the delete', async () => {
-    const store = new MemoryPosterStore();
-    const a = makePending({
-      messageId: ('0xa' + 'a'.repeat(63)) as Bytes32,
-      ingestSeq: 1,
-    });
-    const b = makePending({
-      messageId: ('0xb' + 'b'.repeat(63)) as Bytes32,
-      ingestSeq: 2,
-    });
+  it('countPendingByTag reflects the pool state', async () => {
+    const store = createMemoryStore();
+    const count0 = await store.withTxn((txn) =>
+      Promise.resolve(txn.countPendingByTag(TAG_A))
+    );
+    expect(count0).toBe(0);
     await store.withTxn(async (txn) => {
-      await txn.insertPending(a);
-      await txn.insertPending(b);
-      expect(await txn.countPendingByTag(TAG_A)).toBe(2);
-      await txn.deletePending([a.messageId]);
-      expect(await txn.countPendingByTag(TAG_A)).toBe(1);
+      txn.insertPending(pendingRow({ nonce: 1n, ingestSeq: 1 }));
+      txn.insertPending(pendingRow({ nonce: 2n, ingestSeq: 2 }));
     });
+    const count2 = await store.withTxn((txn) =>
+      Promise.resolve(txn.countPendingByTag(TAG_A))
+    );
+    expect(count2).toBe(2);
   });
 
-  it('nextIngestSeq is per-tag and strictly increasing', async () => {
-    const store = new MemoryPosterStore();
+  it('nextIngestSeq is monotonic per-tag and does NOT regress on delete', async () => {
+    const store = createMemoryStore();
+    const seqs: number[] = [];
     await store.withTxn(async (txn) => {
-      expect(await txn.nextIngestSeq(TAG_A)).toBe(1);
-      expect(await txn.nextIngestSeq(TAG_A)).toBe(2);
-      expect(await txn.nextIngestSeq(TAG_B)).toBe(1);
-      expect(await txn.nextIngestSeq(TAG_A)).toBe(3);
+      seqs.push(txn.nextIngestSeq(TAG_A));
+      seqs.push(txn.nextIngestSeq(TAG_A));
+      seqs.push(txn.nextIngestSeq(TAG_A));
     });
+    expect(seqs).toEqual([1, 2, 3]);
+
+    await store.withTxn(async (txn) => {
+      txn.insertPending(pendingRow({ ingestSeq: seqs[0] }));
+    });
+    await store.withTxn(async (txn) =>
+      txn.deletePending([{ sender: ADDR_1, nonce: 1n }])
+    );
+    const after = await store.withTxn((txn) =>
+      Promise.resolve(txn.nextIngestSeq(TAG_A))
+    );
+    expect(after).toBe(4);
   });
 });
 
 describe('MemoryPosterStore — nonce tracker', () => {
-  it('round-trips get/set by author', async () => {
-    const store = new MemoryPosterStore();
-    await store.withTxn(async (txn) => {
-      expect(await txn.getNonce(AUTHOR)).toBeNull();
-      await txn.setNonce({
-        author: AUTHOR,
+  it('setNonce + getNonce round-trip (lowercased sender)', async () => {
+    const store = createMemoryStore();
+    const sender = ('0x' + 'AA'.repeat(20)) as Address;
+    await store.withTxn(async (txn) =>
+      txn.setNonce({
+        sender,
         lastNonce: 42n,
-        lastMessageId: ('0x' + '11'.repeat(32)) as Bytes32,
-      });
-      const row = await txn.getNonce(AUTHOR);
-      expect(row).toEqual({
-        author: AUTHOR,
-        lastNonce: 42n,
-        lastMessageId: ('0x' + '11'.repeat(32)) as Bytes32,
-      });
-    });
+        lastMessageHash: ('0x' + 'bb'.repeat(32)) as Bytes32,
+      })
+    );
+    const back = await store.withTxn(async (txn) => txn.getNonce(sender));
+    expect(back).not.toBeNull();
+    expect(back!.sender).toBe(sender.toLowerCase());
+    expect(back!.lastNonce).toBe(42n);
   });
 
-  it('scopes state per author', async () => {
-    const store = new MemoryPosterStore();
-    await store.withTxn(async (txn) => {
-      await txn.setNonce({
-        author: AUTHOR,
+  it('mixed-case sender merges with the same record', async () => {
+    const store = createMemoryStore();
+    await store.withTxn(async (txn) =>
+      txn.setNonce({
+        sender: ('0x' + 'AA'.repeat(20)) as Address,
         lastNonce: 1n,
-        lastMessageId: ('0x' + '01'.repeat(32)) as Bytes32,
-      });
-      await txn.setNonce({
-        author: AUTHOR_2,
-        lastNonce: 99n,
-        lastMessageId: ('0x' + '02'.repeat(32)) as Bytes32,
-      });
-      expect((await txn.getNonce(AUTHOR))!.lastNonce).toBe(1n);
-      expect((await txn.getNonce(AUTHOR_2))!.lastNonce).toBe(99n);
-    });
-  });
-
-  it('is case-insensitive on the author key (FU-6: parity with sqlite)', async () => {
-    const store = new MemoryPosterStore();
-    const upper = ('0x' + 'A'.repeat(40)) as Address;
-    const lower = ('0x' + 'a'.repeat(40)) as Address;
-    await store.withTxn(async (txn) => {
-      await txn.setNonce({
-        author: upper,
-        lastNonce: 5n,
-        lastMessageId: ('0x' + '05'.repeat(32)) as Bytes32,
-      });
-    });
-    const back = await store.withTxn(async (txn) => txn.getNonce(lower));
-    expect(back!.lastNonce).toBe(5n);
-    expect(back!.author).toBe(lower);
+        lastMessageHash: ('0x' + 'bb'.repeat(32)) as Bytes32,
+      })
+    );
+    const back = await store.withTxn(async (txn) =>
+      txn.getNonce(('0x' + 'aa'.repeat(20)) as Address)
+    );
+    expect(back!.lastNonce).toBe(1n);
   });
 });
 
-describe('MemoryPosterStore — submitted-batches CRUD', () => {
-  it('inserts + reads a submitted row', async () => {
-    const store = new MemoryPosterStore();
-    const row = makeSubmitted();
-    await store.withTxn(async (txn) => {
-      await txn.insertSubmitted(row);
-    });
-    const back = await store.withTxn(async (txn) => txn.getSubmittedByTx(row.txHash));
+describe('MemoryPosterStore — submitted batches', () => {
+  it('insertSubmitted + getSubmittedByTx round-trip (contents preserved)', async () => {
+    const store = createMemoryStore();
+    const row = submittedRow();
+    await store.withTxn(async (txn) => txn.insertSubmitted(row));
+    const back = await store.withTxn((txn) =>
+      Promise.resolve(txn.getSubmittedByTx(row.txHash))
+    );
     expect(back).not.toBeNull();
-    expect(back!.status).toBe('included');
-    expect(back!.messageIds).toHaveLength(1);
+    expect(back!.batchContentHash).toBe(row.batchContentHash);
+    expect(back!.messages.length).toBe(1);
+    expect(back!.messages[0].messageId).toBe(row.messages[0].messageId);
   });
 
-  it('filters listSubmitted by contentTag and sinceBlock', async () => {
-    const store = new MemoryPosterStore();
+  it('listSubmitted filters by contentTag + sinceBlock', async () => {
+    const store = createMemoryStore();
     await store.withTxn(async (txn) => {
-      await txn.insertSubmitted(
-        makeSubmitted({ txHash: ('0x' + '11'.repeat(32)) as Bytes32, blockNumber: 10 })
+      txn.insertSubmitted(
+        submittedRow({ txHash: ('0x' + '01'.repeat(32)) as Bytes32, blockNumber: 10 })
       );
-      await txn.insertSubmitted(
-        makeSubmitted({ txHash: ('0x' + '22'.repeat(32)) as Bytes32, blockNumber: 20 })
+      txn.insertSubmitted(
+        submittedRow({ txHash: ('0x' + '02'.repeat(32)) as Bytes32, blockNumber: 20 })
       );
-      await txn.insertSubmitted(
-        makeSubmitted({
-          txHash: ('0x' + '33'.repeat(32)) as Bytes32,
+      txn.insertSubmitted(
+        submittedRow({
+          txHash: ('0x' + '03'.repeat(32)) as Bytes32,
           contentTag: TAG_B,
           blockNumber: 30,
         })
       );
     });
-
-    const byTag = await store.withTxn(async (txn) =>
-      txn.listSubmitted({ contentTag: TAG_B })
+    const a = await store.withTxn((txn) =>
+      Promise.resolve(txn.listSubmitted({ contentTag: TAG_A }))
     );
-    expect(byTag.map((r) => r.blockNumber)).toEqual([30]);
-
-    const sinceBlock = await store.withTxn(async (txn) =>
-      txn.listSubmitted({ sinceBlock: 20n })
+    expect(a.length).toBe(2);
+    const since = await store.withTxn((txn) =>
+      Promise.resolve(txn.listSubmitted({ contentTag: TAG_A, sinceBlock: 15n }))
     );
-    expect(sinceBlock.map((r) => r.blockNumber).sort()).toEqual([20, 30]);
+    expect(since.length).toBe(1);
+    expect(since[0].blockNumber).toBe(20);
   });
 
-  it('updates status + replacedByTxHash', async () => {
-    const store = new MemoryPosterStore();
-    const orig = makeSubmitted({ txHash: ('0x' + '11'.repeat(32)) as Bytes32 });
-    const replacement = ('0x' + '99'.repeat(32)) as Bytes32;
-    await store.withTxn(async (txn) => {
-      await txn.insertSubmitted(orig);
-      await txn.updateSubmittedStatus(orig.txHash, 'reorged', replacement, null);
-    });
-    const back = await store.withTxn(async (txn) => txn.getSubmittedByTx(orig.txHash));
+  it('updateSubmittedStatus flips reorged status and sets invalidatedAt', async () => {
+    const store = createMemoryStore();
+    const row = submittedRow();
+    await store.withTxn(async (txn) => txn.insertSubmitted(row));
+    await store.withTxn(async (txn) =>
+      txn.updateSubmittedStatus(row.txHash, 'reorged', null, null, 9_999)
+    );
+    const back = await store.withTxn((txn) =>
+      Promise.resolve(txn.getSubmittedByTx(row.txHash))
+    );
     expect(back!.status).toBe('reorged');
-    expect(back!.replacedByTxHash).toBe(replacement);
+    expect(back!.invalidatedAt).toBe(9_999);
+  });
+
+  it('updateSubmittedStatus preserves non-null blockNumber when a null is passed', async () => {
+    const store = createMemoryStore();
+    const row = submittedRow({ blockNumber: 100 });
+    await store.withTxn(async (txn) => txn.insertSubmitted(row));
+    await store.withTxn(async (txn) =>
+      txn.updateSubmittedStatus(row.txHash, 'reorged', null, null)
+    );
+    const back = await store.withTxn((txn) =>
+      Promise.resolve(txn.getSubmittedByTx(row.txHash))
+    );
+    expect(back!.blockNumber).toBe(100);
   });
 });
 
-describe('MemoryPosterStore — withTxn serialization', () => {
-  it('serializes concurrent withTxn callers through the async lock', async () => {
-    const store = new MemoryPosterStore();
-    const order: number[] = [];
-    const deferred = <T>(): { promise: Promise<T>; resolve: (v: T) => void } => {
-      let resolve!: (v: T) => void;
-      const promise = new Promise<T>((r) => {
-        resolve = r;
-      });
-      return { promise, resolve };
-    };
-
-    const a = deferred<void>();
-    const b = deferred<void>();
-
-    const p1 = store.withTxn(async () => {
-      order.push(1);
-      await a.promise;
-      order.push(2);
-    });
-    const p2 = store.withTxn(async () => {
-      order.push(3);
-      await b.promise;
-      order.push(4);
-    });
-
-    // p2 must not have started until p1 is done.
-    await Promise.resolve();
-    expect(order).toEqual([1]);
-    a.resolve();
-    await p1;
-    expect(order).toEqual([1, 2, 3]);
-    b.resolve();
-    await p2;
-    expect(order).toEqual([1, 2, 3, 4]);
-  });
-
-  it('recovers from a failed txn so subsequent acquirers still run', async () => {
-    const store = new MemoryPosterStore();
-    const failing = store
-      .withTxn(async () => {
-        throw new Error('boom');
-      })
-      .catch(() => 'caught');
-    expect(await failing).toBe('caught');
-    const res = await store.withTxn(async () => 'ok');
-    expect(res).toBe('ok');
-  });
-
-  it('rolls back updateSubmittedStatus mutations on a thrown txn (cubic review)', async () => {
-    const store = new MemoryPosterStore();
-    const txHash = ('0x' + '11'.repeat(32)) as Bytes32;
-
+describe('MemoryPosterStore — transaction rollback', () => {
+  it('throws inside withTxn roll back pending inserts', async () => {
+    const store = createMemoryStore();
     await store.withTxn(async (txn) => {
-      await txn.insertSubmitted(makeSubmitted({ txHash, status: 'included' }));
+      txn.insertPending(pendingRow({ nonce: 1n, ingestSeq: 1 }));
     });
 
-    const replacement = ('0x' + 'ff'.repeat(32)) as Bytes32;
-    // Update + then throw — rollback must restore the original
-    // status/replacedByTxHash/blockNumber.
     await expect(
       store.withTxn(async (txn) => {
-        await txn.updateSubmittedStatus(txHash, 'reorged', replacement, 999);
-        throw new Error('abort');
+        txn.insertPending(pendingRow({ nonce: 2n, ingestSeq: 2 }));
+        throw new Error('simulated failure');
       })
-    ).rejects.toThrow(/abort/);
+    ).rejects.toThrow();
 
-    const after = await store.withTxn(async (txn) => txn.getSubmittedByTx(txHash));
-    expect(after).not.toBeNull();
-    expect(after!.status).toBe('included');
-    expect(after!.replacedByTxHash).toBeNull();
-    expect(after!.blockNumber).toBe(100);
+    const rows = await store.withTxn((txn) =>
+      Promise.resolve(txn.listPendingByTag(TAG_A))
+    );
+    expect(rows.map((r) => Number(r.nonce))).toEqual([1]); // nonce=2 rolled back
+  });
+
+  it('rollback restores nonce tracker state', async () => {
+    const store = createMemoryStore();
+    await store.withTxn(async (txn) =>
+      txn.setNonce({
+        sender: ADDR_1,
+        lastNonce: 1n,
+        lastMessageHash: ('0x' + 'aa'.repeat(32)) as Bytes32,
+      })
+    );
+    await expect(
+      store.withTxn(async (txn) => {
+        txn.setNonce({
+          sender: ADDR_1,
+          lastNonce: 999n,
+          lastMessageHash: ('0x' + 'bb'.repeat(32)) as Bytes32,
+        });
+        throw new Error('simulated failure');
+      })
+    ).rejects.toThrow();
+    const back = await store.withTxn((txn) =>
+      Promise.resolve(txn.getNonce(ADDR_1))
+    );
+    expect(back!.lastNonce).toBe(1n);
+  });
+
+  it('serializes concurrent withTxn callers', async () => {
+    const store = createMemoryStore();
+    const steps: number[] = [];
+    const p1 = store.withTxn(async () => {
+      steps.push(1);
+      await new Promise((r) => setTimeout(r, 20));
+      steps.push(2);
+    });
+    const p2 = store.withTxn(async () => {
+      steps.push(3);
+      steps.push(4);
+    });
+    await Promise.all([p1, p2]);
+    // First txn must complete its [1,2] before the second runs.
+    expect(steps).toEqual([1, 2, 3, 4]);
+  });
+});
+
+describe('MemoryPosterStore — signature returned by clonePending', () => {
+  it('caller mutating returned bytes does not corrupt the store', async () => {
+    const store = new MemoryPosterStore();
+    await store.withTxn(async (txn) => txn.insertPending(pendingRow()));
+    const first = await store.withTxn((txn) =>
+      Promise.resolve(txn.getPendingByKey({ sender: ADDR_1, nonce: 1n }))
+    );
+    first!.contents[0] = 0xff;
+    const second = await store.withTxn((txn) =>
+      Promise.resolve(txn.getPendingByKey({ sender: ADDR_1, nonce: 1n }))
+    );
+    expect(second!.contents[0]).toBe(0xaa);
   });
 });

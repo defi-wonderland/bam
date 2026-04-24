@@ -245,12 +245,12 @@ contract BlobAuthenticatedMessagingCoreTest is Test {
     }
 
     // ═══════════════════════════════════════════════════════════════════════════════
-    // contentTag — SAME-TAG FORWARDING (G-7 / red-team C-8)
+    // contentTag — SAME-TAG FORWARDING
     // ═══════════════════════════════════════════════════════════════════════════════
 
     /// @notice The contentTag topic emitted by BlobSegmentDeclared and BlobBatchRegistered
-    ///         from a single registerBlobBatch call MUST be equal. Enforces B-2 on the
-    ///         blob path — no re-derivation, hashing, normalization, or defaulting.
+    ///         from a single registerBlobBatch call MUST be equal — no re-derivation,
+    ///         hashing, normalization, or defaulting on the blob path.
     function test_registerBlobBatch_sameTagForwarding() public {
         _setBlobHash(BLOB_HASH_0);
 
@@ -284,7 +284,7 @@ contract BlobAuthenticatedMessagingCoreTest is Test {
     }
 
     // ═══════════════════════════════════════════════════════════════════════════════
-    // contentTag — TOPIC-LEVEL FILTER (G-6 / red-team C-7)
+    // contentTag — TOPIC-LEVEL FILTER
     // ═══════════════════════════════════════════════════════════════════════════════
 
     /// @notice Filter BlobBatchRegistered logs by the contentTag topic. A consumer
@@ -349,7 +349,7 @@ contract BlobAuthenticatedMessagingCoreTest is Test {
     }
 
     // ═══════════════════════════════════════════════════════════════════════════════
-    // contentTag — NULL-TAG ACCEPTANCE (G-8 / red-team C-3)
+    // contentTag — NULL-TAG ACCEPTANCE
     // ═══════════════════════════════════════════════════════════════════════════════
 
     /// @notice registerCalldataBatch MUST NOT reject bytes32(0). The null tag is accepted
@@ -386,7 +386,7 @@ contract BlobAuthenticatedMessagingCoreTest is Test {
     }
 
     // ═══════════════════════════════════════════════════════════════════════════════
-    // contentTag — CALLDATA ROUND-TRIP (B-2 on the calldata path)
+    // contentTag — CALLDATA ROUND-TRIP
     // ═══════════════════════════════════════════════════════════════════════════════
 
     /// @notice The contentTag argument passed to registerCalldataBatch MUST be emitted

@@ -7,9 +7,12 @@ import type {
 
 /**
  * `listSubmittedBatches` read surface (locally verifiable past
- * inclusion; spec §Verification mode). Entries are visible within
- * the reorg-tolerance window with their current `status` so clients
- * bound to a stale tx hash can follow the chain.
+ * inclusion). Entries are visible within the reorg-tolerance window
+ * with their current `status` so clients bound to a stale tx hash
+ * can follow the chain.
+ *
+ * Each per-message entry carries `messageHash` (stable) and `messageId`
+ * (batch-scoped; nulled when the parent batch has been reorged out).
  */
 export async function listSubmittedBatches(
   store: PosterStore,
@@ -20,22 +23,24 @@ export async function listSubmittedBatches(
 }
 
 function mapRow(row: StoreTxnSubmittedRow): SubmittedBatch {
+  const reorged = row.status === 'reorged';
   return {
     txHash: row.txHash,
     contentTag: row.contentTag,
     blobVersionedHash: row.blobVersionedHash,
+    batchContentHash: row.batchContentHash,
     blockNumber: row.blockNumber,
     status: row.status,
     replacedByTxHash: row.replacedByTxHash,
     submittedAt: row.submittedAt,
-    messageIds: [...row.messageIds],
+    invalidatedAt: row.invalidatedAt,
     messages: row.messages.map((m) => ({
-      messageId: m.messageId,
-      author: m.author,
+      sender: m.sender,
       nonce: m.nonce,
-      timestamp: m.timestamp,
-      content: m.content,
+      contents: new Uint8Array(m.contents),
       signature: new Uint8Array(m.signature),
+      messageHash: m.messageHash,
+      messageId: reorged ? null : m.messageId,
     })),
   };
 }

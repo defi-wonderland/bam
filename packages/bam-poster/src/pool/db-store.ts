@@ -10,8 +10,8 @@ export interface DbStoreOptions {
 }
 
 /**
- * Selects the DB adapter at startup per the same convention the demo
- * uses (plan §Storage layer): POSTGRES_URL wins; otherwise SQLite.
+ * Selects the DB adapter at startup: POSTGRES_URL wins; otherwise
+ * SQLite.
  */
 export function createDbStore(options: DbStoreOptions): PosterStore {
   const pgUrl = options.postgresUrl ?? process.env.POSTGRES_URL;

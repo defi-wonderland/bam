@@ -14,9 +14,9 @@ export interface HealthOptions {
 }
 
 /**
- * `health()` read surface — qualitative (plan §C-9). Returns the
- * current health state + a human-readable reason. Does NOT expose
- * balances, counts, tags, or txs — those live on `status()`.
+ * `health()` read surface — qualitative. Returns the current health
+ * state + a human-readable reason. Does NOT expose balances, counts,
+ * tags, or txs — those live on `status()`.
  */
 export function readHealth(opts: HealthOptions): Health {
   if (opts.submissionState === 'ok') {

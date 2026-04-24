@@ -366,8 +366,8 @@ contract ECDSARegistryTest is Test {
     }
 
     function test_verifyWithRegisteredKey_zeroOwner_garbageSig_returnsFalse() public view {
-        // C-2 guard: attacker submits garbage against owner = 0x0 hoping
-        // ecrecover returns 0x0 and the registry matches.
+        // Attacker submits garbage against owner = 0x0 hoping ecrecover
+        // returns 0x0 and the registry matches — must be rejected.
         bytes memory garbage = new bytes(65);
         garbage[64] = bytes1(uint8(27));
         assertFalse(registry.verifyWithRegisteredKey(address(0), bytes32(0), garbage));

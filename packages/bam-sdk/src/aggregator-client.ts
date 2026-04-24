@@ -38,8 +38,6 @@ import type {
   DictionaryInfo,
   HealthStatus,
   MessageStatusResponse,
-  SignedMessage,
-  SubmitResult,
 } from './types.js';
 
 /**
@@ -121,14 +119,10 @@ export class AggregatorClient {
   }
 
   /**
-   * Submit a signed message
-   * @param message Signed message to submit
-   * @returns Submit result with message ID and status
+   * `submit` is not exposed here: callers submit under the ERC-8180
+   * primitive layer through a Poster's `/submit` endpoint with the
+   * envelope produced by `signECDSA` / `signECDSAWithKey`.
    */
-  async submit(message: SignedMessage): Promise<SubmitResult> {
-    const response = await this.request<SubmitResult>('POST', '/messages', message);
-    return response;
-  }
 
   /**
    * Get message status

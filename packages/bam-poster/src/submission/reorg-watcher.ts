@@ -1,13 +1,10 @@
 import type { Bytes32 } from 'bam-sdk';
 
 import type {
+  MessageSnapshot,
   PosterStore,
   StoreTxnSubmittedRow,
 } from '../types.js';
-
-// Hoisted so replaying reorged snapshots back into pending doesn't
-// allocate a fresh TextEncoder per message.
-const TEXT_ENCODER = new TextEncoder();
 
 /**
  * Abstraction over the L1 block-header source the watcher needs.
@@ -42,7 +39,7 @@ export function clampReorgWindow(n: number): number {
 }
 
 /**
- * Reorg watcher (plan §C-12).
+ * Reorg watcher.
  *
  * Each tick:
  *   - Walks entries in `poster_submitted_batches` with status
@@ -88,8 +85,14 @@ export class ReorgWatcher {
 
   private async reorgEntry(entry: StoreTxnSubmittedRow): Promise<void> {
     await this.opts.store.withTxn(async (txn) => {
-      // Mark as reorged — future resubmits link back via replaced_by_tx_hash.
-      await txn.updateSubmittedStatus(entry.txHash, 'reorged', null, null);
+      // Mark as reorged and record the invalidation timestamp so clients
+      // reading `listSubmittedBatches` see a distinct state transition.
+      // The per-message `messageId` values stay in the snapshot for
+      // operator forensics, but downstream surfaces return them as
+      // `null` when status === 'reorged' — a new batch will produce a
+      // fresh `batchContentHash` and therefore a fresh id.
+      const invalidatedAt = this.opts.now().getTime();
+      await txn.updateSubmittedStatus(entry.txHash, 'reorged', null, null, invalidatedAt);
 
       // Re-enqueue the messages in their original ingest order, with
       // NEW ingest_seq values at the tail of the tag queue (the
@@ -98,27 +101,25 @@ export class ReorgWatcher {
       // matches the original ingestion order.
       //
       // Nonce-monotonicity is NOT re-run: the last_nonce tracker is
-      // monotonic over time and doesn't regress on reorg.
-      //
-      // Byte-equality with a hypothetical fresh ingest is structurally
-      // impossible here: any fresh ingest with `nonce ≤ last_nonce`
-      // would already have been rejected at its own ingest time.
+      // monotonic over time and doesn't regress on reorg. Re-enqueue
+      // identity is `(sender, nonce, contents)`; a fresh ingest with
+      // the same `(sender, nonce)` cannot exist here because it would
+      // have been rejected as `stale_nonce` at its own ingest time.
       const ordered = [...entry.messages].sort(
-        (a, b) => a.originalIngestSeq - b.originalIngestSeq
+        (a: MessageSnapshot, b: MessageSnapshot) => a.originalIngestSeq - b.originalIngestSeq
       );
       const ingestedAt = this.opts.now().getTime();
       for (const snap of ordered) {
-        const existing = await txn.getPendingByMessageId(snap.messageId);
-        if (existing !== null) continue; // fresh (no-op retry) already re-enqueued it
+        const existing = await txn.getPendingByKey({ sender: snap.sender, nonce: snap.nonce });
+        if (existing !== null) continue;
         const seq = await txn.nextIngestSeq(entry.contentTag);
         await txn.insertPending({
-          messageId: snap.messageId,
           contentTag: entry.contentTag,
-          author: snap.author,
+          sender: snap.sender,
           nonce: snap.nonce,
-          timestamp: snap.timestamp,
-          content: TEXT_ENCODER.encode(snap.content),
+          contents: new Uint8Array(snap.contents),
           signature: new Uint8Array(snap.signature),
+          messageHash: snap.messageHash,
           ingestedAt,
           ingestSeq: seq,
         });

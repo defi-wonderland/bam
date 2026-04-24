@@ -5,7 +5,7 @@
  * The point is to assert that `BAMClient`'s ECDSA methods produce the exact
  * calldata that `ECDSARegistry`'s ABI expects, and route `eth_call` /
  * `eth_sendTransaction` / `eth_getTransactionReceipt` correctly. Anvil-
- * backed differential verification lives in the T013 integration suite.
+ * backed differential verification lives in `tests/integration/ecdsa-registry.test.ts`.
  */
 
 import { describe, expect, it, beforeEach } from 'vitest';

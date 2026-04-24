@@ -1,47 +1,51 @@
 /**
  * Durable schema for the Poster's pool + dedup index + submitted batches.
- * Created on first startup by the DB adapter; no migration library in v1.
+ * Created on first startup by the DB adapter; no migration library — a
+ * schema-version guard in `startup/reconcile.ts` refuses DBs written
+ * under an earlier version rather than auto-migrating.
  *
  * Nonces are stored as zero-padded TEXT(20) per `nonce-codec.ts`.
  */
 
+export const SCHEMA_VERSION = 2;
+
 export const SQL_CREATE_SQLITE = [
+  `CREATE TABLE IF NOT EXISTS poster_schema (
+    version       INTEGER PRIMARY KEY
+  )`,
   `CREATE TABLE IF NOT EXISTS poster_pending (
-    message_id    TEXT PRIMARY KEY,
-    content_tag   TEXT NOT NULL,
-    author        TEXT NOT NULL,
-    nonce         TEXT NOT NULL,
-    timestamp     INTEGER NOT NULL,
-    content       BLOB NOT NULL,
-    signature     BLOB NOT NULL,
-    ingested_at   INTEGER NOT NULL,
-    ingest_seq    INTEGER NOT NULL,
+    content_tag        TEXT NOT NULL,
+    sender             TEXT NOT NULL,
+    nonce              TEXT NOT NULL,
+    contents           BLOB NOT NULL,
+    signature          BLOB NOT NULL,
+    message_hash       TEXT NOT NULL,
+    ingested_at        INTEGER NOT NULL,
+    ingest_seq         INTEGER NOT NULL,
+    PRIMARY KEY (sender, nonce),
     UNIQUE (content_tag, ingest_seq)
   )`,
   `CREATE INDEX IF NOT EXISTS idx_poster_pending_tag_seq
     ON poster_pending (content_tag, ingest_seq)`,
-  // Persistent per-tag ingest-seq counter. Decoupled from
-  // poster_pending so DELETEs on that table can't walk the sequence
-  // backwards (cubic review) — sinceSeq-based incremental reads stay
-  // monotonic across flushes.
   `CREATE TABLE IF NOT EXISTS poster_tag_seq (
     content_tag   TEXT PRIMARY KEY,
     last_seq      INTEGER NOT NULL
   )`,
   `CREATE TABLE IF NOT EXISTS poster_nonces (
-    author             TEXT PRIMARY KEY,
+    sender             TEXT PRIMARY KEY,
     last_nonce         TEXT NOT NULL,
-    last_message_id    TEXT NOT NULL
+    last_message_hash  TEXT NOT NULL
   )`,
   `CREATE TABLE IF NOT EXISTS poster_submitted_batches (
     tx_hash              TEXT PRIMARY KEY,
     content_tag          TEXT NOT NULL,
     blob_versioned_hash  TEXT NOT NULL,
+    batch_content_hash   TEXT NOT NULL,
     block_number         INTEGER,
     status               TEXT NOT NULL,
     replaced_by_tx_hash  TEXT,
     submitted_at         INTEGER NOT NULL,
-    message_ids_json     TEXT NOT NULL,
+    invalidated_at       INTEGER,
     messages_json        TEXT NOT NULL
   )`,
   `CREATE INDEX IF NOT EXISTS idx_poster_submitted_tag_block
@@ -53,40 +57,42 @@ export const SQL_CREATE_SQLITE = [
  * semantic constraints as SQLite, different types.
  */
 export const SQL_CREATE_POSTGRES = [
+  `CREATE TABLE IF NOT EXISTS poster_schema (
+    version       INTEGER PRIMARY KEY
+  )`,
   `CREATE TABLE IF NOT EXISTS poster_pending (
-    message_id    TEXT PRIMARY KEY,
-    content_tag   TEXT NOT NULL,
-    author        TEXT NOT NULL,
-    nonce         TEXT NOT NULL,
-    timestamp     BIGINT NOT NULL,
-    content       BYTEA NOT NULL,
-    signature     BYTEA NOT NULL,
-    ingested_at   BIGINT NOT NULL,
-    ingest_seq    BIGINT NOT NULL,
+    content_tag        TEXT NOT NULL,
+    sender             TEXT NOT NULL,
+    nonce              TEXT NOT NULL,
+    contents           BYTEA NOT NULL,
+    signature          BYTEA NOT NULL,
+    message_hash       TEXT NOT NULL,
+    ingested_at        BIGINT NOT NULL,
+    ingest_seq         BIGINT NOT NULL,
+    PRIMARY KEY (sender, nonce),
     UNIQUE (content_tag, ingest_seq)
   )`,
   `CREATE INDEX IF NOT EXISTS idx_poster_pending_tag_seq
     ON poster_pending (content_tag, ingest_seq)`,
-  // See SQLite flavor: persistent per-tag ingest_seq counter so
-  // DELETE on poster_pending can't reset the sequence.
   `CREATE TABLE IF NOT EXISTS poster_tag_seq (
     content_tag   TEXT PRIMARY KEY,
     last_seq      BIGINT NOT NULL
   )`,
   `CREATE TABLE IF NOT EXISTS poster_nonces (
-    author             TEXT PRIMARY KEY,
+    sender             TEXT PRIMARY KEY,
     last_nonce         TEXT NOT NULL,
-    last_message_id    TEXT NOT NULL
+    last_message_hash  TEXT NOT NULL
   )`,
   `CREATE TABLE IF NOT EXISTS poster_submitted_batches (
     tx_hash              TEXT PRIMARY KEY,
     content_tag          TEXT NOT NULL,
     blob_versioned_hash  TEXT NOT NULL,
+    batch_content_hash   TEXT NOT NULL,
     block_number         BIGINT,
     status               TEXT NOT NULL,
     replaced_by_tx_hash  TEXT,
     submitted_at         BIGINT NOT NULL,
-    message_ids_json     TEXT NOT NULL,
+    invalidated_at       BIGINT,
     messages_json        TEXT NOT NULL
   )`,
   `CREATE INDEX IF NOT EXISTS idx_poster_submitted_tag_block

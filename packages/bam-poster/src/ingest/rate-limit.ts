@@ -3,8 +3,8 @@ import type { Address } from 'bam-sdk';
 import type { RateLimitConfig, ValidationResult } from '../types.js';
 
 /**
- * Default rate-limit settings — a spam floor, not DoS mitigation
- * (spec §Goals / Non-goals). Operators override via config.
+ * Default rate-limit settings — a spam floor, not DoS mitigation.
+ * Operators override via config.
  */
 export const DEFAULT_RATE_LIMIT: RateLimitConfig = {
   windowMs: 60_000,
@@ -17,8 +17,7 @@ export const DEFAULT_RATE_LIMIT: RateLimitConfig = {
  * CROPS-P preserved: we never persist or log an IP.
  *
  * Runs after the size check and before crypto, so CPU-grief spam with
- * invalid signatures is rejected before `verifyECDSA` is ever called
- * (plan §C-1; ordering assertion lives in T011).
+ * invalid signatures is rejected before `verifyECDSA` is ever called.
  *
  * The limiter is in-memory, process-local. If multi-instance
  * coordination is ever wanted, it lives behind this interface.

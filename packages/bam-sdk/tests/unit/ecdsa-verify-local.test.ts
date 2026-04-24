@@ -1,9 +1,9 @@
 /**
- * SDK local-verify helpers — same happy / negative matrix as T004/T005
- * Forge tests, run against the SDK helpers only (no on-chain calls).
- *
- * The anvil-backed differential test in T013 asserts that SDK and contract
- * agree byte-for-byte on identical inputs (red-team C-9).
+ * SDK local-verify helpers — mirrors the happy / negative matrix of
+ * the Forge ECDSARegistry tests, run against the SDK helpers only
+ * (no on-chain calls). The anvil-backed differential test in
+ * `tests/integration/ecdsa-registry.test.ts` asserts that SDK and
+ * contract agree byte-for-byte on identical inputs.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -140,7 +140,7 @@ describe('verifyEcdsaLocal', () => {
     );
   });
 
-  it('returns false for owner=0x0 + garbage sig (C-2)', () => {
+  it('returns false for owner=0x0 + garbage sig', () => {
     const garbage = new Uint8Array(65);
     garbage[64] = 27;
     expect(

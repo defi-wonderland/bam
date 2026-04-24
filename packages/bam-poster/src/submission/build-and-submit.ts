@@ -6,8 +6,8 @@ import {
   encodeBatch,
   loadTrustedSetup,
   type Address,
+  type BAMMessage,
   type Bytes32,
-  type SignedMessage,
 } from 'bam-sdk';
 import { BAM_CORE_ABI } from 'bam-sdk';
 import {
@@ -56,7 +56,7 @@ export interface BuildAndSubmitOptions {
 
 /**
  * Narrow transport surface the submitter needs. Extracted so tests
- * can inject mocks without spinning up a real RPC (FU-9).
+ * can inject mocks without spinning up a real RPC.
  */
 export interface BuildAndSubmitTransport {
   sendBlobTransaction(args: {
@@ -162,15 +162,13 @@ export async function buildAndSubmitWithViem(
       // "KZG trusted setup not loaded. Call loadTrustedSetup() first."
       const kzg = await ensureKzg();
 
-      const signed: SignedMessage[] = messages.map((m) => ({
-        author: m.author,
-        timestamp: m.timestamp,
-        nonce: Number(m.nonce & 0xffffn),
-        content: m.content,
-        signature: m.signature,
-        signatureType: 'ecdsa',
+      const bamMsgs: BAMMessage[] = messages.map((m) => ({
+        sender: m.sender,
+        nonce: m.nonce,
+        contents: m.contents,
       }));
-      const batch = encodeBatch(signed);
+      const signatures = messages.map((m) => m.signature);
+      const batch = encodeBatch(bamMsgs, signatures);
       const blob = createBlob(batch.data);
       const { versionedHash } = commitToBlob(blob);
       const data = encodeFunctionData({

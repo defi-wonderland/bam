@@ -51,9 +51,9 @@ const ROUTES: BoundRoute[] = [
 ];
 
 /**
- * Thin Node `http.createServer` router (plan §Architecture, no framework
- * dep for 6 endpoints). Paths are exact-match; query strings pass
- * through to the handler.
+ * Thin Node `http.createServer` router — no framework dep for 6
+ * endpoints. Paths are exact-match; query strings pass through to the
+ * handler.
  */
 export class HttpServer {
   private readonly server: Server;
@@ -76,8 +76,8 @@ export class HttpServer {
 
   private async dispatch(req: IncomingMessage, res: ServerResponse): Promise<void> {
     try {
-      // FU-12: bearer-token gate. Runs before any handler so even a
-      // malformed /submit can't reach the pool without auth.
+      // Bearer-token gate. Runs before any handler so even a malformed
+      // /submit can't reach the pool without auth.
       if (this.authToken !== undefined && !this.checkAuth(req)) {
         res.statusCode = 401;
         res.setHeader('Content-Type', 'application/json');
@@ -95,13 +95,13 @@ export class HttpServer {
         res.setHeader('Content-Type', 'application/json');
         // 404 is an HTTP routing concern — not a PosterRejection. The
         // body carries a distinct `error` field to keep the rejection-
-        // reason namespace closed (plan §C-4 / gate G-7).
+        // reason namespace closed.
         res.end(JSON.stringify({ error: 'not_found' }));
         return;
       }
       await route.handler(req, res, this.ctx);
     } catch {
-      // Never leak internal details (plan §C-4).
+      // Never leak internal details.
       if (!res.headersSent) {
         res.statusCode = 500;
         res.setHeader('Content-Type', 'application/json');

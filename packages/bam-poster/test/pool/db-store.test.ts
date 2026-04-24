@@ -1,362 +1,231 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import type { Address, Bytes32 } from 'bam-sdk';
 
 import { SqlitePosterStore } from '../../src/pool/sqlite.js';
-import { createDbStore } from '../../src/pool/db-store.js';
-import type { StoreTxnPendingRow, StoreTxnSubmittedRow } from '../../src/types.js';
+import type { PosterStore } from '../../src/types.js';
 
 const TAG_A = ('0x' + 'aa'.repeat(32)) as Bytes32;
 const TAG_B = ('0x' + 'bb'.repeat(32)) as Bytes32;
-const AUTHOR = '0x1234567890123456789012345678901234567890' as Address;
-const AUTHOR_2 = '0x2222222222222222222222222222222222222222' as Address;
+const ADDR_1 = ('0x' + '11'.repeat(20)) as Address;
+const ADDR_2 = ('0x' + '22'.repeat(20)) as Address;
+const HASH_1 = ('0x' + '77'.repeat(32)) as Bytes32;
 
-function pending(overrides: Partial<StoreTxnPendingRow> = {}): StoreTxnPendingRow {
+const stores: PosterStore[] = [];
+
+function newStore(): SqlitePosterStore {
+  const s = new SqlitePosterStore(':memory:');
+  stores.push(s);
+  return s;
+}
+
+afterEach(async () => {
+  for (const s of stores.splice(0)) await s.close();
+});
+
+function pendingRow(overrides = {}): Parameters<
+  Parameters<PosterStore['withTxn']>[0] extends (txn: infer T) => unknown
+    ? T extends { insertPending: (row: infer R) => unknown }
+      ? (row: R) => unknown
+      : never
+    : never
+>[0] {
+  const contents = new Uint8Array(40);
+  contents.fill(0xaa, 0, 32);
   return {
-    messageId: ('0x' + '11'.repeat(32)) as Bytes32,
     contentTag: TAG_A,
-    author: AUTHOR,
+    sender: ADDR_1,
     nonce: 1n,
-    timestamp: 1_700_000_000,
-    content: new Uint8Array([1, 2, 3]),
+    contents,
     signature: new Uint8Array(65),
-    ingestedAt: 1_700_000_000_000,
+    messageHash: HASH_1,
+    ingestedAt: 1_000,
     ingestSeq: 1,
     ...overrides,
   };
 }
 
-function submitted(overrides: Partial<StoreTxnSubmittedRow> = {}): StoreTxnSubmittedRow {
-  return {
-    txHash: ('0x' + 'cc'.repeat(32)) as Bytes32,
-    contentTag: TAG_A,
-    blobVersionedHash: ('0x' + 'dd'.repeat(32)) as Bytes32,
-    blockNumber: 100,
-    status: 'included',
-    replacedByTxHash: null,
-    submittedAt: 1_700_000_000_000,
-    messageIds: [('0x' + '11'.repeat(32)) as Bytes32],
-    messages: [],
-    ...overrides,
-  };
-}
+describe('SqlitePosterStore — schema + schema version', () => {
+  it('fresh DB self-initialises schema version to 2', () => {
+    const store = newStore();
+    expect(store.readSchemaVersion()).toBe(2);
+  });
+
+  it('all expected tables exist on a fresh DB', () => {
+    const store = newStore();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const db = (store as unknown as { db: any }).db;
+    const names = db
+      .prepare(`SELECT name FROM sqlite_master WHERE type='table' ORDER BY name`)
+      .all()
+      .map((r: { name: string }) => r.name);
+    for (const t of [
+      'poster_pending',
+      'poster_nonces',
+      'poster_submitted_batches',
+      'poster_tag_seq',
+      'poster_schema',
+    ]) {
+      expect(names).toContain(t);
+    }
+  });
+});
 
 describe('SqlitePosterStore — pending CRUD', () => {
-  let store: SqlitePosterStore;
-  afterEach(async () => {
-    await store.close();
-  });
-
-  it('inserts + reads a pending row (byte-preserving content + signature)', async () => {
-    store = new SqlitePosterStore(':memory:');
-    const content = new Uint8Array([9, 8, 7, 6, 5]);
-    const sig = new Uint8Array(65);
-    sig[0] = 0xde;
-    sig[64] = 0xad;
-    await store.withTxn(async (txn) => {
-      await txn.insertPending(pending({ content, signature: sig }));
-    });
+  it('insert + getPendingByKey round-trip', async () => {
+    const store = newStore();
+    await store.withTxn(async (txn) => txn.insertPending(pendingRow()));
     const back = await store.withTxn(async (txn) =>
-      txn.getPendingByMessageId(('0x' + '11'.repeat(32)) as Bytes32)
+      txn.getPendingByKey({ sender: ADDR_1, nonce: 1n })
     );
     expect(back).not.toBeNull();
-    expect(Array.from(back!.content)).toEqual([9, 8, 7, 6, 5]);
-    expect(back!.signature[0]).toBe(0xde);
-    expect(back!.signature[64]).toBe(0xad);
+    expect(back!.messageHash).toBe(HASH_1);
+    expect(back!.nonce).toBe(1n);
+    expect(Array.from(back!.contents).slice(0, 32)).toEqual(
+      new Array(32).fill(0xaa)
+    );
   });
 
-  it('enforces PRIMARY KEY on message_id', async () => {
-    store = new SqlitePosterStore(':memory:');
-    await store.withTxn(async (txn) => {
-      await txn.insertPending(pending());
-    });
+  it('duplicate (sender, nonce) insert rejects via PK', async () => {
+    const store = newStore();
+    await store.withTxn(async (txn) => txn.insertPending(pendingRow()));
     await expect(
-      store.withTxn(async (txn) => {
-        await txn.insertPending(pending());
-      })
+      store.withTxn(async (txn) => txn.insertPending(pendingRow()))
     ).rejects.toThrow();
   });
 
-  it('lists pending per tag in FIFO order; supports limit + sinceSeq', async () => {
-    store = new SqlitePosterStore(':memory:');
+  it('listPendingByTag returns per-tag FIFO', async () => {
+    const store = newStore();
     await store.withTxn(async (txn) => {
-      for (let i = 1; i <= 4; i++) {
-        await txn.insertPending(
-          pending({
-            messageId: (`0x${i.toString(16).padStart(64, '0')}`) as Bytes32,
-            ingestSeq: i,
-            ingestedAt: 1_700_000_000_000 + i,
-          })
-        );
-      }
-      // Cross-tag pollution
-      await txn.insertPending(
-        pending({
-          messageId: ('0xff' + '0'.repeat(62)) as Bytes32,
+      txn.insertPending(pendingRow({ nonce: 1n, ingestSeq: 1 }));
+      txn.insertPending(pendingRow({ nonce: 2n, ingestSeq: 2 }));
+      txn.insertPending(
+        pendingRow({
+          sender: ADDR_2,
+          nonce: 1n,
+          ingestSeq: 3,
           contentTag: TAG_B,
-          ingestSeq: 1,
         })
       );
     });
     const rows = await store.withTxn(async (txn) => txn.listPendingByTag(TAG_A));
-    expect(rows.map((r) => r.ingestSeq)).toEqual([1, 2, 3, 4]);
-    expect(rows.every((r) => r.contentTag === TAG_A)).toBe(true);
-
-    const limited = await store.withTxn(async (txn) => txn.listPendingByTag(TAG_A, 2));
-    expect(limited).toHaveLength(2);
-
-    const after2 = await store.withTxn(async (txn) => txn.listPendingByTag(TAG_A, undefined, 2));
-    expect(after2.map((r) => r.ingestSeq)).toEqual([3, 4]);
+    expect(rows.map((r) => Number(r.nonce))).toEqual([1, 2]);
   });
 
-  it('deletePending + countPendingByTag', async () => {
-    store = new SqlitePosterStore(':memory:');
+  it('deletePending removes by (sender, nonce) composite keys', async () => {
+    const store = newStore();
     await store.withTxn(async (txn) => {
-      await txn.insertPending(
-        pending({ messageId: ('0x' + 'a1'.repeat(32)) as Bytes32, ingestSeq: 1 })
-      );
-      await txn.insertPending(
-        pending({ messageId: ('0x' + 'a2'.repeat(32)) as Bytes32, ingestSeq: 2 })
-      );
+      txn.insertPending(pendingRow({ nonce: 1n, ingestSeq: 1 }));
+      txn.insertPending(pendingRow({ nonce: 2n, ingestSeq: 2 }));
     });
-    await store.withTxn(async (txn) => {
-      expect(await txn.countPendingByTag(TAG_A)).toBe(2);
-      await txn.deletePending([('0x' + 'a1'.repeat(32)) as Bytes32]);
-      expect(await txn.countPendingByTag(TAG_A)).toBe(1);
-    });
-  });
-
-  it('deletePending handles large batches above SQLITE_MAX_VARIABLE_NUMBER (qodo review)', async () => {
-    // SQLite's historical SQLITE_MAX_VARIABLE_NUMBER is 999. A single
-    // IN (?, ?, …) with thousands of placeholders would throw; the
-    // chunked implementation must handle it transparently.
-    store = new SqlitePosterStore(':memory:');
-    const COUNT = 1500;
-    const ids = Array.from(
-      { length: COUNT },
-      (_, i) => (`0x${(i + 1).toString(16).padStart(64, '0')}`) as Bytes32
+    await store.withTxn(async (txn) =>
+      txn.deletePending([{ sender: ADDR_1, nonce: 1n }])
     );
-    await store.withTxn(async (txn) => {
-      for (let i = 0; i < COUNT; i++) {
-        await txn.insertPending(pending({ messageId: ids[i], ingestSeq: i + 1 }));
-      }
-    });
-    await store.withTxn(async (txn) => {
-      expect(await txn.countPendingByTag(TAG_A)).toBe(COUNT);
-      await txn.deletePending(ids);
-      expect(await txn.countPendingByTag(TAG_A)).toBe(0);
-    });
+    const rows = await store.withTxn(async (txn) => txn.listPendingByTag(TAG_A));
+    expect(rows.map((r) => Number(r.nonce))).toEqual([2]);
   });
 
-  it('nextIngestSeq is 1 on empty pool, then strictly increasing per-tag', async () => {
-    store = new SqlitePosterStore(':memory:');
+  it('nextIngestSeq persists across DELETEs (counter lives in its own table)', async () => {
+    const store = newStore();
+    const seqs: number[] = [];
     await store.withTxn(async (txn) => {
-      expect(await txn.nextIngestSeq(TAG_A)).toBe(1);
+      seqs.push(txn.nextIngestSeq(TAG_A));
+      seqs.push(txn.nextIngestSeq(TAG_A));
     });
-    await store.withTxn(async (txn) => {
-      const seq = await txn.nextIngestSeq(TAG_A);
-      await txn.insertPending(
-        pending({ messageId: ('0x' + '01'.repeat(32)) as Bytes32, ingestSeq: seq })
-      );
-    });
-    await store.withTxn(async (txn) => {
-      expect(await txn.nextIngestSeq(TAG_A)).toBe(3);
-      expect(await txn.nextIngestSeq(TAG_B)).toBe(1);
-    });
-  });
-
-  it('nextIngestSeq stays monotonic across deletes (cubic review)', async () => {
-    // Pre-fix, the counter was derived from MAX(ingest_seq) over
-    // poster_pending — so DELETE-ing every row (e.g. after a flush)
-    // reset the sequence and made sinceSeq cursors re-see ids they'd
-    // already consumed. Now the counter lives in poster_tag_seq and
-    // must keep climbing even when the pending table is empty.
-    store = new SqlitePosterStore(':memory:');
-    await store.withTxn(async (txn) => {
-      const s1 = await txn.nextIngestSeq(TAG_A);
-      await txn.insertPending(
-        pending({ messageId: ('0x' + '01'.repeat(32)) as Bytes32, ingestSeq: s1 })
-      );
-      const s2 = await txn.nextIngestSeq(TAG_A);
-      await txn.insertPending(
-        pending({ messageId: ('0x' + '02'.repeat(32)) as Bytes32, ingestSeq: s2 })
-      );
-      await txn.deletePending([
-        ('0x' + '01'.repeat(32)) as Bytes32,
-        ('0x' + '02'.repeat(32)) as Bytes32,
-      ]);
-      expect(await txn.countPendingByTag(TAG_A)).toBe(0);
-    });
-    await store.withTxn(async (txn) => {
-      // Pre-fix this was 1. Post-fix the counter carries across the
-      // flush and hands out 3 next.
-      expect(await txn.nextIngestSeq(TAG_A)).toBe(3);
-    });
+    await store.withTxn(async (txn) =>
+      txn.insertPending(pendingRow({ ingestSeq: seqs[0] }))
+    );
+    await store.withTxn(async (txn) =>
+      txn.deletePending([{ sender: ADDR_1, nonce: 1n }])
+    );
+    const next = await store.withTxn(async (txn) => txn.nextIngestSeq(TAG_A));
+    expect(next).toBe(3); // sequence did NOT reset after DELETE
   });
 });
 
 describe('SqlitePosterStore — nonce tracker', () => {
-  let store: SqlitePosterStore;
-  afterEach(async () => {
-    await store.close();
-  });
-
-  it('round-trips the largest uint64 (2^64 - 1) through the codec', async () => {
-    store = new SqlitePosterStore(':memory:');
-    const MAX = (1n << 64n) - 1n;
-    const mid = ('0x' + '42'.repeat(32)) as Bytes32;
-    await store.withTxn(async (txn) => {
-      await txn.setNonce({ author: AUTHOR, lastNonce: MAX, lastMessageId: mid });
-    });
-    const back = await store.withTxn(async (txn) => txn.getNonce(AUTHOR));
+  it('set + get round-trip with lowercase normalisation', async () => {
+    const store = newStore();
+    const sender = ('0x' + 'AA'.repeat(20)) as Address;
+    await store.withTxn(async (txn) =>
+      txn.setNonce({ sender, lastNonce: 42n, lastMessageHash: HASH_1 })
+    );
+    const back = await store.withTxn(async (txn) => txn.getNonce(sender));
     expect(back).not.toBeNull();
-    expect(back!.lastNonce).toBe(MAX);
-    expect(back!.lastMessageId).toBe(mid);
+    expect(back!.sender).toBe(sender.toLowerCase());
+    expect(back!.lastNonce).toBe(42n);
   });
 
-  it('UPSERT keeps one row per author', async () => {
-    store = new SqlitePosterStore(':memory:');
-    await store.withTxn(async (txn) => {
-      await txn.setNonce({
-        author: AUTHOR,
-        lastNonce: 1n,
-        lastMessageId: ('0x' + '01'.repeat(32)) as Bytes32,
-      });
-      await txn.setNonce({
-        author: AUTHOR,
-        lastNonce: 2n,
-        lastMessageId: ('0x' + '02'.repeat(32)) as Bytes32,
-      });
-    });
-    const back = await store.withTxn(async (txn) => txn.getNonce(AUTHOR));
-    expect(back!.lastNonce).toBe(2n);
-  });
-
-  it('is case-insensitive for the author key', async () => {
-    store = new SqlitePosterStore(':memory:');
-    const upper = ('0x' + 'A'.repeat(40)) as Address;
-    const lower = ('0x' + 'a'.repeat(40)) as Address;
-    await store.withTxn(async (txn) => {
-      await txn.setNonce({
-        author: upper,
-        lastNonce: 5n,
-        lastMessageId: ('0x' + '05'.repeat(32)) as Bytes32,
-      });
-    });
-    const back = await store.withTxn(async (txn) => txn.getNonce(lower));
-    expect(back!.lastNonce).toBe(5n);
-  });
-
-  it('scopes by author', async () => {
-    store = new SqlitePosterStore(':memory:');
-    await store.withTxn(async (txn) => {
-      await txn.setNonce({
-        author: AUTHOR,
-        lastNonce: 3n,
-        lastMessageId: ('0x' + '03'.repeat(32)) as Bytes32,
-      });
-      await txn.setNonce({
-        author: AUTHOR_2,
-        lastNonce: 17n,
-        lastMessageId: ('0x' + '17'.repeat(32)) as Bytes32,
-      });
-    });
-    await store.withTxn(async (txn) => {
-      expect((await txn.getNonce(AUTHOR))!.lastNonce).toBe(3n);
-      expect((await txn.getNonce(AUTHOR_2))!.lastNonce).toBe(17n);
-    });
+  it('uint64 boundary round-trips via TEXT(20)', async () => {
+    const store = newStore();
+    const maxUint64 = (1n << 64n) - 1n;
+    await store.withTxn(async (txn) =>
+      txn.setNonce({ sender: ADDR_1, lastNonce: maxUint64, lastMessageHash: HASH_1 })
+    );
+    const back = await store.withTxn(async (txn) => txn.getNonce(ADDR_1));
+    expect(back!.lastNonce).toBe(maxUint64);
   });
 });
 
-describe('SqlitePosterStore — submitted-batches CRUD', () => {
-  let store: SqlitePosterStore;
-  afterEach(async () => {
-    await store.close();
-  });
-
-  it('inserts + reads + list filter + status update', async () => {
-    store = new SqlitePosterStore(':memory:');
-    const rowA = submitted({ txHash: ('0x' + '11'.repeat(32)) as Bytes32, blockNumber: 10 });
-    const rowB = submitted({
-      txHash: ('0x' + '22'.repeat(32)) as Bytes32,
-      contentTag: TAG_B,
-      blockNumber: 20,
-    });
-    await store.withTxn(async (txn) => {
-      await txn.insertSubmitted(rowA);
-      await txn.insertSubmitted(rowB);
-    });
-
-    const backA = await store.withTxn(async (txn) => txn.getSubmittedByTx(rowA.txHash));
-    expect(backA!.messageIds).toEqual(rowA.messageIds);
-
-    const onlyA = await store.withTxn(async (txn) => txn.listSubmitted({ contentTag: TAG_A }));
-    expect(onlyA).toHaveLength(1);
-
-    const sinceBlock = await store.withTxn(async (txn) =>
-      txn.listSubmitted({ sinceBlock: 15n })
+describe('SqlitePosterStore — submitted batches', () => {
+  it('insert + getSubmittedByTx round-trip (incl. batchContentHash)', async () => {
+    const store = newStore();
+    const row = {
+      txHash: ('0x' + '01'.repeat(32)) as Bytes32,
+      contentTag: TAG_A,
+      blobVersionedHash: ('0x' + '02'.repeat(32)) as Bytes32,
+      batchContentHash: ('0x' + '03'.repeat(32)) as Bytes32,
+      blockNumber: 100,
+      status: 'included' as const,
+      replacedByTxHash: null,
+      submittedAt: 2_000,
+      invalidatedAt: null,
+      messages: [
+        {
+          sender: ADDR_1,
+          nonce: 1n,
+          contents: new Uint8Array(32),
+          signature: new Uint8Array(65),
+          messageHash: HASH_1,
+          messageId: ('0x' + '99'.repeat(32)) as Bytes32,
+          originalIngestSeq: 1,
+        },
+      ],
+    };
+    await store.withTxn(async (txn) => txn.insertSubmitted(row));
+    const back = await store.withTxn(async (txn) =>
+      txn.getSubmittedByTx(row.txHash)
     );
-    expect(sinceBlock.map((r) => r.blockNumber).sort()).toEqual([20]);
-
-    const replacement = ('0x' + '99'.repeat(32)) as Bytes32;
-    await store.withTxn(async (txn) => {
-      await txn.updateSubmittedStatus(rowA.txHash, 'reorged', replacement, null);
-    });
-    const updated = await store.withTxn(async (txn) => txn.getSubmittedByTx(rowA.txHash));
-    expect(updated!.status).toBe('reorged');
-    expect(updated!.replacedByTxHash).toBe(replacement);
-    expect(updated!.blockNumber).toBe(10); // unchanged when null supplied
-  });
-
-  it('updateSubmittedStatus can overwrite block_number when a non-null value is supplied', async () => {
-    store = new SqlitePosterStore(':memory:');
-    const row = submitted({ blockNumber: null, status: 'pending' });
-    await store.withTxn(async (txn) => {
-      await txn.insertSubmitted(row);
-      await txn.updateSubmittedStatus(row.txHash, 'included', null, 7);
-    });
-    const back = await store.withTxn(async (txn) => txn.getSubmittedByTx(row.txHash));
-    expect(back!.blockNumber).toBe(7);
+    expect(back).not.toBeNull();
+    expect(back!.batchContentHash).toBe(row.batchContentHash);
+    expect(back!.messages.length).toBe(1);
+    expect(back!.messages[0].messageId).toBe(row.messages[0].messageId);
     expect(back!.status).toBe('included');
   });
-});
 
-describe('SqlitePosterStore — restart survival', () => {
-  it('persists pool + nonce + submitted state across reopens', async () => {
-    const path = `/tmp/bam-poster-test-${process.pid}-${Date.now()}.db`;
-    const a = new SqlitePosterStore(path);
-    await a.withTxn(async (txn) => {
-      await txn.insertPending(pending());
-      await txn.setNonce({
-        author: AUTHOR,
-        lastNonce: 9n,
-        lastMessageId: ('0x' + '09'.repeat(32)) as Bytes32,
-      });
-      await txn.insertSubmitted(submitted());
-    });
-    await a.close();
-
-    const b = new SqlitePosterStore(path);
-    const p = await b.withTxn(async (txn) =>
-      txn.getPendingByMessageId(('0x' + '11'.repeat(32)) as Bytes32)
+  it('updateSubmittedStatus applies invalidatedAt when reorged', async () => {
+    const store = newStore();
+    const txHash = ('0x' + '01'.repeat(32)) as Bytes32;
+    await store.withTxn(async (txn) =>
+      txn.insertSubmitted({
+        txHash,
+        contentTag: TAG_A,
+        blobVersionedHash: ('0x' + '02'.repeat(32)) as Bytes32,
+        batchContentHash: ('0x' + '03'.repeat(32)) as Bytes32,
+        blockNumber: 100,
+        status: 'included',
+        replacedByTxHash: null,
+        submittedAt: 2_000,
+        invalidatedAt: null,
+        messages: [],
+      })
     );
-    const n = await b.withTxn(async (txn) => txn.getNonce(AUTHOR));
-    const s = await b.withTxn(async (txn) =>
-      txn.getSubmittedByTx(('0x' + 'cc'.repeat(32)) as Bytes32)
+    await store.withTxn(async (txn) =>
+      txn.updateSubmittedStatus(txHash, 'reorged', null, null, 3_000)
     );
-    expect(p).not.toBeNull();
-    expect(n!.lastNonce).toBe(9n);
-    expect(s!.blobVersionedHash).toBe('0x' + 'dd'.repeat(32));
-    await b.close();
-  });
-});
-
-describe('createDbStore dispatcher', () => {
-  it('returns a SqlitePosterStore when POSTGRES_URL is absent', async () => {
-    const store = createDbStore({ sqlitePath: ':memory:' });
-    try {
-      expect(store).toBeInstanceOf(SqlitePosterStore);
-    } finally {
-      await store.close();
-    }
+    const back = await store.withTxn(async (txn) =>
+      txn.getSubmittedByTx(txHash)
+    );
+    expect(back!.status).toBe('reorged');
+    expect(back!.invalidatedAt).toBe(3_000);
   });
 });

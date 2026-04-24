@@ -1,685 +1,245 @@
 /**
- * BAM Batch Encoding/Decoding
+ * BAM ERC-8180 batch codec.
+ *
+ * ERC-8180 leaves batch encoding decoder-specific; this is BAM's reference
+ * decoder for `BAMMessage[]` + parallel scheme-0x01 signatures. No
+ * per-author table, no timestamp-delta, no magic bytes — density
+ * regression vs. packed codecs is accepted here; ZSTD compression
+ * recovers most of it for repetitive payloads.
+ *
+ * Header layout (uncompressed, big-endian):
+ *   byte 0           : version          (0x02)
+ *   byte 1           : codec id         (0x00 none | 0x01 zstd)
+ *   bytes 2..5       : message count    (uint32 BE)
+ *   bytes 6..9       : payload length   (uint32 BE, bytes after header)
+ *
+ * Payload (possibly compressed): concatenated per-message records.
+ *   sender           : 20 bytes
+ *   nonce            : uint64 BE (8 bytes)
+ *   contents length  : uint32 BE (4 bytes)
+ *   contents         : N bytes   (first 32 bytes are contentTag)
+ *   signature        : 65 bytes  (scheme 0x01; other schemes deferred)
+ *
+ * Compression is applied to the concatenated payload as a single ZSTD
+ * stream (no dictionary in v1). The payload-length field is the
+ * post-compression length; message count is constant across compression.
+ *
  * @module bam-sdk/batch
  */
 
-import type {
-  Address,
-  BatchHeader,
-  BatchOptions,
-  Bytes32,
-  CompressionCodec,
-  DecodeBatchOptions,
-  DecodedBatch,
-  EncodedBatch,
-  Message,
-  SignedMessage,
-} from './types.js';
-import {
-  ADDRESS_SIZE,
-  BATCH_FLAG_COMPRESSED,
-  BATCH_HEADER_FIXED_SIZE,
-  BLS_SIGNATURE_SIZE,
-  BLOB_SIZE_LIMIT,
-  BYTES32_SIZE,
-  CODEC_BPE,
-  CODEC_NONE,
-  CODEC_ZSTD,
-  MAGIC_BATCH,
-  MAX_AUTHORS_PER_BATCH,
-  MAX_TIMESTAMP_DELTA,
-  PROTOCOL_VERSION,
-  SIG_TYPE_BLS,
-  ZERO_BYTES32,
-} from './constants.js';
-import {
-  AuthorIndexError,
-  AuthorNotFoundError,
-  BatchOverflowError,
-  BatchTruncatedError,
-  InvalidFlagsError,
-  InvalidMagicError,
-  TimestampOverflowError,
-  TooManyAuthorsError,
-  UnsupportedVersionError,
-} from './errors.js';
-import { compress, decompress, loadDictionary, type ZstdDictionary } from './compression.js';
-import { bpeEncode, bpeDecode, deserializeDictionary } from './bpe.js';
+import type { Address, BAMMessage, BatchOptions } from './types.js';
+import { compress, decompress } from './compression.js';
 import { hexToBytes, bytesToHex } from './message.js';
-import { keccak_256 } from '@noble/hashes/sha3';
-
-const textEncoder = new TextEncoder();
-const textDecoder = new TextDecoder('utf-8', { fatal: true });
 
 /**
- * Build author table from messages
- * Extracts unique authors and assigns indices
- * @param messages Messages to extract authors from
- * @returns Array of unique author addresses
+ * Result of `encodeBatch`. Slimmer than the v1 `EncodedBatch` — no
+ * author table, no compression ratio. `size = data.length` is provided
+ * for convenience.
  */
-export function buildAuthorTable(messages: Message[]): Address[] {
-  const authorSet = new Set<string>();
-
-  for (const msg of messages) {
-    authorSet.add(msg.author.toLowerCase());
-  }
-
-  const authors = Array.from(authorSet).sort() as Address[];
-
-  if (authors.length > MAX_AUTHORS_PER_BATCH) {
-    throw new TooManyAuthorsError(authors.length, MAX_AUTHORS_PER_BATCH);
-  }
-
-  return authors;
+export interface EncodedBatch {
+  data: Uint8Array;
+  messageCount: number;
+  codec: 'none' | 'zstd';
+  size: number;
 }
 
-/**
- * Get author index in table
- * @param author Author address
- * @param authorTable Author table
- * @returns Index in table (0-255)
- */
-function getAuthorIndex(author: Address, authorTable: Address[]): number {
-  const index = authorTable.findIndex((addr) => addr.toLowerCase() === author.toLowerCase());
+const BATCH_VERSION = 0x02;
+const CODEC_NONE = 0x00;
+const CODEC_ZSTD = 0x01;
+const HEADER_SIZE = 10;
+const SIGNATURE_BYTES = 65;
+const RECORD_FIXED_OVERHEAD = 20 + 8 + 4 + SIGNATURE_BYTES; // sender + nonce + len + sig
 
-  if (index === -1) {
-    throw new AuthorNotFoundError(author);
+/**
+ * Encode a parallel array of messages and scheme-0x01 signatures into a
+ * single batch buffer.
+ *
+ * Signatures MUST be 65 bytes each; any other length is a caller bug
+ * (validated upstream by the Poster's ingest pipeline).
+ */
+export function encodeBatch(
+  messages: BAMMessage[],
+  signatures: Uint8Array[],
+  options?: BatchOptions
+): EncodedBatch {
+  if (messages.length !== signatures.length) {
+    throw new RangeError(
+      `messages and signatures must be parallel arrays (got ${messages.length} vs ${signatures.length})`
+    );
+  }
+  if (messages.length > 0xffffffff) {
+    throw new RangeError('too many messages in one batch');
   }
 
-  return index;
-}
+  // Default to CODEC_NONE. V1 effectively shipped uncompressed batches as
+  // well (the SDK's `compress` function is a no-op warning shim — see
+  // `compression.ts`). Real ZSTD compression is a future wire-up; the
+  // codec byte provisions for it without demanding it today.
+  const useZstd = options?.codec === 'zstd';
+  const codecId = useZstd ? CODEC_ZSTD : CODEC_NONE;
 
-/**
- * Calculate base timestamp for batch
- * Uses the minimum timestamp from all messages
- * @param messages Messages to analyze
- * @returns Base timestamp
- */
-function calculateBaseTimestamp(messages: Message[]): number {
-  if (messages.length === 0) {
-    return Math.floor(Date.now() / 1000);
-  }
-
-  return Math.min(...messages.map((m) => m.timestamp));
-}
-
-/**
- * Encode batch header
- * @param header Batch header
- * @returns Encoded header bytes
- */
-function encodeBatchHeader(header: BatchHeader): Uint8Array {
-  const authorTableSize = header.authors.length * ADDRESS_SIZE;
-  const headerSize = BATCH_HEADER_FIXED_SIZE + authorTableSize;
-
-  const buffer = new ArrayBuffer(headerSize);
-  const view = new DataView(buffer);
-  const bytes = new Uint8Array(buffer);
-  let offset = 0;
-
-  // Magic (4 bytes, big-endian)
-  view.setUint32(offset, MAGIC_BATCH, false);
-  offset += 4;
-
-  // Version (1 byte)
-  view.setUint8(offset, PROTOCOL_VERSION);
-  offset += 1;
-
-  // Flags (1 byte) - will be set by caller
-  view.setUint8(offset, 0); // Placeholder
-  offset += 1;
-
-  // Codec ID (1 byte) - will be set by caller
-  view.setUint8(offset, CODEC_NONE); // Placeholder
-  offset += 1;
-
-  // Dictionary reference (32 bytes)
-  const dictRefBytes = hexToBytes(header.dictionaryRef);
-  bytes.set(dictRefBytes, offset);
-  offset += BYTES32_SIZE;
-
-  // Base timestamp (4 bytes, big-endian)
-  view.setUint32(offset, header.baseTimestamp, false);
-  offset += 4;
-
-  // Author count (2 bytes, big-endian)
-  view.setUint16(offset, header.authors.length, false);
-  offset += 2;
-
-  // Author table
-  for (const author of header.authors) {
-    const authorBytes = hexToBytes(author);
-    if (authorBytes.length !== ADDRESS_SIZE) {
-      throw new Error(
-        `Invalid author address length: ${authorBytes.length} (expected ${ADDRESS_SIZE}) for ${author}`
-      );
+  // Assemble the uncompressed payload.
+  const recordBuffers: Uint8Array[] = [];
+  let payloadSize = 0;
+  for (let i = 0; i < messages.length; i++) {
+    const m = messages[i];
+    const sig = signatures[i];
+    if (sig.length !== SIGNATURE_BYTES) {
+      throw new RangeError(`signature ${i} must be 65 bytes (got ${sig.length})`);
     }
-    bytes.set(authorBytes, offset);
-    offset += ADDRESS_SIZE;
+    const senderBytes = hexToBytes(m.sender);
+    if (senderBytes.length !== 20) {
+      throw new RangeError(`message ${i} sender must be 20 bytes`);
+    }
+    if (m.nonce < 0n || m.nonce > 0xffffffffffffffffn) {
+      throw new RangeError(`message ${i} nonce out of uint64 range`);
+    }
+    if (m.contents.length > 0xffffffff) {
+      throw new RangeError(`message ${i} contents too large`);
+    }
+
+    const rec = new Uint8Array(RECORD_FIXED_OVERHEAD + m.contents.length);
+    let o = 0;
+    rec.set(senderBytes, o);
+    o += 20;
+    writeU64BE(rec, o, m.nonce);
+    o += 8;
+    writeU32BE(rec, o, m.contents.length);
+    o += 4;
+    rec.set(m.contents, o);
+    o += m.contents.length;
+    rec.set(sig, o);
+    recordBuffers.push(rec);
+    payloadSize += rec.length;
   }
 
-  // Message count (2 bytes, big-endian) - placeholder, will be set by caller
-  view.setUint16(offset, 0, false);
-  offset += 2;
-
-  // BLS aggregate signature (48 bytes)
-  bytes.set(header.aggregateSignature, offset);
-  offset += BLS_SIGNATURE_SIZE;
-
-  return bytes;
-}
-
-/**
- * Encode a batched message
- * @param msg Message to encode
- * @param authorTable Author table for index lookup
- * @param baseTimestamp Base timestamp for delta encoding
- * @returns Encoded message bytes
- */
-function encodeBatchedMessage(
-  msg: Message,
-  authorTable: Address[],
-  baseTimestamp: number
-): Uint8Array {
-  const contentBytes = textEncoder.encode(msg.content);
-
-  // Calculate timestamp delta
-  const timestampDelta = msg.timestamp - baseTimestamp;
-  if (timestampDelta < 0) {
-    throw new TimestampOverflowError(timestampDelta, 0);
-  }
-  if (timestampDelta > MAX_TIMESTAMP_DELTA) {
-    throw new TimestampOverflowError(timestampDelta, MAX_TIMESTAMP_DELTA);
+  const plain = new Uint8Array(payloadSize);
+  let p = 0;
+  for (const rec of recordBuffers) {
+    plain.set(rec, p);
+    p += rec.length;
   }
 
-  // Get author index
-  const authorIndex = getAuthorIndex(msg.author, authorTable);
+  const payload = useZstd ? compress(plain) : plain;
 
-  // Calculate size
-  const hasPkRegistry = false; // For now, not implemented
-  const hasReply = !!msg.replyTo;
-  const replySize = hasReply ? BYTES32_SIZE : 0;
-  const pkRegistrySize = hasPkRegistry ? 3 : 0;
-
-  const totalSize = 1 + 2 + 2 + 1 + 1 + contentBytes.length + replySize + pkRegistrySize;
-
-  const buffer = new ArrayBuffer(totalSize);
-  const view = new DataView(buffer);
-  const bytes = new Uint8Array(buffer);
-  let offset = 0;
-
-  // Author index (1 byte)
-  view.setUint8(offset, authorIndex);
-  offset += 1;
-
-  // Timestamp delta (2 bytes, big-endian)
-  view.setUint16(offset, timestampDelta, false);
-  offset += 2;
-
-  // Nonce (2 bytes, big-endian)
-  view.setUint16(offset, msg.nonce, false);
-  offset += 2;
-
-  // Flags (1 byte)
-  let flags = 0;
-  if (hasReply) flags |= 0x08; // Reply flag
-  if (hasPkRegistry) flags |= 0x02; // PK registry flag
-  view.setUint8(offset, flags);
-  offset += 1;
-
-  // Content length (1 byte)
-  view.setUint8(offset, contentBytes.length);
-  offset += 1;
-
-  // Content
-  bytes.set(contentBytes, offset);
-  offset += contentBytes.length;
-
-  // Reply-to (optional, 32 bytes)
-  if (hasReply && msg.replyTo) {
-    const replyBytes = hexToBytes(msg.replyTo);
-    bytes.set(replyBytes, offset);
-    offset += BYTES32_SIZE;
-  }
-
-  // PK registry index (optional, 3 bytes)
-  // Not implemented yet
-
-  return bytes;
-}
-
-/**
- * Encode messages into a batch
- * @param messages Messages to batch
- * @param options Batch options (dictionary, compression level)
- * @returns Encoded batch
- */
-export function encodeBatch(messages: SignedMessage[], options?: BatchOptions): EncodedBatch {
-  if (messages.length === 0) {
-    throw new Error('Cannot create empty batch');
-  }
-
-  // Build author table
-  const authorTable = buildAuthorTable(messages);
-
-  // Calculate base timestamp
-  const baseTimestamp = calculateBaseTimestamp(messages);
-
-  // Create aggregate signature (placeholder - all zeros for now)
-  // In production, this would aggregate all BLS signatures
-  const aggregateSignature = new Uint8Array(BLS_SIGNATURE_SIZE).fill(0);
-
-  // Build batch header
-  const header: BatchHeader = {
-    version: '0.1',
-    dictionaryRef: options?.dictionary
-      ? (bytesToHex(keccak_256(options.dictionary)) as Bytes32)
-      : ZERO_BYTES32,
-    baseTimestamp,
-    authors: authorTable,
-    aggregateSignature,
-  };
-
-  // Encode header
-  const headerBytes = encodeBatchHeader(header);
-
-  // Encode all messages
-  const messageBytesList: Uint8Array[] = [];
-  for (const msg of messages) {
-    const msgBytes = encodeBatchedMessage(msg, authorTable, baseTimestamp);
-    messageBytesList.push(msgBytes);
-  }
-
-  // Concatenate all message bytes
-  const uncompressedSize = messageBytesList.reduce((sum, bytes) => sum + bytes.length, 0);
-  const uncompressedMessages = new Uint8Array(uncompressedSize);
-  let offset = 0;
-  for (const msgBytes of messageBytesList) {
-    uncompressedMessages.set(msgBytes, offset);
-    offset += msgBytes.length;
-  }
-
-  // Resolve compression codec
-  const codec: CompressionCodec = options?.codec ?? (options?.compress === false ? 'none' : 'none');
-  let compressedData: Uint8Array;
-  let compressionRatio: number;
-
-  if (codec === 'bpe' && options?.dictionary) {
-    const bpeDict = deserializeDictionary(options.dictionary);
-    compressedData = bpeEncode(uncompressedMessages, bpeDict);
-    compressionRatio = uncompressedSize / compressedData.length;
-  } else if (codec === 'zstd' && options?.dictionary) {
-    const dict = loadDictionary(options.dictionary);
-    compressedData = compress(uncompressedMessages, dict, options.compressionLevel);
-    compressionRatio = uncompressedSize / compressedData.length;
-  } else {
-    compressedData = uncompressedMessages;
-    compressionRatio = 1.0;
-  }
-
-  // Build final batch
-  const compressedLenSize = 4;
-  const totalSize = headerBytes.length + compressedLenSize + compressedData.length;
-
-  // Check blob size limit
-  if (totalSize > BLOB_SIZE_LIMIT) {
-    throw new BatchOverflowError(totalSize, BLOB_SIZE_LIMIT);
-  }
-
-  const batchBuffer = new Uint8Array(totalSize);
-  const batchView = new DataView(batchBuffer.buffer);
-  offset = 0;
-
-  // Copy header
-  batchBuffer.set(headerBytes, offset);
-
-  // Update flags in header
-  let flags = SIG_TYPE_BLS; // BLS aggregate signature
-  if (codec !== 'none') {
-    flags |= BATCH_FLAG_COMPRESSED;
-  }
-  batchBuffer[5] = flags; // Flags byte at offset 5
-
-  // Write codec ID byte at offset 6
-  const codecId = codec === 'bpe' ? CODEC_BPE : codec === 'zstd' ? CODEC_ZSTD : CODEC_NONE;
-  batchBuffer[6] = codecId;
-
-  // Update message count in header
-  // Offset: 4 magic + 1 version + 1 flags + 1 codec + 32 dict + 4 timestamp + 2 authorCount + (N * 20) authors
-  const msgCountOffset = 45 + authorTable.length * ADDRESS_SIZE;
-  batchView.setUint16(msgCountOffset, messages.length, false);
-
-  offset = headerBytes.length;
-
-  // Compressed data length (4 bytes)
-  batchView.setUint32(offset, compressedData.length, false);
-  offset += 4;
-
-  // Compressed data
-  batchBuffer.set(compressedData, offset);
+  const data = new Uint8Array(HEADER_SIZE + payload.length);
+  data[0] = BATCH_VERSION;
+  data[1] = codecId;
+  writeU32BE(data, 2, messages.length);
+  writeU32BE(data, 6, payload.length);
+  data.set(payload, HEADER_SIZE);
 
   return {
-    data: batchBuffer,
-    headerSize: headerBytes.length,
-    compressedSize: compressedData.length,
-    totalSize,
+    data,
     messageCount: messages.length,
-    authorCount: authorTable.length,
-    compressionRatio,
+    codec: useZstd ? 'zstd' : 'none',
+    size: data.length,
   };
 }
 
 /**
- * Decode batch header
- * @param data Batch data
- * @returns Decoded header and offset to compressed data
+ * Decode a batch buffer back into `BAMMessage[]` + parallel signatures.
+ *
+ * Rejects: truncated data, unknown codec id, wrong version, payload
+ * length beyond the buffer, per-record length running off the payload.
  */
-function decodeBatchHeader(data: Uint8Array): {
-  header: BatchHeader;
-  offset: number;
-  codecId: number;
+export function decodeBatch(data: Uint8Array): {
+  messages: BAMMessage[];
+  signatures: Uint8Array[];
 } {
-  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
-  let offset = 0;
-
-  // Magic (4 bytes)
-  const magic = view.getUint32(offset, false);
-  if (magic !== MAGIC_BATCH) {
-    throw new InvalidMagicError(MAGIC_BATCH, magic);
+  if (data.length < HEADER_SIZE) {
+    throw new RangeError(`batch too short: ${data.length} bytes`);
   }
-  offset += 4;
-
-  // Version (1 byte)
-  const version = view.getUint8(offset);
-  if (version !== PROTOCOL_VERSION) {
-    throw new UnsupportedVersionError(version);
+  const version = data[0];
+  if (version !== BATCH_VERSION) {
+    throw new RangeError(`unsupported batch version 0x${version.toString(16)}`);
   }
-  offset += 1;
-
-  // Flags (1 byte)
-  const flags = view.getUint8(offset);
-  offset += 1;
-
-  // Validate reserved bits
-  if (flags & 0b11100000) {
-    throw new InvalidFlagsError(flags, 'Reserved bits must be zero');
+  const codecId = data[1];
+  if (codecId !== CODEC_NONE && codecId !== CODEC_ZSTD) {
+    throw new RangeError(`unknown codec id 0x${codecId.toString(16)}`);
+  }
+  const messageCount = readU32BE(data, 2);
+  const payloadLen = readU32BE(data, 6);
+  if (HEADER_SIZE + payloadLen > data.length) {
+    throw new RangeError('batch payload extends past buffer');
   }
 
-  // Codec ID (1 byte)
-  const codecId = view.getUint8(offset);
-  offset += 1;
+  const payload = data.subarray(HEADER_SIZE, HEADER_SIZE + payloadLen);
+  const plain = codecId === CODEC_ZSTD ? decompress(payload) : payload;
 
-  // Dictionary reference (32 bytes)
-  const dictionaryRef = bytesToHex(data.slice(offset, offset + BYTES32_SIZE)) as `0x${string}`;
-  offset += BYTES32_SIZE;
-
-  // Base timestamp (4 bytes)
-  const baseTimestamp = view.getUint32(offset, false);
-  offset += 4;
-
-  // Author count (2 bytes)
-  const authorCount = view.getUint16(offset, false);
-  offset += 2;
-
-  // Author table
-  const authors: Address[] = [];
-  for (let i = 0; i < authorCount; i++) {
-    // Create a clean copy of the address bytes
-    const authorBytes = new Uint8Array(ADDRESS_SIZE);
-    for (let j = 0; j < ADDRESS_SIZE; j++) {
-      authorBytes[j] = data[offset + j];
-    }
-    const author = bytesToHex(authorBytes) as Address;
-    authors.push(author);
-    offset += ADDRESS_SIZE;
-  }
-
-  // Message count (2 bytes) - stored but not used in header
-  // const messageCount = view.getUint16(offset, false);
-  offset += 2;
-
-  // BLS aggregate signature (48 bytes)
-  const aggregateSignature = data.slice(offset, offset + BLS_SIGNATURE_SIZE);
-  offset += BLS_SIGNATURE_SIZE;
-
-  const header: BatchHeader = {
-    version: '0.1',
-    dictionaryRef,
-    baseTimestamp,
-    authors,
-    aggregateSignature,
-  };
-
-  return { header, offset, codecId };
-}
-
-/**
- * Decode a batched message
- * @param data Message data
- * @param offset Starting offset
- * @param authorTable Author table for address lookup
- * @param baseTimestamp Base timestamp for reconstructing absolute timestamp
- * @returns Decoded message and new offset
- */
-function decodeBatchedMessage(
-  data: Uint8Array,
-  offset: number,
-  authorTable: Address[],
-  baseTimestamp: number
-): { message: Message; offset: number } {
-  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
-
-  // Author index (1 byte)
-  const authorIndex = view.getUint8(offset);
-  if (authorIndex >= authorTable.length) {
-    throw new AuthorIndexError(authorIndex, authorTable.length);
-  }
-  const author = authorTable[authorIndex];
-  offset += 1;
-
-  // Timestamp delta (2 bytes)
-  const timestampDelta = view.getUint16(offset, false);
-  const timestamp = baseTimestamp + timestampDelta;
-  offset += 2;
-
-  // Nonce (2 bytes)
-  const nonce = view.getUint16(offset, false);
-  offset += 2;
-
-  // Flags (1 byte)
-  const flags = view.getUint8(offset);
-  const hasReply = (flags & 0x08) !== 0;
-  const hasPkRegistry = (flags & 0x02) !== 0;
-  offset += 1;
-
-  // Content length (1 byte)
-  const contentLength = view.getUint8(offset);
-  offset += 1;
-
-  // Content
-  const contentBytes = data.slice(offset, offset + contentLength);
-  const content = textDecoder.decode(contentBytes);
-  offset += contentLength;
-
-  // Reply-to (optional)
-  let replyTo: `0x${string}` | undefined;
-  if (hasReply) {
-    replyTo = bytesToHex(data.slice(offset, offset + BYTES32_SIZE)) as `0x${string}`;
-    offset += BYTES32_SIZE;
-  }
-
-  // PK registry index (optional)
-  if (hasPkRegistry) {
-    // Skip for now
-    offset += 3;
-  }
-
-  const message: Message = {
-    author,
-    timestamp,
-    nonce,
-    content,
-    replyTo,
-  };
-
-  return { message, offset };
-}
-
-/**
- * Decode a batch
- * @param data Batch data
- * @param dictionaryOrOptions Optional compression dictionary or decode options
- * @param options Optional decode options (if first arg is dictionary)
- * @returns Decoded batch
- */
-export function decodeBatch(
-  data: Uint8Array,
-  dictionaryOrOptions?: ZstdDictionary | DecodeBatchOptions,
-  options?: DecodeBatchOptions
-): DecodedBatch {
-  // Handle overloaded parameters
-  let dictionary: ZstdDictionary | undefined;
-  let decodeOptions: DecodeBatchOptions | undefined;
-
-  if (dictionaryOrOptions) {
-    // ZstdDictionary has 'data' property (Uint8Array), DecodeBatchOptions does not
-    if ('data' in dictionaryOrOptions && dictionaryOrOptions.data instanceof Uint8Array) {
-      // First arg is dictionary
-      dictionary = dictionaryOrOptions;
-      decodeOptions = options;
-    } else {
-      // First arg is options, not dictionary
-      decodeOptions = dictionaryOrOptions as DecodeBatchOptions;
-    }
-  } else if (options) {
-    // First arg was undefined, but third arg has options
-    decodeOptions = options;
-  }
-
-  const batchStartOffset = decodeOptions?.batchStartOffset ?? 0;
-  // Decode header
-  const { header, offset: headerEndOffset, codecId } = decodeBatchHeader(data);
-
-  let offset = headerEndOffset;
-  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
-
-  // Compressed data length (4 bytes)
-  const compressedLength = view.getUint32(offset, false);
-  offset += 4;
-
-  // Compressed data
-  const compressedData = data.slice(offset, offset + compressedLength);
-
-  // Decompress based on codec ID
-  const flags = data[5]; // Flags at offset 5
-  const isCompressedFlag = (flags & BATCH_FLAG_COMPRESSED) !== 0;
-
-  let messageData: Uint8Array;
-  if (isCompressedFlag && codecId === CODEC_BPE && dictionary) {
-    // For BPE, the dictionary's raw data is the serialized BPE dict
-    const rawBytes = dictionary.data;
-    const bpeDict = deserializeDictionary(rawBytes);
-    messageData = bpeDecode(compressedData, bpeDict);
-  } else if (isCompressedFlag && codecId === CODEC_ZSTD && dictionary) {
-    messageData = decompress(compressedData, dictionary);
-  } else {
-    messageData = compressedData;
-  }
-
-  // Decode messages
-  const messages: Message[] = [];
-  let msgOffset = 0;
-
-  // We need to know how many messages to decode
-  // This is in the header at a specific offset
-  // Offset: 4 (magic) + 1 (version) + 1 (flags) + 1 (codec) + 32 (dict) + 4 (timestamp) + 2 (author count) + (N * 20) (authors)
-  const msgCountOffset = 45 + header.authors.length * ADDRESS_SIZE;
-  const messageCount = new DataView(data.buffer, data.byteOffset + msgCountOffset, 2).getUint16(
-    0,
-    false
-  );
-
+  const messages: BAMMessage[] = [];
+  const signatures: Uint8Array[] = [];
+  let o = 0;
   for (let i = 0; i < messageCount; i++) {
-    if (msgOffset >= messageData.length) {
-      throw new BatchTruncatedError(messageCount, i);
+    if (o + 20 + 8 + 4 > plain.length) {
+      throw new RangeError(`record ${i}: header runs past payload`);
     }
-
-    const result = decodeBatchedMessage(
-      messageData,
-      msgOffset,
-      header.authors,
-      header.baseTimestamp
-    );
-
-    messages.push(result.message);
-    msgOffset = result.offset;
+    const sender = bytesToHex(plain.slice(o, o + 20)) as Address;
+    o += 20;
+    const nonce = readU64BE(plain, o);
+    o += 8;
+    const contentsLen = readU32BE(plain, o);
+    o += 4;
+    if (o + contentsLen + SIGNATURE_BYTES > plain.length) {
+      throw new RangeError(`record ${i}: body runs past payload`);
+    }
+    const contents = new Uint8Array(plain.slice(o, o + contentsLen));
+    o += contentsLen;
+    const sig = new Uint8Array(plain.slice(o, o + SIGNATURE_BYTES));
+    o += SIGNATURE_BYTES;
+    messages.push({ sender, nonce, contents });
+    signatures.push(sig);
   }
 
-  return {
-    header,
-    messages,
-    compressedSize: compressedLength,
-    decompressedSize: messageData.length,
-    batchStartOffset,
-  };
+  if (o !== plain.length) {
+    throw new RangeError(`trailing bytes after ${messageCount} records (${plain.length - o} left)`);
+  }
+
+  return { messages, signatures };
 }
 
 /**
- * Estimate batch size for given messages
- * @param messages Messages to estimate
- * @param options Batch options
- * @returns Estimated size in bytes
+ * Estimate the encoded (post-compression) size of a batch containing
+ * `messages`. Conservative: estimates the uncompressed size, which is an
+ * upper bound for CODEC_NONE and a working bound for CODEC_ZSTD since
+ * ZSTD never grows compressible inputs by more than ~0.01% plus a fixed
+ * ~12-byte frame header.
  */
-export function estimateBatchSize(messages: Message[], options?: BatchOptions): number {
-  // Build author table
-  const authorTable = buildAuthorTable(messages);
-
-  // Header size
-  const headerSize = BATCH_HEADER_FIXED_SIZE + authorTable.length * ADDRESS_SIZE;
-
-  // Estimate message sizes
-  let messagesSize = 0;
-  for (const msg of messages) {
-    const contentSize = textEncoder.encode(msg.content).length;
-    const baseSize = 1 + 2 + 2 + 1 + 1 + contentSize; // AuthorIdx + TSDelta + Nonce + Flags + ContentLen + Content
-    const replySize = msg.replyTo ? BYTES32_SIZE : 0;
-    messagesSize += baseSize + replySize;
+export function estimateBatchSize(messages: BAMMessage[]): number {
+  let total = HEADER_SIZE;
+  for (const m of messages) {
+    total += RECORD_FIXED_OVERHEAD + m.contents.length;
   }
-
-  // Apply compression estimate
-  const compressionRatio = options?.compress !== false ? 5.0 : 1.0;
-  const compressedSize = Math.ceil(messagesSize / compressionRatio);
-
-  // Total: header + compressed length field + compressed data
-  return headerSize + 4 + compressedSize;
+  return total;
 }
 
-/**
- * Validate batch constraints
- * @param messages Messages to validate
- * @returns True if valid, throws error otherwise
- */
-export function validateBatch(messages: Message[]): boolean {
-  if (messages.length === 0) {
-    throw new Error('Batch must contain at least one message');
-  }
+function writeU32BE(buf: Uint8Array, offset: number, value: number): void {
+  buf[offset] = (value >>> 24) & 0xff;
+  buf[offset + 1] = (value >>> 16) & 0xff;
+  buf[offset + 2] = (value >>> 8) & 0xff;
+  buf[offset + 3] = value & 0xff;
+}
 
-  // Check author count
-  const authorTable = buildAuthorTable(messages);
-  if (authorTable.length > MAX_AUTHORS_PER_BATCH) {
-    throw new Error(
-      `Too many unique authors: ${authorTable.length} (max ${MAX_AUTHORS_PER_BATCH})`
-    );
-  }
+function readU32BE(buf: Uint8Array, offset: number): number {
+  return (
+    buf[offset] * 0x1000000 +
+    (buf[offset + 1] << 16) +
+    (buf[offset + 2] << 8) +
+    buf[offset + 3]
+  );
+}
 
-  // Check timestamp deltas
-  const baseTimestamp = calculateBaseTimestamp(messages);
-  for (const msg of messages) {
-    const delta = msg.timestamp - baseTimestamp;
-    if (delta < 0 || delta > MAX_TIMESTAMP_DELTA) {
-      throw new TimestampOverflowError(delta, MAX_TIMESTAMP_DELTA);
-    }
+function writeU64BE(buf: Uint8Array, offset: number, value: bigint): void {
+  for (let i = 7; i >= 0; i--) {
+    buf[offset + i] = Number(value & 0xffn);
+    value >>= 8n;
   }
+}
 
-  return true;
+function readU64BE(buf: Uint8Array, offset: number): bigint {
+  let v = 0n;
+  for (let i = 0; i < 8; i++) {
+    v = (v << 8n) | BigInt(buf[offset + i]);
+  }
+  return v;
 }

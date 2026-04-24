@@ -53,7 +53,7 @@ contract ECDSARegistry is IECDSARegistry {
     /// @dev Owner → registry index assigned at register / rotate time.
     mapping(address => uint256) private _index;
 
-    /// @dev Index → owning address. Cleared on rotation (addresses C-8).
+    /// @dev Index → owning address. Cleared on rotation so a stale index never resolves to a previous owner.
     mapping(uint256 => address) private _indexToOwner;
 
     /// @dev Next index to assign. Starts at 1; 0 means "unindexed".
@@ -128,7 +128,7 @@ contract ECDSARegistry is IECDSARegistry {
         }
 
         // Clear the stale index reverse-mapping so that lookups by the old
-        // index no longer resolve to msg.sender (addresses red-team C-8).
+        // index no longer resolve to msg.sender.
         uint256 oldIndex = _index[msg.sender];
         if (oldIndex != 0) delete _indexToOwner[oldIndex];
 
@@ -167,7 +167,7 @@ contract ECDSARegistry is IECDSARegistry {
 
     /// @notice Look up the owner bound to a registry index.
     /// @dev Returns `address(0)` for indices that are unassigned OR that
-    ///      have been rotated away (stale index guard — C-8).
+    ///      have been rotated away.
     function ownerOfIndex(uint256 index) external view returns (address owner) {
         return _indexToOwner[index];
     }
@@ -203,7 +203,8 @@ contract ECDSARegistry is IECDSARegistry {
     /// @dev Branches on `hasDelegate`:
     ///       - keyed  → signature must recover to the bound delegate.
     ///       - keyless → signature must recover to `owner` itself (and
-    ///                   recovered MUST be non-zero — C-2 guard).
+    ///                   recovered MUST be non-zero to block owner=0x0
+    ///                   spoofing via malformed signatures).
     ///      Never reverts `NotRegistered` (deliberate ERC-8180 divergence).
     function verifyWithRegisteredKey(
         address owner,

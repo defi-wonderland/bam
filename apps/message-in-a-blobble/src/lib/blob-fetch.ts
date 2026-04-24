@@ -1,36 +1,19 @@
 import { createPublicClient, http, commitmentsToVersionedHashes } from 'viem';
 import { sepolia } from 'viem/chains';
-import { decodeBatch as sdkDecodeBatch } from 'bam-sdk';
+// Use the browser entrypoint deliberately — `decodeBatch` is pure
+// JS (no c-kzg, no native bindings) and both entries export it. Going
+// through `bam-sdk` (Node) pulls in `./kzg/index.js`, whose `c-kzg`
+// native binding `next build`'s "collect page data" step can't locate
+// under `.next/server/.../build/Release/kzg.node`. This route never
+// touches KZG.
+import { decodeBatch } from 'bam-sdk/browser';
 
 /**
- * Decode a batch from usable blob bytes, handling both old (v1, no codec byte)
- * and new (v2, with codec byte at offset 6) formats.
- *
- * If the new SDK's decodeBatch returns 0 messages, we try inserting a 0x00
- * codec byte at offset 6 (upgrading a v1 blob to v2 layout) and retry.
+ * Decode a batch blob. Any blob that isn't in the current wire format
+ * simply fails to decode and the caller skips it.
  */
 export function decodeBlobBatch(usableBytes: Uint8Array) {
-  const decoded = sdkDecodeBatch(usableBytes);
-  if (decoded.messages.length > 0) {
-    return decoded;
-  }
-
-  // Try patching as a v1 blob: insert a 0x00 codec byte at offset 6
-  const patched = new Uint8Array(usableBytes.length + 1);
-  patched.set(usableBytes.slice(0, 6), 0);   // magic(4) + version(1) + flags(1)
-  patched[6] = 0x00;                          // codec = NONE
-  patched.set(usableBytes.slice(6), 7);       // rest of the data
-
-  try {
-    const retried = sdkDecodeBatch(patched);
-    if (retried.messages.length > 0) {
-      return retried;
-    }
-  } catch {
-    // patching didn't help, return original result
-  }
-
-  return decoded;
+  return decodeBatch(usableBytes);
 }
 
 /**

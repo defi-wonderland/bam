@@ -6,9 +6,8 @@ import type {
 } from '../types.js';
 
 /**
- * `listPending` read surface (trusted; spec §Verification mode).
- * Filters by `contentTag` or spans every tag the Poster serves;
- * returns in per-tag FIFO order.
+ * `listPending` read surface. Filters by `contentTag` or spans every
+ * tag the Poster serves; returns in per-tag FIFO order.
  */
 export async function listPending(
   store: PosterStore,
@@ -29,13 +28,12 @@ export async function listPending(
 
 function mapRow(row: StoreTxnPendingRow): Pending {
   return {
-    messageId: row.messageId,
-    contentTag: row.contentTag,
-    author: row.author,
+    sender: row.sender,
     nonce: row.nonce,
-    content: new TextDecoder().decode(row.content),
-    timestamp: row.timestamp,
+    contentTag: row.contentTag,
+    contents: new Uint8Array(row.contents),
     signature: new Uint8Array(row.signature),
+    messageHash: row.messageHash,
     ingestedAt: row.ingestedAt,
     ingestSeq: row.ingestSeq,
   };

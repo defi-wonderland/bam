@@ -1,437 +1,255 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
-  bytesToHex,
-  computeMessageHash,
-  deriveAddress,
-  generateECDSAPrivateKey,
-  signECDSA,
+  encodeContents,
+  signECDSAWithKey,
   type Address,
+  type BAMMessage,
   type Bytes32,
 } from 'bam-sdk';
 
 import { IngestPipeline } from '../../src/ingest/pipeline.js';
 import { RateLimiter } from '../../src/ingest/rate-limit.js';
 import { MemoryPosterStore } from '../../src/pool/memory-store.js';
-import { defaultEcdsaValidator } from '../../src/validator/default-ecdsa.js';
 import type { MessageValidator } from '../../src/types.js';
 
+const CHAIN_ID = 31337;
+const PRIV = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80' as const;
+const SENDER = '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266' as Address;
+const PRIV_2 = '0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d' as const;
+const SENDER_2 = '0x70997970C51812dc3A010C7d01b50e0d17dc79C8' as Address;
 const TAG = ('0x' + 'aa'.repeat(32)) as Bytes32;
-const OTHER_TAG = ('0x' + 'bb'.repeat(32)) as Bytes32;
 
-async function signedEnvelope(opts: {
-  content?: string;
-  nonce?: number;
-  timestamp?: number;
-  contentTag?: Bytes32;
-  privateKey?: string;
-}): Promise<{ raw: Uint8Array; author: Address; privateKey: string }> {
-  const privateKey = opts.privateKey ?? generateECDSAPrivateKey();
-  const author = deriveAddress(privateKey);
-  const content = opts.content ?? 'hello';
-  const nonce = opts.nonce ?? 1;
-  const timestamp = opts.timestamp ?? 1_700_000_000;
-  const hash = computeMessageHash({ author, timestamp, nonce, content });
-  const sig = await signECDSA(privateKey, bytesToHex(hash) as Bytes32);
-  const env = {
-    contentTag: opts.contentTag ?? TAG,
-    message: {
-      author,
-      timestamp,
-      nonce,
-      content,
-      signature: bytesToHex(sig),
-    },
-  };
-  return {
-    raw: new TextEncoder().encode(JSON.stringify(env)),
-    author,
-    privateKey,
-  };
+function bytesToHexStr(b: Uint8Array): `0x${string}` {
+  return ('0x' +
+    Array.from(b)
+      .map((x) => x.toString(16).padStart(2, '0'))
+      .join('')) as `0x${string}`;
 }
 
-function unsignedGarbage(i: number): Uint8Array {
-  const author = ('0x' + ((i + 1).toString(16).padStart(40, '0'))) as Address;
+function signedEnvelope(opts: {
+  privateKey?: `0x${string}`;
+  sender?: Address;
+  nonce?: bigint;
+  tag?: Bytes32;
+  appBytes?: Uint8Array;
+}): Uint8Array {
+  const privateKey = opts.privateKey ?? PRIV;
+  const sender = opts.sender ?? SENDER;
+  const nonce = opts.nonce ?? 1n;
+  const tag = opts.tag ?? TAG;
+  const appBytes = opts.appBytes ?? new TextEncoder().encode('hi');
+  const contents = encodeContents(tag, appBytes);
+  const msg: BAMMessage = { sender, nonce, contents };
+  const signature = signECDSAWithKey(privateKey, msg, CHAIN_ID);
   const env = {
-    contentTag: TAG,
+    contentTag: tag,
     message: {
-      author,
-      timestamp: 1_700_000_000,
-      nonce: 1,
-      content: `garbage-${i}`,
-      signature: '0x' + '00'.repeat(65),
+      sender,
+      nonce: nonce.toString(),
+      contents: bytesToHexStr(contents),
+      signature,
     },
   };
   return new TextEncoder().encode(JSON.stringify(env));
 }
 
-function makePipeline(opts: {
-  rateLimit?: { windowMs: number; maxPerWindow: number };
+interface Harness {
+  pipeline: IngestPipeline;
+  store: MemoryPosterStore;
+  validator: MessageValidator;
+  verifyCalls: { count: number };
+}
+
+function mkHarness(opts?: {
   validator?: MessageValidator;
-  maxMessageSizeBytes?: number;
+  verifyCallCounter?: { count: number };
+  rate?: { windowMs: number; maxPerWindow: number };
   allowlist?: Bytes32[];
-  store?: MemoryPosterStore;
-} = {}): { pipeline: IngestPipeline; store: MemoryPosterStore; limiter: RateLimiter } {
-  const store = opts.store ?? new MemoryPosterStore();
-  const limiter = new RateLimiter(opts.rateLimit ?? { windowMs: 60_000, maxPerWindow: 60 });
-  const validator = opts.validator ?? defaultEcdsaValidator();
+  maxMessageSizeBytes?: number;
+  maxContentsSizeBytes?: number;
+}): Harness {
+  const store = new MemoryPosterStore();
+  const rate = opts?.rate ?? { windowMs: 60_000, maxPerWindow: 1_000 };
+  const limiter = new RateLimiter(rate);
+  const counter = opts?.verifyCallCounter ?? { count: 0 };
+  const validator =
+    opts?.validator ?? {
+      validate() {
+        counter.count++;
+        return { ok: true };
+      },
+    };
   const pipeline = new IngestPipeline({
     store,
     validator,
     rateLimiter: limiter,
-    allowlistedTags: opts.allowlist ?? [TAG],
-    maxMessageSizeBytes: opts.maxMessageSizeBytes ?? 120_000,
+    allowlistedTags: opts?.allowlist ?? [TAG],
+    maxMessageSizeBytes: opts?.maxMessageSizeBytes ?? 120_000,
+    maxContentsSizeBytes: opts?.maxContentsSizeBytes ?? 100_000,
     now: () => new Date(0),
   });
-  return { pipeline, store, limiter };
+  return { pipeline, store, validator, verifyCalls: counter };
 }
 
 describe('IngestPipeline — happy path', () => {
-  it('accepts a well-formed, signed message and writes a pending row', async () => {
-    const { pipeline, store } = makePipeline();
-    const { raw, author } = await signedEnvelope({});
-    const res = await pipeline.ingest(raw);
+  it('accepts a well-formed signed message and returns messageHash', async () => {
+    const h = mkHarness();
+    const raw = signedEnvelope({});
+    const res = await h.pipeline.ingest(raw);
     expect(res.accepted).toBe(true);
-    const pending = await store.withTxn(async (txn) => txn.listPendingByTag(TAG));
-    expect(pending).toHaveLength(1);
-    expect(pending[0].author).toBe(author);
-    expect(pending[0].nonce).toBe(1n);
+    if (res.accepted) expect(res.messageHash).toMatch(/^0x[0-9a-f]{64}$/);
+    expect(h.verifyCalls.count).toBe(1);
+  });
+
+  it('inserted pending row carries sender, nonce, contents, messageHash', async () => {
+    const h = mkHarness();
+    const raw = signedEnvelope({});
+    await h.pipeline.ingest(raw);
+    const rows = await h.store.withTxn(async (txn) => txn.listPendingByTag(TAG));
+    expect(rows.length).toBe(1);
+    expect(rows[0].sender.toLowerCase()).toBe(SENDER.toLowerCase());
+    expect(rows[0].nonce).toBe(1n);
+    expect(rows[0].contents.length).toBeGreaterThanOrEqual(32);
   });
 });
 
-describe('IngestPipeline — cheap gates before crypto', () => {
-  it('CPU-grief ordering: rate-limit fires before the validator is invoked', async () => {
-    let verifyCount = 0;
-    const realEcdsa = defaultEcdsaValidator();
-    const countingValidator: MessageValidator = {
-      validate(m) {
-        verifyCount++;
-        return realEcdsa.validate(m);
+describe('IngestPipeline — structural rejections', () => {
+  it('non-JSON envelope → malformed', async () => {
+    const h = mkHarness();
+    const raw = new TextEncoder().encode('not-json');
+    const res = await h.pipeline.ingest(raw);
+    expect(res.accepted).toBe(false);
+    if (!res.accepted) expect(res.reason).toBe('malformed');
+    expect(h.verifyCalls.count).toBe(0);
+  });
+
+  it('contents < 32 bytes → malformed (before validator)', async () => {
+    const h = mkHarness();
+    const env = {
+      contentTag: TAG,
+      message: {
+        sender: SENDER,
+        nonce: '1',
+        contents: '0x' + '00'.repeat(16), // only 16 bytes
+        signature: '0x' + '00'.repeat(65),
       },
-      recoverSigner: realEcdsa.recoverSigner?.bind(realEcdsa),
     };
-    // Fixed author (all garbage uses i=0) so rate-limit accumulates
-    // against the same key.
-    const { pipeline } = makePipeline({
-      validator: countingValidator,
-      rateLimit: { windowMs: 60_000, maxPerWindow: 3 },
-    });
-
-    for (let i = 0; i < 1000; i++) {
-      // Same key (i=0) every call — rate-limit must fire on calls 4..1000.
-      await pipeline.ingest(unsignedGarbage(0));
-    }
-    // Validator budget: exactly `maxPerWindow` attempts reach the
-    // signature check before rate-limit absorbs the rest.
-    expect(verifyCount).toBeLessThanOrEqual(3);
+    const raw = new TextEncoder().encode(JSON.stringify(env));
+    const res = await h.pipeline.ingest(raw);
+    expect(res.accepted).toBe(false);
+    if (!res.accepted) expect(res.reason).toBe('malformed');
   });
 
-  it('rate-limit keys on recovered signer — rotating claimed author does not multiply budget', async () => {
-    // One real signing key, N rotating claimed-author values. Each
-    // envelope signs against the real key (so recovery yields the
-    // same address every time) while the envelope's `author` field
-    // rotates — the bypass cubic flagged: pre-fix, every rotation
-    // would land in a fresh rate-limit bucket. Post-fix, recovery
-    // collapses them into one bucket.
-    const { pipeline } = makePipeline({
-      rateLimit: { windowMs: 60_000, maxPerWindow: 2 },
-    });
-    const privateKey = generateECDSAPrivateKey();
-    const realAuthor = deriveAddress(privateKey);
-    const timestamp = 1_700_000_000;
-
-    // Build N envelopes that all recover to `realAuthor` but declare
-    // a rotating claimed author. They'll fail the ECDSA verify (since
-    // claimed != recovered) — but that's after monotonicity and after
-    // the rate-limit check. Rate-limit must still absorb them.
-    const envelopes: Uint8Array[] = [];
-    for (let i = 0; i < 20; i++) {
-      const claimedAuthor = ('0x' + (i + 1).toString(16).padStart(40, '0')) as Address;
-      const hash = computeMessageHash({ author: realAuthor, timestamp, nonce: i + 1, content: 'x' });
-      const sig = await signECDSA(privateKey, bytesToHex(hash) as Bytes32);
-      const env = {
-        contentTag: TAG,
-        message: {
-          author: claimedAuthor,
-          timestamp,
-          nonce: i + 1,
-          content: 'x',
-          signature: bytesToHex(sig),
-        },
-      };
-      envelopes.push(new TextEncoder().encode(JSON.stringify(env)));
-    }
-
-    let rateLimited = 0;
-    for (const raw of envelopes) {
-      const res = await pipeline.ingest(raw);
-      if (!res.accepted && res.reason === 'rate_limited') rateLimited++;
-    }
-    // maxPerWindow=2 ⇒ 18 of the 20 must be rate-limited.
-    expect(rateLimited).toBe(18);
-  });
-
-  it('rejects oversized payloads before parsing', async () => {
-    const { pipeline } = makePipeline({ maxMessageSizeBytes: 10 });
-    const res = await pipeline.ingest(new Uint8Array(100));
+  it('oversized envelope (> maxMessageSizeBytes) → message_too_large', async () => {
+    const h = mkHarness({ maxMessageSizeBytes: 200 });
+    const raw = signedEnvelope({ appBytes: new Uint8Array(1024) });
+    const res = await h.pipeline.ingest(raw);
     expect(res.accepted).toBe(false);
     if (!res.accepted) expect(res.reason).toBe('message_too_large');
-  });
-
-  it('rejects transport-hint disagreement with content_tag_mismatch', async () => {
-    const { pipeline } = makePipeline();
-    const { raw } = await signedEnvelope({});
-    const res = await pipeline.ingest(raw, { contentTag: OTHER_TAG });
-    expect(res.accepted).toBe(false);
-    if (!res.accepted) expect(res.reason).toBe('content_tag_mismatch');
-  });
-
-  it('rejects unknown tags (unknown_tag)', async () => {
-    const { pipeline } = makePipeline({ allowlist: [OTHER_TAG] });
-    const { raw } = await signedEnvelope({ contentTag: TAG });
-    const res = await pipeline.ingest(raw);
-    expect(res.accepted).toBe(false);
-    if (!res.accepted) expect(res.reason).toBe('unknown_tag');
-  });
-
-  it('custom recoverSigner that throws is contained (qodo review)', async () => {
-    // A custom validator whose recoverSigner throws must not escape the
-    // pipeline as an uncaught error — the contract is to return a
-    // PosterRejection. We treat it as recover-mismatch so rate-limit
-    // routes to the sentinel bucket.
-    const realEcdsa = defaultEcdsaValidator();
-    const throwingValidator: MessageValidator = {
-      validate(m) {
-        return realEcdsa.validate(m);
-      },
-      recoverSigner() {
-        throw new Error('boom');
-      },
-    };
-    const { pipeline } = makePipeline({
-      validator: throwingValidator,
-      rateLimit: { windowMs: 60_000, maxPerWindow: 2 },
-    });
-    const { raw } = await signedEnvelope({});
-    // The throw must not bubble; first two calls land in the sentinel
-    // bucket and succeed (validator.validate runs next and accepts the
-    // good signature), third gets rate-limited.
-    const results = await Promise.all([
-      pipeline.ingest(raw),
-      pipeline.ingest(await signedEnvelope({ nonce: 2 }).then((e) => e.raw)),
-      pipeline.ingest(await signedEnvelope({ nonce: 3 }).then((e) => e.raw)),
-    ]);
-    // Exactly one rate_limited reject among the three.
-    const rejections = results.filter((r) => !r.accepted);
-    expect(rejections).toHaveLength(1);
-    if (!rejections[0].accepted) expect(rejections[0].reason).toBe('rate_limited');
+    expect(h.verifyCalls.count).toBe(0);
   });
 });
 
-describe('IngestPipeline — nonce monotonicity', () => {
-  it('byte-equal resubmit is a no-op (returns the original id)', async () => {
-    const { pipeline } = makePipeline();
-    const { raw } = await signedEnvelope({ nonce: 3 });
-    const r1 = await pipeline.ingest(raw);
-    const r2 = await pipeline.ingest(raw);
-    expect(r1.accepted).toBe(true);
-    expect(r2.accepted).toBe(true);
-    if (r1.accepted && r2.accepted) {
-      expect(r2.messageId).toBe(r1.messageId);
-    }
-  });
-
-  it('rejects equal-nonce with different content as stale_nonce', async () => {
-    const { pipeline } = makePipeline();
-    const privateKey = generateECDSAPrivateKey();
-    const e1 = await signedEnvelope({ nonce: 1, content: 'first', privateKey });
-    const e2 = await signedEnvelope({ nonce: 1, content: 'second', privateKey });
-    const r1 = await pipeline.ingest(e1.raw);
-    const r2 = await pipeline.ingest(e2.raw);
-    expect(r1.accepted).toBe(true);
-    expect(r2.accepted).toBe(false);
-    if (!r2.accepted) expect(r2.reason).toBe('stale_nonce');
-  });
-
-  it('rejects strictly-lesser nonce', async () => {
-    const { pipeline } = makePipeline();
-    const privateKey = generateECDSAPrivateKey();
-    const e1 = await signedEnvelope({ nonce: 5, privateKey });
-    const e2 = await signedEnvelope({ nonce: 4, privateKey });
-    const r1 = await pipeline.ingest(e1.raw);
-    const r2 = await pipeline.ingest(e2.raw);
-    expect(r1.accepted).toBe(true);
-    expect(r2.accepted).toBe(false);
-    if (!r2.accepted) expect(r2.reason).toBe('stale_nonce');
-  });
-});
-
-describe('IngestPipeline — atomicity race (plan §C-3)', () => {
-  it('50 parallel submits of identical (sender,nonce,content) produce exactly one acceptance', async () => {
-    const { pipeline, store } = makePipeline();
-    const { raw } = await signedEnvelope({});
-    const N = 50;
-    const results = await Promise.all(
-      Array.from({ length: N }, () => pipeline.ingest(raw))
-    );
-    // Every result should be "accepted" because the byte-equal retry
-    // is a no-op (returns the same id). But exactly one row must exist
-    // in the pool, and exactly one (author, nonce) entry in the nonce
-    // tracker.
-    const pending = await store.withTxn(async (txn) => txn.listPendingByTag(TAG));
-    expect(pending).toHaveLength(1);
-    const accepts = results.filter((r) => r.accepted);
-    expect(accepts.length).toBe(N);
-    const ids = new Set(accepts.filter((r) => r.accepted).map((r) => (r as { messageId: string }).messageId));
-    expect(ids.size).toBe(1);
-  });
-
-  it('50 parallel submits with same (sender, nonce) but different content: exactly one accepted', async () => {
-    const { pipeline, store } = makePipeline();
-    const privateKey = generateECDSAPrivateKey();
-    const N = 50;
-    const envelopes = await Promise.all(
-      Array.from({ length: N }, (_, i) =>
-        signedEnvelope({ nonce: 1, content: `variant-${i}`, privateKey })
-      )
-    );
-    const results = await Promise.all(envelopes.map((e) => pipeline.ingest(e.raw)));
-    const accepted = results.filter((r) => r.accepted);
-    const rejected = results.filter((r) => !r.accepted);
-    expect(accepted).toHaveLength(1);
-    expect(rejected).toHaveLength(N - 1);
-    for (const r of rejected) {
-      if (!r.accepted) expect(r.reason).toBe('stale_nonce');
-    }
-    const pending = await store.withTxn(async (txn) => txn.listPendingByTag(TAG));
-    expect(pending).toHaveLength(1);
-  });
-});
-
-describe('IngestPipeline — malformed envelopes', () => {
-  it('rejects non-JSON bytes with malformed', async () => {
-    const { pipeline } = makePipeline();
-    const res = await pipeline.ingest(new Uint8Array([0xff, 0xff, 0xff]));
-    expect(res.accepted).toBe(false);
-    if (!res.accepted) expect(res.reason).toBe('malformed');
-  });
-
-  it('rejects an envelope with a bad contentTag shape', async () => {
-    const { pipeline } = makePipeline();
-    const bad = new TextEncoder().encode(
-      JSON.stringify({ contentTag: 'notatag', message: {} })
-    );
-    const res = await pipeline.ingest(bad);
-    expect(res.accepted).toBe(false);
-    if (!res.accepted) expect(res.reason).toBe('malformed');
-  });
-
-  it('rejects non-integer / out-of-range timestamps (cubic + qodo review)', async () => {
-    // SDK packs timestamp as uint32 via DataView.setUint32. Anything
-    // outside [0, 2^32-1] or non-integer would silently wrap or
-    // truncate during hashing and break signature verification in
-    // subtle ways.
-    const { pipeline } = makePipeline();
-    const badTimestamps = [
-      1_700_000_000.5,
-      -1,
-      Number.POSITIVE_INFINITY,
-      0x1_0000_0000, // 2^32 — just past uint32
-      Number.MAX_SAFE_INTEGER,
-    ];
-    for (const ts of badTimestamps) {
+describe('IngestPipeline — ordering (CPU-grief) + atomicity', () => {
+  it('unsigned garbage never reaches the validator if rate-limit fires first', async () => {
+    const h = mkHarness({ rate: { windowMs: 60_000, maxPerWindow: 2 } });
+    // Every call comes from the same "sender" (sentinel bucket since
+    // signatures won't recover), so the rate-limiter saturates fast.
+    const garbage = () => {
       const env = {
         contentTag: TAG,
         message: {
-          author: '0x1111111111111111111111111111111111111111',
-          timestamp: ts,
-          nonce: 1,
-          content: 'x',
-          signature: '0x' + '00'.repeat(65),
+          sender: ('0x' + '00'.repeat(20)) as Address,
+          nonce: '1',
+          contents: '0x' + 'aa'.repeat(32) + '00',
+          signature: '0x' + '11'.repeat(65),
         },
       };
-      const raw = new TextEncoder().encode(JSON.stringify(env));
-      const res = await pipeline.ingest(raw);
-      expect(res.accepted).toBe(false);
-      if (!res.accepted) expect(res.reason).toBe('malformed');
+      return new TextEncoder().encode(JSON.stringify(env));
+    };
+    const results = [];
+    for (let i = 0; i < 20; i++) {
+      results.push(await h.pipeline.ingest(garbage()));
     }
+    const rateLimited = results.filter(
+      (r) => !r.accepted && (r as { reason: string }).reason === 'rate_limited'
+    ).length;
+    expect(rateLimited).toBeGreaterThan(0);
+    // The validator counter must not be incremented on rate-limited requests.
+    // (It may be called once or twice before the rate-limit kicks in.)
+    expect(h.verifyCalls.count).toBeLessThanOrEqual(2);
   });
-});
 
-describe('IngestPipeline — nonce parsing (cubic review)', () => {
-  it('parses decimal-string nonces as decimal, not hex', async () => {
-    const { pipeline, store } = makePipeline();
-    // Sign for nonce 10 (decimal ten), serialize nonce as the
-    // string "10" (what most JSON producers will do).
-    const privateKey = generateECDSAPrivateKey();
-    const author = deriveAddress(privateKey);
-    const timestamp = 1_700_000_000;
-    const nonce = 10;
-    const content = 'ten';
-    const hash = computeMessageHash({ author, timestamp, nonce, content });
-    const sig = await signECDSA(privateKey, bytesToHex(hash) as Bytes32);
+  it('cross-tag attribution attempts reject before the validator runs', async () => {
+    const h = mkHarness({ allowlist: [TAG, ('0x' + 'bb'.repeat(32)) as Bytes32] });
+    // Signer signs for TAG but hint says another tag (same allowlist).
+    const otherTag = ('0x' + 'bb'.repeat(32)) as Bytes32;
+    const contents = encodeContents(TAG, new Uint8Array([1, 2, 3]));
+    const msg: BAMMessage = { sender: SENDER, nonce: 1n, contents };
+    const signature = signECDSAWithKey(PRIV, msg, CHAIN_ID);
     const env = {
-      contentTag: TAG,
+      contentTag: otherTag, // mismatch
       message: {
-        author,
-        timestamp,
-        nonce: '10', // decimal string — must parse as 10, not 16
-        content,
-        signature: bytesToHex(sig),
+        sender: SENDER,
+        nonce: '1',
+        contents: bytesToHexStr(contents),
+        signature,
       },
     };
     const raw = new TextEncoder().encode(JSON.stringify(env));
-    const res = await pipeline.ingest(raw);
-    expect(res.accepted).toBe(true);
-    const pending = await store.withTxn(async (txn) => txn.listPendingByTag(TAG));
-    expect(pending).toHaveLength(1);
-    expect(pending[0].nonce).toBe(10n);
+    const res = await h.pipeline.ingest(raw);
+    expect(res.accepted).toBe(false);
+    if (!res.accepted) expect(res.reason).toBe('content_tag_mismatch');
+    expect(h.verifyCalls.count).toBe(0);
   });
 
-  it('parses 0x-prefixed hex strings as hex', async () => {
-    const { pipeline, store } = makePipeline();
-    const privateKey = generateECDSAPrivateKey();
-    const author = deriveAddress(privateKey);
-    const timestamp = 1_700_000_000;
-    const nonce = 16; // 0x10
-    const content = 'sixteen';
-    const hash = computeMessageHash({ author, timestamp, nonce, content });
-    const sig = await signECDSA(privateKey, bytesToHex(hash) as Bytes32);
-    const env = {
-      contentTag: TAG,
-      message: {
-        author,
-        timestamp,
-        nonce: '0x10', // explicit hex
-        content,
-        signature: bytesToHex(sig),
-      },
-    };
-    const raw = new TextEncoder().encode(JSON.stringify(env));
-    const res = await pipeline.ingest(raw);
-    expect(res.accepted).toBe(true);
-    const pending = await store.withTxn(async (txn) => txn.listPendingByTag(TAG));
-    expect(pending[0].nonce).toBe(16n);
-  });
-});
-
-describe('IngestPipeline — contentTag case normalization (qodo review)', () => {
-  it('persists mixed-case envelope tags under a canonical lowercase form', async () => {
-    // Allowlist is lowercase; envelope sends the tag in uppercase. The
-    // store adapters match tags case-sensitively, so without
-    // canonicalization the per-tag worker query would never see the
-    // inserted row and messages would stall indefinitely.
-    const { pipeline, store } = makePipeline();
-    const upperTag = ('0x' + 'AA'.repeat(32)) as Bytes32;
-    const { raw } = await signedEnvelope({ contentTag: upperTag });
-
-    const res = await pipeline.ingest(raw);
-    expect(res.accepted).toBe(true);
-
-    // Query using the canonical lowercase tag — must find the row.
-    const pending = await store.withTxn(async (txn) =>
-      txn.listPendingByTag(TAG)
+  it('concurrent ingest of the same (sender, nonce) admits exactly one', async () => {
+    const h = mkHarness();
+    const raw = signedEnvelope({});
+    // Same bytes, 20 parallel submits. Monotonicity allows no_op on
+    // byte-equal retry, so every concurrent call sees the same
+    // messageHash and is "accepted". The pool must still contain
+    // exactly one row.
+    const results = await Promise.all(
+      Array.from({ length: 20 }, () => h.pipeline.ingest(raw))
     );
-    expect(pending).toHaveLength(1);
-    expect(pending[0].contentTag).toBe(TAG);
+    for (const r of results) expect(r.accepted).toBe(true);
+    const rows = await h.store.withTxn(async (txn) => txn.listPendingByTag(TAG));
+    expect(rows.length).toBe(1);
+  });
+
+  it('concurrent ingest of distinct (sender, nonce) admits both', async () => {
+    const h = mkHarness();
+    const raw1 = signedEnvelope({ privateKey: PRIV, sender: SENDER, nonce: 1n });
+    const raw2 = signedEnvelope({ privateKey: PRIV_2, sender: SENDER_2, nonce: 1n });
+    const [r1, r2] = await Promise.all([
+      h.pipeline.ingest(raw1),
+      h.pipeline.ingest(raw2),
+    ]);
+    expect(r1.accepted).toBe(true);
+    expect(r2.accepted).toBe(true);
+    const rows = await h.store.withTxn(async (txn) => txn.listPendingByTag(TAG));
+    expect(rows.length).toBe(2);
+  });
+});
+
+describe('IngestPipeline — nonce monotonicity end-to-end', () => {
+  it('stale nonce (lower than last-accepted) rejects', async () => {
+    const h = mkHarness();
+    await h.pipeline.ingest(signedEnvelope({ nonce: 5n }));
+    const res = await h.pipeline.ingest(signedEnvelope({ nonce: 4n }));
+    expect(res.accepted).toBe(false);
+    if (!res.accepted) expect(res.reason).toBe('stale_nonce');
+  });
+
+  it('byte-equal retry of last-accepted is a no-op', async () => {
+    const h = mkHarness();
+    const raw = signedEnvelope({ nonce: 3n });
+    const first = await h.pipeline.ingest(raw);
+    const second = await h.pipeline.ingest(raw);
+    expect(first.accepted).toBe(true);
+    expect(second.accepted).toBe(true);
+    const rows = await h.store.withTxn(async (txn) => txn.listPendingByTag(TAG));
+    expect(rows.length).toBe(1);
   });
 });

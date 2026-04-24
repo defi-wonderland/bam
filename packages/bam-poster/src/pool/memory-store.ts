@@ -2,6 +2,7 @@ import type { Address, Bytes32 } from 'bam-sdk';
 
 import type {
   NonceTrackerRow,
+  PendingKey,
   PosterStore,
   StoreTxn,
   StoreTxnPendingRow,
@@ -10,26 +11,23 @@ import type {
   SubmittedBatchesQuery,
 } from '../types.js';
 
-/**
- * Process-local async mutex: serializes `withTxn` callers so the
- * in-memory store has the same linearizable semantics the DB adapters
- * get from `BEGIN IMMEDIATE` / SERIALIZABLE.
- */
 class AsyncLock {
   private chain: Promise<unknown> = Promise.resolve();
 
   run<T>(fn: () => Promise<T>): Promise<T> {
     const next = this.chain.then(() => fn());
-    // Swallow rejections in the chain so a failed txn doesn't poison
-    // subsequent acquirers.
     this.chain = next.catch(() => undefined);
     return next;
   }
 }
 
+/** Composite key (sender, nonce) encoded as a single map key. */
+function pendingKey(sender: Address, nonce: bigint): string {
+  return `${sender.toLowerCase()}:${nonce.toString()}`;
+}
+
 interface PendingState {
-  rows: Map<Bytes32, StoreTxnPendingRow>;
-  /** Per-tag FIFO counter. Assigned as `ingest_seq`. */
+  rows: Map<string, StoreTxnPendingRow>;
   tagSeq: Map<Bytes32, number>;
 }
 
@@ -44,11 +42,6 @@ export class MemoryPosterStore implements PosterStore {
 
   async withTxn<T>(fn: (txn: StoreTxn) => Promise<T>): Promise<T> {
     return this.lock.run(async () => {
-      // Snapshot every backing map at txn start. On a thrown callback
-      // we restore — matching the DB adapters' ROLLBACK semantics so
-      // the in-memory store doesn't silently retain partial writes.
-      // Shallow copy: row objects themselves are treated as immutable
-      // by the adapter (every setter stores a fresh object).
       const snapshot = {
         rows: new Map(this.pending.rows),
         tagSeq: new Map(this.pending.tagSeq),
@@ -76,7 +69,7 @@ export class MemoryPosterStore implements PosterStore {
     // nothing to release
   }
 
-  // Test hook — unsafe outside tests.
+  /** Test hook — unsafe outside tests. */
   _unsafeClear(): void {
     this.pending.rows.clear();
     this.pending.tagSeq.clear();
@@ -91,13 +84,14 @@ export class MemoryPosterStore implements PosterStore {
 
     return {
       insertPending(row: StoreTxnPendingRow): void {
-        if (pending.rows.has(row.messageId)) {
-          throw new Error('insertPending: duplicate message_id');
+        const k = pendingKey(row.sender, row.nonce);
+        if (pending.rows.has(k)) {
+          throw new Error('insertPending: duplicate (sender, nonce)');
         }
-        pending.rows.set(row.messageId, clonePending(row));
+        pending.rows.set(k, clonePending(row));
       },
-      getPendingByMessageId(messageId: Bytes32): StoreTxnPendingRow | null {
-        const row = pending.rows.get(messageId);
+      getPendingByKey(key: PendingKey): StoreTxnPendingRow | null {
+        const row = pending.rows.get(pendingKey(key.sender, key.nonce));
         return row ? clonePending(row) : null;
       },
       listPendingByTag(tag: Bytes32, limit?: number, sinceSeq?: number): StoreTxnPendingRow[] {
@@ -122,8 +116,8 @@ export class MemoryPosterStore implements PosterStore {
         });
         return typeof limit === 'number' ? all.slice(0, limit) : all;
       },
-      deletePending(messageIds: Bytes32[]): void {
-        for (const id of messageIds) pending.rows.delete(id);
+      deletePending(keys: PendingKey[]): void {
+        for (const k of keys) pending.rows.delete(pendingKey(k.sender, k.nonce));
       },
       countPendingByTag(tag: Bytes32): number {
         let count = 0;
@@ -139,17 +133,13 @@ export class MemoryPosterStore implements PosterStore {
         return next;
       },
 
-      getNonce(author: Address): NonceTrackerRow | null {
-        // FU-6: match SqlitePosterStore's behavior — address key is
-        // always lowercased. Without this, an in-memory-backed
-        // Poster would treat mixed-case callers as distinct authors,
-        // which the sqlite adapter merges.
-        const row = nonces.get(author.toLowerCase() as Address);
+      getNonce(sender: Address): NonceTrackerRow | null {
+        const row = nonces.get(sender.toLowerCase() as Address);
         return row ? { ...row } : null;
       },
       setNonce(row: NonceTrackerRow): void {
-        const key = row.author.toLowerCase() as Address;
-        nonces.set(key, { ...row, author: key });
+        const key = row.sender.toLowerCase() as Address;
+        nonces.set(key, { ...row, sender: key });
       },
 
       insertSubmitted(row: StoreTxnSubmittedRow): void {
@@ -167,16 +157,11 @@ export class MemoryPosterStore implements PosterStore {
         for (const row of submitted.values()) {
           if (query.contentTag !== undefined && row.contentTag !== query.contentTag) continue;
           if (query.sinceBlock !== undefined) {
-            // Rows without a blockNumber haven't landed on chain yet
-            // and therefore aren't "since" any block. Exclude them
-            // from sinceBlock-filtered queries to match the SQL
-            // adapters' semantics.
             if (row.blockNumber === null) continue;
             if (BigInt(row.blockNumber) < query.sinceBlock) continue;
           }
           results.push(cloneSubmitted(row));
         }
-        // Newest first by submittedAt.
         results.sort((a, b) => b.submittedAt - a.submittedAt);
         return typeof query.limit === 'number' ? results.slice(0, query.limit) : results;
       },
@@ -184,19 +169,18 @@ export class MemoryPosterStore implements PosterStore {
         txHash: Bytes32,
         status: SubmittedBatchStatus,
         replacedByTxHash: Bytes32 | null,
-        blockNumber: number | null
+        blockNumber: number | null,
+        invalidatedAt?: number | null
       ): void {
         const row = submitted.get(txHash);
         if (!row) throw new Error('updateSubmittedStatus: no row for tx_hash');
-        // Replace the row object rather than mutating in place. The
-        // `withTxn` rollback snapshots the outer Map with a shallow
-        // copy; an in-place mutation on a row would survive the
-        // rollback because both snapshots reference the same object.
         submitted.set(txHash, {
           ...row,
           status,
           replacedByTxHash,
           blockNumber: blockNumber !== null ? blockNumber : row.blockNumber,
+          invalidatedAt:
+            invalidatedAt === undefined ? row.invalidatedAt : invalidatedAt,
         });
       },
     };
@@ -208,12 +192,9 @@ export function createMemoryStore(): PosterStore {
 }
 
 function clonePending(row: StoreTxnPendingRow): StoreTxnPendingRow {
-  // Spread preserves Uint8Array references. Without these explicit
-  // copies, a caller mutating the returned `content` / `signature`
-  // bytes would mutate the store's internal state (cubic review).
   return {
     ...row,
-    content: new Uint8Array(row.content),
+    contents: new Uint8Array(row.contents),
     signature: new Uint8Array(row.signature),
   };
 }
@@ -221,9 +202,9 @@ function clonePending(row: StoreTxnPendingRow): StoreTxnPendingRow {
 function cloneSubmitted(row: StoreTxnSubmittedRow): StoreTxnSubmittedRow {
   return {
     ...row,
-    messageIds: [...row.messageIds],
     messages: row.messages.map((m) => ({
       ...m,
+      contents: new Uint8Array(m.contents),
       signature: new Uint8Array(m.signature),
     })),
   };
