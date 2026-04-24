@@ -16,7 +16,7 @@ describe('bam-store conformance — memory backend', () => {
   runConformance(() => createMemoryStore());
 });
 
-describe.skip('bam-store conformance — sqlite backend', () => {
+describe('bam-store conformance — sqlite backend', () => {
   runConformance(() => new SqliteBamStore(':memory:'));
 });
 
