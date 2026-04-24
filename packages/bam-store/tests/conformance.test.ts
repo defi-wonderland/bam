@@ -12,7 +12,7 @@ import { describe } from 'vitest';
 import { createMemoryStore, SqliteBamStore } from '../src/index.js';
 import { runConformance } from './conformance.js';
 
-describe.skip('bam-store conformance — memory backend', () => {
+describe('bam-store conformance — memory backend', () => {
   runConformance(() => createMemoryStore());
 });
 

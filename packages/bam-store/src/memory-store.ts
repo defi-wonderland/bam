@@ -3,7 +3,12 @@ import type { Address, Bytes32 } from 'bam-sdk';
 import type {
   BamStore,
   BatchRow,
+  BatchStatus,
+  BatchesQuery,
   MessageRow,
+  MessageSnapshot,
+  MessageStatus,
+  MessagesQuery,
   NonceTrackerRow,
   PendingKey,
   ReaderCursorRow,
@@ -24,45 +29,52 @@ class AsyncLock {
   }
 }
 
-/** Composite key (sender, nonce) encoded as a single map key. */
+/** Composite key (author, nonce) encoded as a single map key. */
 function pendingKey(sender: Address, nonce: bigint): string {
   return `${sender.toLowerCase()}:${nonce.toString()}`;
 }
 
-interface PendingState {
-  rows: Map<string, StoreTxnPendingRow>;
+/** Bridge chain id for rows written through the old Poster-facing
+ * methods that don't carry a chain id. Removed in T008 when callers
+ * switch to the unified methods with a real chainId. */
+const BRIDGE_CHAIN_ID = 0;
+
+interface State {
+  messages: Map<string, MessageRow>;
+  batches: Map<Bytes32, BatchRow>;
   tagSeq: Map<Bytes32, number>;
+  nonces: Map<Address, NonceTrackerRow>;
+  readerCursor: Map<number, ReaderCursorRow>;
+}
+
+function newState(): State {
+  return {
+    messages: new Map(),
+    batches: new Map(),
+    tagSeq: new Map(),
+    nonces: new Map(),
+    readerCursor: new Map(),
+  };
 }
 
 export class MemoryBamStore implements BamStore {
   private readonly lock = new AsyncLock();
-  private readonly pending: PendingState = {
-    rows: new Map(),
-    tagSeq: new Map(),
-  };
-  private readonly nonces = new Map<Address, NonceTrackerRow>();
-  private readonly submitted = new Map<Bytes32, StoreTxnSubmittedRow>();
+  private readonly state: State = newState();
 
   async withTxn<T>(fn: (txn: StoreTxn) => Promise<T>): Promise<T> {
     return this.lock.run(async () => {
-      const snapshot = {
-        rows: new Map(this.pending.rows),
-        tagSeq: new Map(this.pending.tagSeq),
-        nonces: new Map(this.nonces),
-        submitted: new Map(this.submitted),
+      const snapshot: State = {
+        messages: new Map(this.state.messages),
+        batches: new Map(this.state.batches),
+        tagSeq: new Map(this.state.tagSeq),
+        nonces: new Map(this.state.nonces),
+        readerCursor: new Map(this.state.readerCursor),
       };
       const txn = this.makeTxn();
       try {
         return await fn(txn);
       } catch (err) {
-        this.pending.rows.clear();
-        for (const [k, v] of snapshot.rows) this.pending.rows.set(k, v);
-        this.pending.tagSeq.clear();
-        for (const [k, v] of snapshot.tagSeq) this.pending.tagSeq.set(k, v);
-        this.nonces.clear();
-        for (const [k, v] of snapshot.nonces) this.nonces.set(k, v);
-        this.submitted.clear();
-        for (const [k, v] of snapshot.submitted) this.submitted.set(k, v);
+        restoreInto(this.state, snapshot);
         throw err;
       }
     });
@@ -74,68 +86,107 @@ export class MemoryBamStore implements BamStore {
 
   /** Test hook — unsafe outside tests. */
   _unsafeClear(): void {
-    this.pending.rows.clear();
-    this.pending.tagSeq.clear();
-    this.nonces.clear();
-    this.submitted.clear();
+    this.state.messages.clear();
+    this.state.batches.clear();
+    this.state.tagSeq.clear();
+    this.state.nonces.clear();
+    this.state.readerCursor.clear();
   }
 
   private makeTxn(): StoreTxn {
-    const pending = this.pending;
-    const nonces = this.nonces;
-    const submitted = this.submitted;
+    const { messages, batches, tagSeq, nonces, readerCursor } = this.state;
 
     return {
+      // ── old Poster-facing pending CRUD (bridged to unified messages) ──
       insertPending(row: StoreTxnPendingRow): void {
         const k = pendingKey(row.sender, row.nonce);
-        if (pending.rows.has(k)) {
-          throw new Error('insertPending: duplicate (sender, nonce)');
+        const existing = messages.get(k);
+        if (existing) {
+          // The reorg watcher re-enqueues a row whose prior status was
+          // `reorged`. Duplicates (from the nonce-replay-across-batchers
+          // case) may also be overwritten. Any live status rejects.
+          if (existing.status !== 'reorged' && existing.status !== 'duplicate') {
+            throw new Error('insertPending: duplicate (sender, nonce)');
+          }
         }
-        pending.rows.set(k, clonePending(row));
+        messages.set(k, {
+          messageId: null,
+          author: row.sender,
+          nonce: row.nonce,
+          contentTag: row.contentTag,
+          contents: new Uint8Array(row.contents),
+          signature: new Uint8Array(row.signature),
+          messageHash: row.messageHash,
+          status: 'pending',
+          batchRef: null,
+          ingestedAt: row.ingestedAt,
+          ingestSeq: row.ingestSeq,
+          blockNumber: null,
+          txIndex: null,
+          messageIndexWithinBatch: null,
+        });
       },
+
       getPendingByKey(key: PendingKey): StoreTxnPendingRow | null {
-        const row = pending.rows.get(pendingKey(key.sender, key.nonce));
-        return row ? clonePending(row) : null;
+        const r = messages.get(pendingKey(key.sender, key.nonce));
+        if (!r || r.status !== 'pending') return null;
+        return toPending(r);
       },
-      listPendingByTag(tag: Bytes32, limit?: number, sinceSeq?: number): StoreTxnPendingRow[] {
-        const all: StoreTxnPendingRow[] = [];
-        for (const row of pending.rows.values()) {
-          if (row.contentTag !== tag) continue;
-          if (sinceSeq !== undefined && row.ingestSeq <= sinceSeq) continue;
-          all.push(clonePending(row));
+
+      listPendingByTag(
+        tag: Bytes32,
+        limit?: number,
+        sinceSeq?: number
+      ): StoreTxnPendingRow[] {
+        const out: StoreTxnPendingRow[] = [];
+        for (const r of messages.values()) {
+          if (r.status !== 'pending') continue;
+          if (r.contentTag !== tag) continue;
+          if (sinceSeq !== undefined && (r.ingestSeq ?? 0) <= sinceSeq) continue;
+          out.push(toPending(r));
         }
-        all.sort((a, b) => a.ingestSeq - b.ingestSeq);
-        return typeof limit === 'number' ? all.slice(0, limit) : all;
+        out.sort((a, b) => a.ingestSeq - b.ingestSeq);
+        return typeof limit === 'number' ? out.slice(0, limit) : out;
       },
+
       listPendingAll(limit?: number, sinceSeq?: number): StoreTxnPendingRow[] {
-        const all: StoreTxnPendingRow[] = [];
-        for (const row of pending.rows.values()) {
-          if (sinceSeq !== undefined && row.ingestSeq <= sinceSeq) continue;
-          all.push(clonePending(row));
+        const out: StoreTxnPendingRow[] = [];
+        for (const r of messages.values()) {
+          if (r.status !== 'pending') continue;
+          if (sinceSeq !== undefined && (r.ingestSeq ?? 0) <= sinceSeq) continue;
+          out.push(toPending(r));
         }
-        all.sort((a, b) => {
+        out.sort((a, b) => {
           if (a.ingestedAt !== b.ingestedAt) return a.ingestedAt - b.ingestedAt;
           return a.ingestSeq - b.ingestSeq;
         });
-        return typeof limit === 'number' ? all.slice(0, limit) : all;
+        return typeof limit === 'number' ? out.slice(0, limit) : out;
       },
+
       deletePending(keys: PendingKey[]): void {
-        for (const k of keys) pending.rows.delete(pendingKey(k.sender, k.nonce));
-      },
-      countPendingByTag(tag: Bytes32): number {
-        let count = 0;
-        for (const row of pending.rows.values()) {
-          if (row.contentTag === tag) count++;
+        for (const k of keys) {
+          const key = pendingKey(k.sender, k.nonce);
+          const r = messages.get(key);
+          if (r && r.status === 'pending') messages.delete(key);
         }
-        return count;
       },
+
+      countPendingByTag(tag: Bytes32): number {
+        let n = 0;
+        for (const r of messages.values()) {
+          if (r.status === 'pending' && r.contentTag === tag) n++;
+        }
+        return n;
+      },
+
       nextIngestSeq(tag: Bytes32): number {
-        const cur = pending.tagSeq.get(tag) ?? 0;
+        const cur = tagSeq.get(tag) ?? 0;
         const next = cur + 1;
-        pending.tagSeq.set(tag, next);
+        tagSeq.set(tag, next);
         return next;
       },
 
+      // ── nonce tracker ────────────────────────────────────────────────
       getNonce(sender: Address): NonceTrackerRow | null {
         const row = nonces.get(sender.toLowerCase() as Address);
         return row ? { ...row } : null;
@@ -145,29 +196,67 @@ export class MemoryBamStore implements BamStore {
         nonces.set(key, { ...row, sender: key });
       },
 
+      // ── old submitted CRUD (bridged to batches + messages) ───────────
       insertSubmitted(row: StoreTxnSubmittedRow): void {
-        if (submitted.has(row.txHash)) {
+        if (batches.has(row.txHash)) {
           throw new Error('insertSubmitted: duplicate tx_hash');
         }
-        submitted.set(row.txHash, cloneSubmitted(row));
-      },
-      getSubmittedByTx(txHash: Bytes32): StoreTxnSubmittedRow | null {
-        const row = submitted.get(txHash);
-        return row ? cloneSubmitted(row) : null;
-      },
-      listSubmitted(query: SubmittedBatchesQuery): StoreTxnSubmittedRow[] {
-        const results: StoreTxnSubmittedRow[] = [];
-        for (const row of submitted.values()) {
-          if (query.contentTag !== undefined && row.contentTag !== query.contentTag) continue;
-          if (query.sinceBlock !== undefined) {
-            if (row.blockNumber === null) continue;
-            if (BigInt(row.blockNumber) < query.sinceBlock) continue;
-          }
-          results.push(cloneSubmitted(row));
+        const bs = oldStatusToBatch(row.status);
+        batches.set(row.txHash, {
+          txHash: row.txHash,
+          chainId: BRIDGE_CHAIN_ID,
+          contentTag: row.contentTag,
+          blobVersionedHash: row.blobVersionedHash,
+          batchContentHash: row.batchContentHash,
+          blockNumber: row.blockNumber,
+          txIndex: null,
+          status: bs,
+          replacedByTxHash: row.replacedByTxHash,
+          submittedAt: row.submittedAt,
+          invalidatedAt: row.invalidatedAt,
+        });
+        for (let i = 0; i < row.messages.length; i++) {
+          const m = row.messages[i];
+          const ms = messageStatusForBatch(bs);
+          messages.set(pendingKey(m.sender, m.nonce), {
+            messageId: m.messageId,
+            author: m.sender,
+            nonce: m.nonce,
+            contentTag: row.contentTag,
+            contents: new Uint8Array(m.contents),
+            signature: new Uint8Array(m.signature),
+            messageHash: m.messageHash,
+            status: ms,
+            batchRef: row.txHash,
+            ingestedAt: null,
+            ingestSeq: m.originalIngestSeq,
+            blockNumber: bs === 'confirmed' ? row.blockNumber : null,
+            txIndex: null,
+            messageIndexWithinBatch: i,
+          });
         }
-        results.sort((a, b) => b.submittedAt - a.submittedAt);
-        return typeof query.limit === 'number' ? results.slice(0, query.limit) : results;
       },
+
+      getSubmittedByTx(txHash: Bytes32): StoreTxnSubmittedRow | null {
+        const b = batches.get(txHash);
+        if (!b) return null;
+        return toSubmitted(b, collectMessagesForBatch(messages, txHash));
+      },
+
+      listSubmitted(query: SubmittedBatchesQuery): StoreTxnSubmittedRow[] {
+        const out: StoreTxnSubmittedRow[] = [];
+        for (const b of batches.values()) {
+          if (query.contentTag !== undefined && b.contentTag !== query.contentTag) continue;
+          if (query.sinceBlock !== undefined) {
+            if (b.blockNumber === null) continue;
+            if (BigInt(b.blockNumber) < query.sinceBlock) continue;
+          }
+          out.push(toSubmitted(b, collectMessagesForBatch(messages, b.txHash)));
+        }
+        out.sort((a, b) => b.submittedAt - a.submittedAt);
+        return typeof query.limit === 'number' ? out.slice(0, query.limit) : out;
+      },
+
       updateSubmittedStatus(
         txHash: Bytes32,
         status: SubmittedBatchStatus,
@@ -175,54 +264,176 @@ export class MemoryBamStore implements BamStore {
         blockNumber: number | null,
         invalidatedAt?: number | null
       ): void {
-        const row = submitted.get(txHash);
-        if (!row) throw new Error('updateSubmittedStatus: no row for tx_hash');
-        submitted.set(txHash, {
-          ...row,
-          status,
+        const b = batches.get(txHash);
+        if (!b) throw new Error('updateSubmittedStatus: no row for tx_hash');
+        const bs = oldStatusToBatch(status);
+        batches.set(txHash, {
+          ...b,
+          status: bs,
           replacedByTxHash,
-          blockNumber: blockNumber !== null ? blockNumber : row.blockNumber,
+          blockNumber: blockNumber !== null ? blockNumber : b.blockNumber,
+          invalidatedAt: invalidatedAt === undefined ? b.invalidatedAt : invalidatedAt,
+        });
+        // Terminal transitions ('reorged'/'resubmitted') cascade to
+        // every live message under this batch so the reorg watcher's
+        // subsequent `insertPending` on the same (author, nonce) isn't
+        // blocked by a stale confirmed/submitted row. Matches the
+        // markReorged cascade semantics in the unified surface.
+        if (bs === 'reorged') {
+          for (const [k, r] of messages) {
+            if (r.batchRef === txHash && (r.status === 'confirmed' || r.status === 'submitted')) {
+              messages.set(k, { ...cloneMessage(r), status: 'reorged' });
+            }
+          }
+        }
+      },
+
+      // ── unified-schema lifecycle transitions (T005) ──────────────────
+      markSubmitted(keys: PendingKey[], batchRef: Bytes32): void {
+        for (const k of keys) {
+          const mk = pendingKey(k.sender, k.nonce);
+          const r = messages.get(mk);
+          if (!r) throw new Error(`markSubmitted: no row for (${k.sender}, ${k.nonce})`);
+          if (r.status !== 'pending') {
+            throw new Error(
+              `markSubmitted: (${k.sender}, ${k.nonce}) status=${r.status}, expected pending`
+            );
+          }
+          messages.set(mk, { ...cloneMessage(r), status: 'submitted', batchRef });
+        }
+      },
+
+      upsertObserved(row: MessageRow): void {
+        const k = pendingKey(row.author, row.nonce);
+        const existing = messages.get(k);
+        // Idempotency: a second observation of the same (author, nonce)
+        // with matching messageHash is a no-op merge. A mismatching
+        // messageHash is the "duplicate" case the Reader surfaces via
+        // markDuplicate; upsertObserved itself doesn't invent that
+        // transition — it refuses to overwrite a confirmed row.
+        if (existing) {
+          if (existing.status === 'confirmed' && existing.messageHash !== row.messageHash) {
+            throw new Error(
+              'upsertObserved: existing confirmed row has a different messageHash — caller must call markDuplicate'
+            );
+          }
+          if (existing.status === 'confirmed' && existing.messageHash === row.messageHash) {
+            return; // idempotent no-op
+          }
+        }
+        messages.set(k, cloneMessage(row));
+      },
+
+      markDuplicate(messageHash: Bytes32): void {
+        for (const [k, r] of messages) {
+          if (r.messageHash === messageHash && r.status !== 'confirmed') {
+            messages.set(k, { ...cloneMessage(r), status: 'duplicate' });
+            return;
+          }
+        }
+        throw new Error(`markDuplicate: no non-confirmed row with messageHash=${messageHash}`);
+      },
+
+      markReorged(txHash: Bytes32, invalidatedAt: number): void {
+        const b = batches.get(txHash);
+        if (!b) throw new Error(`markReorged: no batch for tx_hash=${txHash}`);
+        batches.set(txHash, { ...b, status: 'reorged', invalidatedAt });
+        // Cascade: every confirmed row under this batch flips to
+        // reorged with the same invalidatedAt.
+        for (const [k, r] of messages) {
+          if (r.batchRef === txHash && r.status === 'confirmed') {
+            messages.set(k, { ...cloneMessage(r), status: 'reorged' });
+          }
+        }
+      },
+
+      // ── unified-schema reads (T005) ──────────────────────────────────
+      listMessages(query: MessagesQuery): MessageRow[] {
+        const out: MessageRow[] = [];
+        for (const r of messages.values()) {
+          if (query.contentTag !== undefined && r.contentTag !== query.contentTag) continue;
+          if (query.author !== undefined && r.author.toLowerCase() !== query.author.toLowerCase()) continue;
+          if (query.status !== undefined && r.status !== query.status) continue;
+          if (query.sinceBlock !== undefined) {
+            if (r.blockNumber === null) continue;
+            if (BigInt(r.blockNumber) < query.sinceBlock) continue;
+          }
+          if (query.cursor !== undefined) {
+            if (!afterCursor(r, query.cursor)) continue;
+          }
+          out.push(cloneMessage(r));
+        }
+        // Chain-derived ordering: (blockNumber, txIndex, messageIndexWithinBatch).
+        // Rows with null coordinates sort to the end in a stable order
+        // that still obeys ingestSeq (so Poster-side lists stay FIFO).
+        out.sort(compareByChainCoord);
+        return typeof query.limit === 'number' ? out.slice(0, query.limit) : out;
+      },
+
+      getByMessageId(messageId: Bytes32): MessageRow | null {
+        for (const r of messages.values()) {
+          if (r.messageId === messageId) return cloneMessage(r);
+        }
+        return null;
+      },
+
+      getByAuthorNonce(author: Address, nonce: bigint): MessageRow | null {
+        const r = messages.get(pendingKey(author, nonce));
+        return r ? cloneMessage(r) : null;
+      },
+
+      // ── unified-schema batch CRUD (T005) ─────────────────────────────
+      upsertBatch(row: BatchRow): void {
+        batches.set(row.txHash, { ...row });
+      },
+
+      updateBatchStatus(
+        txHash: Bytes32,
+        status: BatchStatus,
+        opts?: {
+          blockNumber?: number | null;
+          txIndex?: number | null;
+          replacedByTxHash?: Bytes32 | null;
+          invalidatedAt?: number | null;
+        }
+      ): void {
+        const b = batches.get(txHash);
+        if (!b) throw new Error(`updateBatchStatus: no batch for tx_hash=${txHash}`);
+        batches.set(txHash, {
+          ...b,
+          status,
+          blockNumber: opts?.blockNumber === undefined ? b.blockNumber : opts.blockNumber,
+          txIndex: opts?.txIndex === undefined ? b.txIndex : opts.txIndex,
+          replacedByTxHash:
+            opts?.replacedByTxHash === undefined ? b.replacedByTxHash : opts.replacedByTxHash,
           invalidatedAt:
-            invalidatedAt === undefined ? row.invalidatedAt : invalidatedAt,
+            opts?.invalidatedAt === undefined ? b.invalidatedAt : opts.invalidatedAt,
         });
       },
 
-      // ── unified-schema methods: stubbed until T005 ────────────────────
-      markSubmitted(): void {
-        throw new Error('markSubmitted not implemented (T005)');
+      listBatches(query: BatchesQuery): BatchRow[] {
+        const out: BatchRow[] = [];
+        for (const b of batches.values()) {
+          if (query.contentTag !== undefined && b.contentTag !== query.contentTag) continue;
+          if (query.chainId !== undefined && b.chainId !== query.chainId) continue;
+          if (query.status !== undefined && b.status !== query.status) continue;
+          if (query.sinceBlock !== undefined) {
+            if (b.blockNumber === null) continue;
+            if (BigInt(b.blockNumber) < query.sinceBlock) continue;
+          }
+          out.push({ ...b });
+        }
+        out.sort((a, b) => (b.submittedAt ?? 0) - (a.submittedAt ?? 0));
+        return typeof query.limit === 'number' ? out.slice(0, query.limit) : out;
       },
-      upsertObserved(): void {
-        throw new Error('upsertObserved not implemented (T005)');
+
+      // ── reader cursor (T005) ─────────────────────────────────────────
+      getCursor(chainId: number): ReaderCursorRow | null {
+        const row = readerCursor.get(chainId);
+        return row ? { ...row } : null;
       },
-      markDuplicate(): void {
-        throw new Error('markDuplicate not implemented (T005)');
-      },
-      markReorged(): void {
-        throw new Error('markReorged not implemented (T005)');
-      },
-      listMessages(): MessageRow[] {
-        throw new Error('listMessages not implemented (T005)');
-      },
-      getByMessageId(): MessageRow | null {
-        throw new Error('getByMessageId not implemented (T005)');
-      },
-      getByAuthorNonce(): MessageRow | null {
-        throw new Error('getByAuthorNonce not implemented (T005)');
-      },
-      upsertBatch(): void {
-        throw new Error('upsertBatch not implemented (T005)');
-      },
-      updateBatchStatus(): void {
-        throw new Error('updateBatchStatus not implemented (T005)');
-      },
-      listBatches(): BatchRow[] {
-        throw new Error('listBatches not implemented (T005)');
-      },
-      getCursor(): ReaderCursorRow | null {
-        throw new Error('getCursor not implemented (T005)');
-      },
-      setCursor(): void {
-        throw new Error('setCursor not implemented (T005)');
+      setCursor(row: ReaderCursorRow): void {
+        readerCursor.set(row.chainId, { ...row });
       },
     };
   }
@@ -232,21 +443,133 @@ export function createMemoryStore(): BamStore {
   return new MemoryBamStore();
 }
 
-function clonePending(row: StoreTxnPendingRow): StoreTxnPendingRow {
+// ─────────────────────────────────────────────────────────────────────────
+// Bridge helpers
+// ─────────────────────────────────────────────────────────────────────────
+
+function oldStatusToBatch(s: SubmittedBatchStatus): BatchStatus {
+  switch (s) {
+    case 'pending':
+      return 'pending_tx';
+    case 'included':
+      return 'confirmed';
+    case 'reorged':
+      return 'reorged';
+    case 'resubmitted':
+      // 'resubmitted' is represented as a reorged batch with
+      // replacedByTxHash set; the read bridge distinguishes the two.
+      return 'reorged';
+  }
+}
+
+function batchToOldStatus(b: BatchRow): SubmittedBatchStatus {
+  switch (b.status) {
+    case 'pending_tx':
+      return 'pending';
+    case 'confirmed':
+      return 'included';
+    case 'reorged':
+      return b.replacedByTxHash !== null ? 'resubmitted' : 'reorged';
+  }
+}
+
+function messageStatusForBatch(bs: BatchStatus): MessageStatus {
+  switch (bs) {
+    case 'pending_tx':
+      return 'submitted';
+    case 'confirmed':
+      return 'confirmed';
+    case 'reorged':
+      return 'reorged';
+  }
+}
+
+function collectMessagesForBatch(
+  messages: Map<string, MessageRow>,
+  txHash: Bytes32
+): MessageSnapshot[] {
+  const out: MessageSnapshot[] = [];
+  for (const r of messages.values()) {
+    if (r.batchRef !== txHash) continue;
+    out.push({
+      sender: r.author,
+      nonce: r.nonce,
+      contents: new Uint8Array(r.contents),
+      signature: new Uint8Array(r.signature),
+      messageHash: r.messageHash,
+      messageId: r.messageId,
+      originalIngestSeq: r.ingestSeq ?? 0,
+    });
+  }
+  out.sort((a, b) => a.originalIngestSeq - b.originalIngestSeq);
+  return out;
+}
+
+function toPending(r: MessageRow): StoreTxnPendingRow {
   return {
-    ...row,
-    contents: new Uint8Array(row.contents),
-    signature: new Uint8Array(row.signature),
+    contentTag: r.contentTag,
+    sender: r.author,
+    nonce: r.nonce,
+    contents: new Uint8Array(r.contents),
+    signature: new Uint8Array(r.signature),
+    messageHash: r.messageHash,
+    ingestedAt: r.ingestedAt ?? 0,
+    ingestSeq: r.ingestSeq ?? 0,
   };
 }
 
-function cloneSubmitted(row: StoreTxnSubmittedRow): StoreTxnSubmittedRow {
+function toSubmitted(b: BatchRow, msgs: MessageSnapshot[]): StoreTxnSubmittedRow {
   return {
-    ...row,
-    messages: row.messages.map((m) => ({
-      ...m,
-      contents: new Uint8Array(m.contents),
-      signature: new Uint8Array(m.signature),
-    })),
+    txHash: b.txHash,
+    contentTag: b.contentTag,
+    blobVersionedHash: b.blobVersionedHash,
+    batchContentHash: b.batchContentHash,
+    blockNumber: b.blockNumber,
+    status: batchToOldStatus(b),
+    replacedByTxHash: b.replacedByTxHash,
+    submittedAt: b.submittedAt ?? 0,
+    invalidatedAt: b.invalidatedAt,
+    messages: msgs,
   };
+}
+
+function cloneMessage(r: MessageRow): MessageRow {
+  return {
+    ...r,
+    contents: new Uint8Array(r.contents),
+    signature: new Uint8Array(r.signature),
+  };
+}
+
+function afterCursor(r: MessageRow, c: { blockNumber: number; txIndex: number; messageIndexWithinBatch: number }): boolean {
+  if (r.blockNumber === null || r.txIndex === null || r.messageIndexWithinBatch === null) return false;
+  if (r.blockNumber !== c.blockNumber) return r.blockNumber > c.blockNumber;
+  if (r.txIndex !== c.txIndex) return r.txIndex > c.txIndex;
+  return r.messageIndexWithinBatch > c.messageIndexWithinBatch;
+}
+
+function compareByChainCoord(a: MessageRow, b: MessageRow): number {
+  const aHas = a.blockNumber !== null;
+  const bHas = b.blockNumber !== null;
+  if (aHas && bHas) {
+    if (a.blockNumber !== b.blockNumber) return (a.blockNumber as number) - (b.blockNumber as number);
+    if ((a.txIndex ?? 0) !== (b.txIndex ?? 0)) return (a.txIndex ?? 0) - (b.txIndex ?? 0);
+    return (a.messageIndexWithinBatch ?? 0) - (b.messageIndexWithinBatch ?? 0);
+  }
+  if (aHas !== bHas) return aHas ? -1 : 1;
+  // Neither has a coord — fall back to ingestSeq for stable order.
+  return (a.ingestSeq ?? 0) - (b.ingestSeq ?? 0);
+}
+
+function restoreInto(live: State, snap: State): void {
+  live.messages.clear();
+  for (const [k, v] of snap.messages) live.messages.set(k, v);
+  live.batches.clear();
+  for (const [k, v] of snap.batches) live.batches.set(k, v);
+  live.tagSeq.clear();
+  for (const [k, v] of snap.tagSeq) live.tagSeq.set(k, v);
+  live.nonces.clear();
+  for (const [k, v] of snap.nonces) live.nonces.set(k, v);
+  live.readerCursor.clear();
+  for (const [k, v] of snap.readerCursor) live.readerCursor.set(k, v);
 }
