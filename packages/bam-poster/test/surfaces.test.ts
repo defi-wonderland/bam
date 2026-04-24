@@ -197,6 +197,14 @@ describe('listSubmittedBatches', () => {
     expect(rows[0].txHash).toBe('0x' + '01'.repeat(32));
   });
 
+  it('limit: 0 returns no batches', async () => {
+    const store = new MemoryBamStore();
+    await seedBatch(store, { txHash: ('0x' + '01'.repeat(32)) as Bytes32 });
+    await seedBatch(store, { txHash: ('0x' + '02'.repeat(32)) as Bytes32 });
+    const rows = await listSubmittedBatches(store, 31337, { limit: 0 });
+    expect(rows.length).toBe(0);
+  });
+
   it('filters out batches with null submittedAt (Reader-observed, never submitted by us)', async () => {
     const store = new MemoryBamStore();
     await seedBatch(store, { txHash: ('0x' + '01'.repeat(32)) as Bytes32 });

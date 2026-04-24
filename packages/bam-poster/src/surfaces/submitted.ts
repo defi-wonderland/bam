@@ -51,10 +51,14 @@ export async function listSubmittedBatches(
     });
     const out: SubmittedBatch[] = [];
     for (const b of batches) {
+      // Limit guard runs BEFORE the push so `limit: 0` (or negative)
+      // returns an empty array. The pre-push check also handles the
+      // happy path: once out.length === limit, the next iteration
+      // exits before another snapshot read.
+      if (typeof query.limit === 'number' && out.length >= query.limit) break;
       if (b.submittedAt === null) continue;
       const msgs = await readSnapshotMessages(txn, b);
       out.push(mapBatch(b, msgs));
-      if (typeof query.limit === 'number' && out.length >= query.limit) break;
     }
     return out;
   });
