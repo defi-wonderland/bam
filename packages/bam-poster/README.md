@@ -14,8 +14,9 @@ and submits them to L1 as blob batches via the existing BAM Core
 - **CLI entrypoint** — `bam-poster` binary that reads env, wires the
   library, mounts HTTP, handles SIGTERM.
 
-This package is **Node-only** — it imports `better-sqlite3`, `c-kzg`,
-and `node:http` at the top level. Do not import it from
+This package is **Node-only** — it reaches `c-kzg` and `node:http`
+at the top level, plus `bam-store`'s Node-only SQLite/Postgres
+adapters through `createDbStore`. Do not import it from
 `bam-sdk/browser` or any other browser-reachable code.
 
 ## Non-goals

@@ -27,16 +27,13 @@
     "lint": "eslint src test"
   },
   "dependencies": {
-    "@vercel/postgres": "^0.10.0",
     "bam-sdk": "workspace:*",
     "bam-store": "workspace:*",
-    "better-sqlite3": "^11.5.0",
     "c-kzg": "^4.1.0",
     "dotenv": "^16.4.5",
     "viem": "^2.21.0"
   },
   "devDependencies": {
-    "@types/better-sqlite3": "^7.6.11",
     "@types/node": "^20.11.0"
   },
   "engines": {

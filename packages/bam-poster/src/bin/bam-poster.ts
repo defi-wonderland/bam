@@ -130,8 +130,8 @@ export async function runCli(): Promise<void> {
       await server.close();
       // poster.stop() closes the configured store on the way out, so
       // we don't also close `store` here — double-closing some
-      // adapters (e.g. better-sqlite3) throws and flips a graceful
-      // shutdown into an error exit (qodo review).
+      // backends throws and flips a graceful shutdown into an error
+      // exit (qodo review).
       await poster.stop();
       process.exit(0);
     } catch {
