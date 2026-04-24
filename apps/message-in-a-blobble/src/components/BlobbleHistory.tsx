@@ -13,10 +13,10 @@ interface OnChainBlobble {
 }
 
 interface DecodedMessage {
-  author: string;
-  content: string;
-  timestamp: number;
-  nonce: number;
+  sender: string;
+  content: string | null;
+  timestamp: number | null;
+  nonce: string;
 }
 
 interface BlobbleDetail {
@@ -158,12 +158,20 @@ function BlobbleDetails({ detail }: { detail: BlobbleDetail }) {
       {detail.messages.map((m, i) => (
           <div key={i} className="p-2 bg-palm-50 rounded border border-palm-100">
             <div className="flex items-center justify-between mb-1">
-              <AddressLink address={m.author} className="text-xs" />
-              <span className="text-xs text-sand-500">
-                {new Date(m.timestamp * 1000).toLocaleTimeString()}
-              </span>
+              <AddressLink address={m.sender} className="text-xs" />
+              {m.timestamp !== null && (
+                <span className="text-xs text-sand-500">
+                  {new Date(m.timestamp * 1000).toLocaleTimeString()}
+                </span>
+              )}
             </div>
-            <p className="text-sm text-ocean-900">{m.content}</p>
+            {m.content !== null ? (
+              <p className="text-sm text-ocean-900">{m.content}</p>
+            ) : (
+              <p className="text-xs text-sand-400 italic">
+                (non-social contents — nonce {m.nonce})
+              </p>
+            )}
           </div>
       ))}
     </div>

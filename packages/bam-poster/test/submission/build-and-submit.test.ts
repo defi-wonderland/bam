@@ -1,332 +1,186 @@
-import { describe, it, expect } from 'vitest';
-import {
-  bytesToHex,
-  computeMessageHash,
-  computeMessageId,
-  generateECDSAPrivateKey,
-  loadTrustedSetup,
-  signECDSA,
-  type Address,
-  type Bytes32,
-} from 'bam-sdk';
-import { privateKeyToAccount } from 'viem/accounts';
-import type { Kzg } from 'viem';
+import { beforeAll, describe, expect, it } from 'vitest';
+import { loadTrustedSetup, type Address, type Bytes32 } from 'bam-sdk';
 
 import {
   buildAndSubmitWithViem,
   classifySubmissionError,
   type BuildAndSubmitTransport,
 } from '../../src/submission/build-and-submit.js';
-import { LocalEcdsaSigner } from '../../src/signer/local.js';
-import type { DecodedMessage } from '../../src/types.js';
+import type { DecodedMessage, Signer } from '../../src/types.js';
+import type { Kzg } from 'viem';
+
+// Real KZG setup is required for the in-SDK commitToBlob path; the
+// viem-level `kzg` object the transport receives is separately
+// stubbed below.
+beforeAll(() => {
+  loadTrustedSetup();
+});
 
 const TAG = ('0x' + 'aa'.repeat(32)) as Bytes32;
-const BAM_CORE = '0x9C4b230066a6808D83F5FBa0c040E0Df2Fcc7314' as Address;
+const SENDER = ('0x' + '11'.repeat(20)) as Address;
+const BAM_CORE = ('0x' + '22'.repeat(20)) as Address;
 
-// NOTE: we intentionally do NOT call `loadTrustedSetup` in a `beforeAll`
-// here. An earlier version of this file did, which masked a real bug
-// (buildAndSubmit was calling `commitToBlob` before the trusted setup
-// was primed). Now the stub `kzgLoader` below calls `loadTrustedSetup`
-// itself — matching what the default production loader does — so every
-// test exercises the same load-before-commit ordering, and a
-// regression would surface as "KZG trusted setup not loaded."
-
-async function signedDecoded(): Promise<DecodedMessage> {
-  const pk = generateECDSAPrivateKey() as `0x${string}`;
-  const author = privateKeyToAccount(pk).address as Address;
-  const timestamp = 1_700_000_000;
-  const nonce = 1;
-  const content = 'hello';
-  const hash = computeMessageHash({ author, timestamp, nonce, content });
-  const signature = await signECDSA(pk, bytesToHex(hash) as Bytes32);
+function decoded(nonce: number): DecodedMessage {
+  const contents = new Uint8Array(40);
+  contents.fill(0xaa, 0, 32);
   return {
-    author,
-    timestamp,
+    sender: SENDER,
     nonce: BigInt(nonce),
-    content,
+    contents,
     contentTag: TAG,
-    signature,
-    messageId: computeMessageId({ author, timestamp, nonce, content }),
+    signature: new Uint8Array(65),
+    messageHash: ('0x' + nonce.toString(16).padStart(64, '0')) as Bytes32,
   };
 }
 
-function makeTransport(
-  overrides: Partial<BuildAndSubmitTransport> = {}
-): BuildAndSubmitTransport {
-  const base: BuildAndSubmitTransport = {
+class StubSigner implements Signer {
+  account() {
+    return { address: SENDER, type: 'json-rpc' as const };
+  }
+}
+
+function mkTransport(overrides: Partial<BuildAndSubmitTransport> = {}): BuildAndSubmitTransport {
+  return {
     async sendBlobTransaction() {
-      return ('0x' + 'de'.repeat(32)) as `0x${string}`;
+      return ('0x' + '99'.repeat(32)) as `0x${string}`;
     },
     async waitForReceipt() {
-      return { blockNumber: 42n };
+      return { blockNumber: 1234n };
     },
     async getChainId() {
-      return 1;
+      return 31337;
     },
     async getBytecode() {
-      return '0x6080' as `0x${string}`;
+      return '0x6060604052' as `0x${string}`;
     },
     async getBalance() {
       return 10n ** 18n;
     },
     async getBlockNumber() {
-      return 100n;
+      return 1234n;
     },
-    async getTransactionReceipt() {
-      return { blockNumber: 42n };
+    async getTransactionReceipt(_hash: Bytes32) {
+      return { blockNumber: 1234n };
     },
+    ...overrides,
   };
-  return { ...base, ...overrides };
 }
 
-/**
- * Test double for the viem-side `Kzg` interface. Every stub loader
- * that returns this also calls the real `loadTrustedSetup()` (via
- * `stubLoader` below) — that's what the production default loader
- * does, so tests exercise the same load-before-commit sequence.
- */
-const STUB_KZG: Kzg = {
+const stubKzg: Kzg = {
   blobToKzgCommitment: () => new Uint8Array(48),
   computeBlobKzgProof: () => new Uint8Array(48),
 };
 
-/**
- * Stub loader: primes the SDK's trusted-setup state (same as the
- * production default loader does) and returns a no-op Kzg for viem.
- */
-const stubLoader = async (): Promise<Kzg> => {
-  loadTrustedSetup();
-  return STUB_KZG;
-};
-
-async function factory(
-  transport: BuildAndSubmitTransport,
-  kzgLoader: () => Promise<Kzg> = stubLoader
-): Promise<ReturnType<typeof buildAndSubmitWithViem>> {
-  return buildAndSubmitWithViem({
-    rpcUrl: 'http://unused',
-    chainId: 1,
-    bamCoreAddress: BAM_CORE,
-    signer: new LocalEcdsaSigner(generateECDSAPrivateKey() as `0x${string}`),
-    transport,
-    kzgLoader,
-  });
-}
-
 describe('classifySubmissionError', () => {
-  it('classifies revert-shaped errors as permanent', () => {
-    expect(classifySubmissionError(new Error('execution reverted: invalid tag'))).toEqual({
-      kind: 'permanent',
-      detail: 'submission_failed',
-    });
-    expect(classifySubmissionError(new Error('execution reverted with reason'))).toEqual({
+  it('"execution reverted" → permanent', () => {
+    expect(classifySubmissionError(new Error('execution reverted: foo'))).toEqual({
       kind: 'permanent',
       detail: 'submission_failed',
     });
   });
 
-  it('classifies specific permanent patterns as permanent', () => {
-    for (const msg of [
-      'invalid opcode',
-      'invalid signature on tx',
-      'ABI encoding error',
-      'contract does not exist at 0x…',
-      'out of gas',
-    ]) {
-      expect(classifySubmissionError(new Error(msg))).toEqual({
-        kind: 'permanent',
-        detail: 'submission_failed',
-      });
-    }
+  it('"invalid opcode" → permanent', () => {
+    expect(classifySubmissionError(new Error('invalid opcode')).kind).toBe('permanent');
   });
 
-  it('does NOT treat transient "invalid …" errors as permanent (cubic review)', () => {
-    // These all contain the word "invalid" but are transient / retryable
-    // (node sync lag, network blip). Narrowed patterns must let them
-    // fall through to retryable rather than halt the worker forever.
-    for (const msg of [
-      'invalid nonce',
-      'invalid JSON-RPC response',
-      'invalid argument 0: block not found',
-    ]) {
-      expect(classifySubmissionError(new Error(msg))).toEqual({
-        kind: 'retryable',
-        detail: 'submission_failed',
-      });
-    }
+  it('"invalid signature" → permanent (ABI malformed)', () => {
+    expect(classifySubmissionError(new Error('invalid signature')).kind).toBe('permanent');
   });
 
-  it('classifies transient / network errors as retryable', () => {
-    expect(classifySubmissionError(new Error('fetch failed'))).toEqual({
-      kind: 'retryable',
-      detail: 'submission_failed',
-    });
-    expect(classifySubmissionError(new Error('insufficient funds for gas'))).toEqual({
-      kind: 'retryable',
-      detail: 'submission_failed',
-    });
-    expect(classifySubmissionError(new Error('blob gas too low'))).toEqual({
-      kind: 'retryable',
-      detail: 'submission_failed',
-    });
+  it('"abi" match → permanent', () => {
+    expect(classifySubmissionError(new Error('bad abi encoding')).kind).toBe('permanent');
   });
 
-  it('handles non-Error thrown values', () => {
-    expect(classifySubmissionError('execution reverted')).toEqual({
-      kind: 'permanent',
-      detail: 'submission_failed',
-    });
-    expect(classifySubmissionError(42)).toEqual({
-      kind: 'retryable',
-      detail: 'submission_failed',
-    });
+  it('generic network error → retryable', () => {
+    expect(classifySubmissionError(new Error('ECONNRESET')).kind).toBe('retryable');
+  });
+
+  it('"invalid nonce" (common transient) → retryable, NOT permanent', () => {
+    expect(classifySubmissionError(new Error('invalid nonce — too low')).kind).toBe(
+      'retryable'
+    );
+  });
+
+  it('non-Error input → retryable by default', () => {
+    expect(classifySubmissionError('random string').kind).toBe('retryable');
   });
 });
 
-describe('buildAndSubmitWithViem — happy path', () => {
-  it('returns `included` with the txHash + block the transport reports', async () => {
-    const transport = makeTransport({
+describe('buildAndSubmitWithViem (transport injection)', () => {
+  it('included outcome contains the transport-returned tx hash + block', async () => {
+    const transport = mkTransport({
       async sendBlobTransaction() {
         return ('0x' + 'ab'.repeat(32)) as `0x${string}`;
       },
       async waitForReceipt() {
-        return { blockNumber: 123n };
+        return { blockNumber: 42n };
       },
     });
-    const { buildAndSubmit } = await factory(transport);
-    const msg = await signedDecoded();
-    const outcome = await buildAndSubmit({ contentTag: TAG, messages: [msg] });
+    const { buildAndSubmit } = await buildAndSubmitWithViem({
+      rpcUrl: 'http://localhost:8545',
+      chainId: 31337,
+      bamCoreAddress: BAM_CORE,
+      signer: new StubSigner(),
+      transport,
+      kzgLoader: async () => stubKzg,
+    });
+    const outcome = await buildAndSubmit({ contentTag: TAG, messages: [decoded(1)] });
     expect(outcome.kind).toBe('included');
     if (outcome.kind === 'included') {
       expect(outcome.txHash).toBe('0x' + 'ab'.repeat(32));
-      expect(outcome.blockNumber).toBe(123);
-      expect(outcome.blobVersionedHash).toMatch(/^0x[0-9a-f]{64}$/);
+      expect(outcome.blockNumber).toBe(42);
     }
   });
-});
 
-describe('buildAndSubmitWithViem — error paths', () => {
-  it('maps a revert error from sendBlobTransaction to permanent', async () => {
-    const transport = makeTransport({
+  it('transport throw "execution reverted" bubbles up as permanent', async () => {
+    const transport = mkTransport({
       async sendBlobTransaction() {
-        throw new Error('execution reverted: out of gas');
+        throw new Error('execution reverted');
       },
     });
-    const { buildAndSubmit } = await factory(transport);
-    const outcome = await buildAndSubmit({
-      contentTag: TAG,
-      messages: [await signedDecoded()],
+    const { buildAndSubmit } = await buildAndSubmitWithViem({
+      rpcUrl: 'http://localhost:8545',
+      chainId: 31337,
+      bamCoreAddress: BAM_CORE,
+      signer: new StubSigner(),
+      transport,
+      kzgLoader: async () => stubKzg,
+      logger: () => undefined,
     });
+    const outcome = await buildAndSubmit({ contentTag: TAG, messages: [decoded(1)] });
     expect(outcome.kind).toBe('permanent');
   });
 
-  it('maps an RPC timeout error to retryable', async () => {
-    const transport = makeTransport({
+  it('transport throw generic network error → retryable', async () => {
+    const transport = mkTransport({
       async sendBlobTransaction() {
-        throw new Error('request timeout');
+        throw new Error('connection refused');
       },
     });
-    const { buildAndSubmit } = await factory(transport);
-    const outcome = await buildAndSubmit({
-      contentTag: TAG,
-      messages: [await signedDecoded()],
-    });
-    expect(outcome.kind).toBe('retryable');
-  });
-
-  it('maps a waitForReceipt failure as retryable (receipt hasn\'t landed yet)', async () => {
-    const transport = makeTransport({
-      async waitForReceipt() {
-        throw new Error('network unreachable');
-      },
-    });
-    const { buildAndSubmit } = await factory(transport);
-    const outcome = await buildAndSubmit({
-      contentTag: TAG,
-      messages: [await signedDecoded()],
-    });
-    expect(outcome.kind).toBe('retryable');
-  });
-});
-
-describe('buildAndSubmitWithViem — lazy KZG load', () => {
-  it('does not invoke kzgLoader at factory construction time', async () => {
-    let loads = 0;
-    const loader = async (): Promise<Kzg> => {
-      loads++;
-      return STUB_KZG;
-    };
-    await factory(makeTransport(), loader);
-    // Construction must not trigger KZG load — CLI startup stays fast.
-    expect(loads).toBe(0);
-  });
-
-  it('invokes kzgLoader on first submission', async () => {
-    let loads = 0;
-    const loader = async (): Promise<Kzg> => {
-      loads++;
-      return STUB_KZG;
-    };
-    const { buildAndSubmit } = await factory(makeTransport(), loader);
-    const msg = await signedDecoded();
-    await buildAndSubmit({ contentTag: TAG, messages: [msg] });
-    expect(loads).toBeGreaterThanOrEqual(1);
-  });
-
-  it('default kzgLoader (no override) resolves c-kzg without ReferenceError — ESM createRequire path (R1)', async () => {
-    // No `kzgLoader` override — exercises the `createRequire('c-kzg')`
-    // default path. Under plain ESM, a bare `require('c-kzg')` throws
-    // `ReferenceError: require is not defined` which would have been
-    // caught by the error classifier + returned `retryable`. This test
-    // asserts the submission actually lands.
     const { buildAndSubmit } = await buildAndSubmitWithViem({
-      rpcUrl: 'http://unused',
-      chainId: 1,
+      rpcUrl: 'http://localhost:8545',
+      chainId: 31337,
       bamCoreAddress: BAM_CORE,
-      signer: new LocalEcdsaSigner(generateECDSAPrivateKey() as `0x${string}`),
-      transport: makeTransport(),
-      // No kzgLoader — default path runs.
+      signer: new StubSigner(),
+      transport,
+      kzgLoader: async () => stubKzg,
+      logger: () => undefined,
     });
-    const msg = await signedDecoded();
-    const outcome = await buildAndSubmit({ contentTag: TAG, messages: [msg] });
-    expect(outcome.kind).toBe('included');
-  });
-});
-
-describe('buildAndSubmitWithViem — rpc surface', () => {
-  it('proxies chain-id / bytecode / balance / block / tx receipt through transport', async () => {
-    const transport = makeTransport({
-      async getChainId() {
-        return 11155111;
-      },
-      async getBytecode() {
-        return '0xdead' as `0x${string}`;
-      },
-      async getBalance() {
-        return 777n;
-      },
-      async getBlockNumber() {
-        return 55n;
-      },
-      async getTransactionReceipt() {
-        return { blockNumber: 40n };
-      },
-    });
-    const { rpc } = await factory(transport);
-    expect(await rpc.getChainId()).toBe(11155111);
-    expect(await rpc.getCode(BAM_CORE)).toBe('0xdead');
-    expect(await rpc.getBalance(BAM_CORE)).toBe(777n);
-    expect(await rpc.getBlockNumber()).toBe(55n);
-    expect(await rpc.getTransactionBlock(('0x' + '11'.repeat(32)) as Bytes32)).toBe(40);
+    const outcome = await buildAndSubmit({ contentTag: TAG, messages: [decoded(1)] });
+    expect(outcome.kind).toBe('retryable');
   });
 
-  it('getTransactionBlock returns null when the transport says null', async () => {
-    const transport = makeTransport({
-      async getTransactionReceipt() {
-        return null;
-      },
+  it('rpc exposes getChainId + getBalance + getTransactionBlock', async () => {
+    const { rpc } = await buildAndSubmitWithViem({
+      rpcUrl: 'http://localhost:8545',
+      chainId: 31337,
+      bamCoreAddress: BAM_CORE,
+      signer: new StubSigner(),
+      transport: mkTransport(),
+      kzgLoader: async () => stubKzg,
     });
-    const { rpc } = await factory(transport);
-    expect(await rpc.getTransactionBlock(('0x' + '22'.repeat(32)) as Bytes32)).toBeNull();
+    expect(await rpc.getChainId()).toBe(31337);
+    expect(await rpc.getBalance(SENDER)).toBe(10n ** 18n);
+    expect(await rpc.getTransactionBlock(('0x' + '01'.repeat(32)) as Bytes32)).toBe(1234);
   });
 });

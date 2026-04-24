@@ -4,10 +4,9 @@ import { clampReorgWindow } from '../submission/reorg-watcher.js';
 import { canonicalTag } from '../util/canonical.js';
 
 /**
- * CLI-level env parsing (plan §Rollout → Configuration). Centralizes
- * the translation from process.env to a shape the factory accepts.
- * Throws a stable error on missing required values — the CLI surfaces
- * this as a fixed exit code.
+ * CLI-level env parsing. Centralizes the translation from process.env
+ * to a shape the factory accepts. Throws a stable error on missing
+ * required values — the CLI surfaces this as a fixed exit code.
  */
 export class EnvConfigError extends Error {
   readonly code = 'env_config_error';
@@ -26,7 +25,7 @@ export interface ParsedEnv {
   postgresUrl?: string;
   decoderAddress?: Address;
   signatureRegistryAddress?: Address;
-  /** FU-12: optional bearer-token auth for the HTTP surface. */
+  /** Optional bearer-token auth for the HTTP surface. */
   authToken?: string;
 }
 

@@ -1,157 +1,208 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import type { Address, Bytes32 } from 'bam-sdk';
 
-import { MemoryPosterStore } from '../src/pool/memory-store.js';
-import { LocalEcdsaSigner } from '../src/signer/local.js';
-import { readHealth } from '../src/surfaces/health.js';
 import { listPending } from '../src/surfaces/pending.js';
-import { readStatus } from '../src/surfaces/status.js';
 import { listSubmittedBatches } from '../src/surfaces/submitted.js';
-import type { MessageSnapshot, Status } from '../src/types.js';
+import { readStatus } from '../src/surfaces/status.js';
+import { readHealth } from '../src/surfaces/health.js';
+import { MemoryPosterStore } from '../src/pool/memory-store.js';
+import type {
+  MessageSnapshot,
+  Signer,
+  StoreTxnPendingRow,
+  StoreTxnSubmittedRow,
+} from '../src/types.js';
+import type { StatusRpcReader } from '../src/surfaces/status.js';
 
 const TAG_A = ('0x' + 'aa'.repeat(32)) as Bytes32;
 const TAG_B = ('0x' + 'bb'.repeat(32)) as Bytes32;
-const AUTHOR = '0x1111111111111111111111111111111111111111' as Address;
+const SENDER = ('0x' + '11'.repeat(20)) as Address;
+const WALLET = ('0x' + '99'.repeat(20)) as Address;
 
-describe('surfaces — disjointness (plan §C-9)', () => {
-  it('status and health expose disjoint field sets', async () => {
+function pendingRow(overrides: Partial<StoreTxnPendingRow> = {}): StoreTxnPendingRow {
+  const contents = new Uint8Array(40);
+  contents.fill(0xaa, 0, 32);
+  return {
+    contentTag: TAG_A,
+    sender: SENDER,
+    nonce: 1n,
+    contents,
+    signature: new Uint8Array(65),
+    messageHash: ('0x' + '77'.repeat(32)) as Bytes32,
+    ingestedAt: 1_000,
+    ingestSeq: 1,
+    ...overrides,
+  };
+}
+
+function msgSnapshot(nonce: number): MessageSnapshot {
+  const contents = new Uint8Array(40);
+  contents.fill(0xaa, 0, 32);
+  return {
+    sender: SENDER,
+    nonce: BigInt(nonce),
+    contents,
+    signature: new Uint8Array(65),
+    messageHash: (('0x' + nonce.toString(16).padStart(64, '0')) as Bytes32),
+    messageId: (('0x' + (nonce + 1000).toString(16).padStart(64, '0')) as Bytes32),
+    originalIngestSeq: nonce,
+  };
+}
+
+function submittedRow(overrides: Partial<StoreTxnSubmittedRow> = {}): StoreTxnSubmittedRow {
+  return {
+    txHash: ('0x' + '01'.repeat(32)) as Bytes32,
+    contentTag: TAG_A,
+    blobVersionedHash: ('0x' + '02'.repeat(32)) as Bytes32,
+    batchContentHash: ('0x' + '03'.repeat(32)) as Bytes32,
+    blockNumber: 100,
+    status: 'included',
+    replacedByTxHash: null,
+    submittedAt: 2_000,
+    invalidatedAt: null,
+    messages: [msgSnapshot(1)],
+    ...overrides,
+  };
+}
+
+class StubSigner implements Signer {
+  account() {
+    return { address: WALLET, type: 'json-rpc' as const };
+  }
+}
+
+describe('listPending', () => {
+  it('returns BAMMessage-shaped rows with messageHash (no v1 content/timestamp)', async () => {
     const store = new MemoryPosterStore();
-    const signer = new LocalEcdsaSigner(('0x' + 'ab'.repeat(32)) as `0x${string}`);
-    const status = await readStatus({
-      store,
-      rpc: { async getBalance() { return 123n; } },
-      signer,
-      configuredTags: [TAG_A, TAG_B],
-    });
-    const health = readHealth({ submissionState: 'degraded', reason: 'RPC slow' });
-
-    const statusKeys = new Set(Object.keys(status));
-    const healthKeys = new Set(Object.keys(health));
-    for (const k of statusKeys) expect(healthKeys.has(k)).toBe(false);
-    for (const k of healthKeys) expect(statusKeys.has(k)).toBe(false);
+    await store.withTxn(async (txn) => txn.insertPending(pendingRow()));
+    const rows = await listPending(store, {});
+    expect(rows.length).toBe(1);
+    expect(Object.keys(rows[0]).sort()).toEqual(
+      ['contentTag', 'contents', 'ingestedAt', 'ingestSeq', 'messageHash', 'nonce', 'sender', 'signature'].sort()
+    );
+    expect(rows[0].messageHash).toBe('0x' + '77'.repeat(32));
   });
 
-  it('status exposes balances + tags + counts + last-submitted (quantitative)', async () => {
-    const store = new MemoryPosterStore();
-    const signer = new LocalEcdsaSigner(('0x' + 'ab'.repeat(32)) as `0x${string}`);
-    const status = await readStatus({
-      store,
-      rpc: { async getBalance() { return 10n ** 18n; } },
-      signer,
-      configuredTags: [TAG_A, TAG_B],
-    });
-    expect(status.walletAddress).toMatch(/^0x/);
-    expect(status.walletBalanceWei).toBe(10n ** 18n);
-    expect(status.configuredTags).toEqual([TAG_A, TAG_B]);
-    expect(status.pendingByTag.length).toBe(2);
-    // No last-submitted yet.
-    expect(status.lastSubmittedByTag).toEqual([]);
-  });
-
-  it('health reports state/reason/since only (qualitative)', () => {
-    const now = new Date(1_700_000_000_000);
-    const health = readHealth({
-      submissionState: 'degraded',
-      reason: 'wallet balance low',
-      since: now,
-    });
-    expect(health.state).toBe('degraded');
-    expect(health.reason).toBe('wallet balance low');
-    expect(health.since).toBe(now);
-    expect((health as unknown as Status).walletBalanceWei).toBeUndefined();
-  });
-
-  it('ok health omits reason + since', () => {
-    expect(readHealth({ submissionState: 'ok' })).toEqual({ state: 'ok' });
-  });
-});
-
-describe('surfaces — listPending', () => {
   it('filters by contentTag', async () => {
     const store = new MemoryPosterStore();
     await store.withTxn(async (txn) => {
-      for (const [i, tag] of [[1, TAG_A], [2, TAG_B], [3, TAG_A]] as const) {
-        await txn.insertPending({
-          messageId: (`0x${i.toString(16).padStart(64, '0')}`) as Bytes32,
-          contentTag: tag,
-          author: AUTHOR,
-          nonce: BigInt(i),
-          timestamp: 1_700_000_000 + i,
-          content: new TextEncoder().encode(`msg-${i}`),
-          signature: new Uint8Array(65),
-          ingestedAt: 1_700_000_000_000 + i,
-          ingestSeq: await txn.nextIngestSeq(tag),
-        });
-      }
+      txn.insertPending(pendingRow({ nonce: 1n, ingestSeq: 1 }));
+      txn.insertPending(pendingRow({ nonce: 2n, ingestSeq: 2, contentTag: TAG_B }));
     });
     const a = await listPending(store, { contentTag: TAG_A });
-    expect(a).toHaveLength(2);
-    expect(a.every((m) => m.contentTag === TAG_A)).toBe(true);
+    expect(a.length).toBe(1);
     const b = await listPending(store, { contentTag: TAG_B });
-    expect(b).toHaveLength(1);
-    const all = await listPending(store, {});
-    expect(all).toHaveLength(3);
-  });
-
-  it('respects limit + since cursor', async () => {
-    const store = new MemoryPosterStore();
-    await store.withTxn(async (txn) => {
-      for (let i = 1; i <= 5; i++) {
-        await txn.insertPending({
-          messageId: (`0x${i.toString(16).padStart(64, '0')}`) as Bytes32,
-          contentTag: TAG_A,
-          author: AUTHOR,
-          nonce: BigInt(i),
-          timestamp: 1_700_000_000 + i,
-          content: new TextEncoder().encode(`msg-${i}`),
-          signature: new Uint8Array(65),
-          ingestedAt: 1_700_000_000_000 + i,
-          ingestSeq: i,
-        });
-      }
-    });
-    const limited = await listPending(store, { contentTag: TAG_A, limit: 2 });
-    expect(limited.map((m) => m.ingestSeq)).toEqual([1, 2]);
-    const after = await listPending(store, {
-      contentTag: TAG_A,
-      since: { ingestSeq: 2, contentTag: TAG_A },
-    });
-    expect(after.map((m) => m.ingestSeq)).toEqual([3, 4, 5]);
+    expect(b.length).toBe(1);
   });
 });
 
-describe('surfaces — listSubmittedBatches', () => {
-  it('returns reorg status + replacedByTxHash where applicable', async () => {
+describe('listSubmittedBatches', () => {
+  it('status "included" → messageId is populated, invalidatedAt null', async () => {
     const store = new MemoryPosterStore();
-    const messageIds = [('0x' + '11'.repeat(32)) as Bytes32];
-    const messages: MessageSnapshot[] = [];
+    await store.withTxn(async (txn) => txn.insertSubmitted(submittedRow()));
+    const rows = await listSubmittedBatches(store, {});
+    expect(rows.length).toBe(1);
+    expect(rows[0].status).toBe('included');
+    expect(rows[0].invalidatedAt).toBeNull();
+    expect(rows[0].messages[0].messageId).not.toBeNull();
+  });
+
+  it('status "reorged" → messageId is surfaced as null on every message', async () => {
+    const store = new MemoryPosterStore();
+    await store.withTxn(async (txn) =>
+      txn.insertSubmitted(
+        submittedRow({ status: 'reorged', invalidatedAt: 3_000 })
+      )
+    );
+    const rows = await listSubmittedBatches(store, {});
+    expect(rows[0].status).toBe('reorged');
+    expect(rows[0].invalidatedAt).toBe(3_000);
+    for (const m of rows[0].messages) expect(m.messageId).toBeNull();
+  });
+
+  it('returns batchContentHash on every entry', async () => {
+    const store = new MemoryPosterStore();
+    await store.withTxn(async (txn) => txn.insertSubmitted(submittedRow()));
+    const rows = await listSubmittedBatches(store, {});
+    expect(rows[0].batchContentHash).toBe('0x' + '03'.repeat(32));
+  });
+
+  it('filters by sinceBlock', async () => {
+    const store = new MemoryPosterStore();
     await store.withTxn(async (txn) => {
-      await txn.insertSubmitted({
-        txHash: ('0x' + 'aa'.repeat(32)) as Bytes32,
-        contentTag: TAG_A,
-        blobVersionedHash: ('0x' + '00'.repeat(32)) as Bytes32,
-        blockNumber: 100,
-        status: 'reorged',
-        replacedByTxHash: ('0x' + 'bb'.repeat(32)) as Bytes32,
-        submittedAt: 1_700_000_000_000,
-        messageIds,
-        messages,
-      });
-      await txn.insertSubmitted({
-        txHash: ('0x' + 'bb'.repeat(32)) as Bytes32,
-        contentTag: TAG_A,
-        blobVersionedHash: ('0x' + '00'.repeat(32)) as Bytes32,
-        blockNumber: 120,
-        status: 'included',
-        replacedByTxHash: null,
-        submittedAt: 1_700_000_000_001,
-        messageIds,
-        messages,
-      });
+      txn.insertSubmitted(
+        submittedRow({ txHash: ('0x' + '01'.repeat(32)) as Bytes32, blockNumber: 10 })
+      );
+      txn.insertSubmitted(
+        submittedRow({ txHash: ('0x' + '02'.repeat(32)) as Bytes32, blockNumber: 20 })
+      );
     });
-    const batches = await listSubmittedBatches(store, { contentTag: TAG_A });
-    expect(batches).toHaveLength(2);
-    const reorged = batches.find((b) => b.status === 'reorged');
-    expect(reorged?.replacedByTxHash).toBe(('0x' + 'bb'.repeat(32)) as Bytes32);
+    const rows = await listSubmittedBatches(store, { sinceBlock: 15n });
+    expect(rows.length).toBe(1);
+    expect(rows[0].blockNumber).toBe(20);
+  });
+});
+
+describe('readStatus', () => {
+  it('returns wallet address + balance + per-tag pending counts', async () => {
+    const store = new MemoryPosterStore();
+    await store.withTxn(async (txn) => {
+      txn.insertPending(pendingRow({ nonce: 1n, ingestSeq: 1 }));
+      txn.insertPending(pendingRow({ nonce: 2n, ingestSeq: 2 }));
+    });
+    const rpc: StatusRpcReader = {
+      async getBalance() {
+        return 10n ** 18n;
+      },
+    };
+    const s = await readStatus({
+      store,
+      rpc,
+      signer: new StubSigner(),
+      configuredTags: [TAG_A, TAG_B],
+    });
+    expect(s.walletAddress).toBe(WALLET);
+    expect(s.walletBalanceWei).toBe(10n ** 18n);
+    expect(s.pendingByTag.find((p) => p.contentTag === TAG_A)?.count).toBe(2);
+    expect(s.pendingByTag.find((p) => p.contentTag === TAG_B)?.count).toBe(0);
+  });
+
+  it('surfaces lastSubmittedByTag', async () => {
+    const store = new MemoryPosterStore();
+    await store.withTxn(async (txn) => txn.insertSubmitted(submittedRow()));
+    const rpc: StatusRpcReader = {
+      async getBalance() {
+        return 0n;
+      },
+    };
+    const s = await readStatus({
+      store,
+      rpc,
+      signer: new StubSigner(),
+      configuredTags: [TAG_A],
+    });
+    expect(s.lastSubmittedByTag.length).toBe(1);
+    expect(s.lastSubmittedByTag[0].txHash).toBe('0x' + '01'.repeat(32));
+  });
+});
+
+describe('readHealth', () => {
+  it('ok state returns { state: "ok" } only (no reason/since leak)', () => {
+    const h = readHealth({ submissionState: 'ok' });
+    expect(h.state).toBe('ok');
+    expect('reason' in h).toBe(false);
+    expect('since' in h).toBe(false);
+  });
+
+  it('degraded returns state + reason', () => {
+    const since = new Date(5_000);
+    const h = readHealth({ submissionState: 'degraded', reason: 'rpc_down', since });
+    expect(h).toEqual({ state: 'degraded', reason: 'rpc_down', since });
+  });
+
+  it('unhealthy returns state + reason', () => {
+    const h = readHealth({ submissionState: 'unhealthy', reason: 'abi_mismatch' });
+    expect(h.state).toBe('unhealthy');
+    expect(h.reason).toBe('abi_mismatch');
   });
 });

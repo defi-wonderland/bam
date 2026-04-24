@@ -7,30 +7,16 @@
 export type {
   Address,
   AggregatorInfo,
-  Batch,
-  BatchedMessage,
-  BatchFlags,
-  BatchHeader,
+  BAMMessage,
   BatchOptions,
   Bytes32,
   ClientOptions,
   CompressionCodec,
-  DecodeBatchOptions,
-  DecodedBatch,
   DictionaryInfo,
-  EncodedBatch,
-  EncodedMessage,
-  ExtendedSignature,
-  ExtendedSignatureHeader,
   HealthStatus,
   HexBytes,
-  Message,
-  MessageFlags,
   MessageStatus,
   MessageStatusResponse,
-  SignatureType,
-  SignedMessage,
-  SubmitResult,
 } from './types.js';
 
 export { ErrorCode, SignatureScheme } from './types.js';
@@ -106,20 +92,35 @@ export {
   UnsupportedVersionError,
 } from './errors.js';
 
-// Message functions
+// ERC-8180 message primitives + hex helpers.
 export {
   bytesToHex,
   computeMessageHash,
+  computeMessageHashForMessage,
   computeMessageId,
-  decodeMessage,
-  encodeExtendedHeader,
-  encodeMessage,
-  encodeMessageWithId,
-  getSignatureSizeForScheme,
+  encodeContents,
   hexToBytes,
-  parseExtendedHeader,
+  splitContents,
 } from './message.js';
-export type { EncodeMessageOptions } from './message.js';
+
+// ERC-8180 scheme-0x01 ECDSA (EIP-712) signing surface.
+export {
+  EIP712_DOMAIN_NAME,
+  EIP712_DOMAIN_VERSION,
+  EIP712_TYPES,
+  computeECDSADigest,
+  signECDSA,
+  signECDSAWithKey,
+  verifyECDSA,
+} from './signatures.js';
+
+// ERC-8180 batch codec.
+export {
+  decodeBatch,
+  encodeBatch,
+  estimateBatchSize,
+} from './batch.js';
+export type { EncodedBatch } from './batch.js';
 
 // Compression functions
 export {
@@ -148,16 +149,7 @@ export type { BPEDictionary } from './bpe.js';
 // Node-only compression functions (loadBundledDictionary, loadDictionaryFromFile)
 export { loadBundledDictionary, loadDictionaryFromFile } from './compression-node.js';
 
-// Batch functions
-export {
-  buildAuthorTable,
-  decodeBatch,
-  encodeBatch,
-  estimateBatchSize,
-  validateBatch,
-} from './batch.js';
-
-// Signature functions
+// Signature functions (BLS + ECDSA key utilities + registry helpers)
 export {
   aggregateBLS,
   computeEcdsaPopMessage,
@@ -173,16 +165,13 @@ export {
   isValidBLSPublicKey,
   isValidBLSSignature,
   isValidECDSASignature,
-  recoverAddress,
   serializeBLSPrivateKey,
   serializeBLSPublicKey,
   serializeBLSSignature,
   serializeECDSASignature,
   signBLS,
-  signECDSA,
   verifyAggregateBLS,
   verifyBLS,
-  verifyECDSA,
   verifyEcdsaLocal,
   verifyEcdsaAsEOA,
   wrapPersonalSign,

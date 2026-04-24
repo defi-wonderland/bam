@@ -12,11 +12,8 @@ export type Bytes32 = `0x${string}`;
 /** Variable-length hex-encoded bytes */
 export type HexBytes = `0x${string}`;
 
-/** Signature type enumeration (v1 wire format) */
-export type SignatureType = 'bls' | 'ecdsa' | 'extended';
-
 /**
- * Signature scheme identifiers for extended mode (SigType 11)
+ * Signature scheme identifiers (ERC-8180 §Signature Registry).
  */
 export enum SignatureScheme {
   /** ECDSA secp256k1 (Ethereum native) */
@@ -27,27 +24,6 @@ export enum SignatureScheme {
   STARK = 0x03,
   /** Dilithium (NIST PQC standard) */
   Dilithium = 0x04,
-}
-
-/**
- * Extended signature header (when SigType = 11)
- * Enables future signature schemes without protocol changes
- */
-export interface ExtendedSignatureHeader {
-  /** Signature scheme identifier (1 byte) */
-  scheme: SignatureScheme;
-  /** Scheme version for forward compatibility (1 byte) */
-  schemeVersion: number;
-}
-
-/**
- * Extended signature data (SigType 11)
- */
-export interface ExtendedSignature {
-  /** Extended header */
-  header: ExtendedSignatureHeader;
-  /** Signature bytes (format depends on scheme) */
-  signature: Uint8Array;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -151,177 +127,23 @@ export type MessageStatus =
   | 'failed'
   | 'expired';
 
-/**
- * Individual message (standalone format)
- * Used for direct submission, archival storage, and debugging
- */
-export interface Message {
-  /** Message author's Ethereum address */
-  author: Address;
-  /** Unix epoch timestamp in seconds */
-  timestamp: number;
-  /** Per-author sequential counter (0-65535) */
-  nonce: number;
-  /** UTF-8 message content (max 280 characters) */
-  content: string;
-  /** Signature bytes (48 for BLS, 65 for ECDSA) */
-  signature?: Uint8Array;
-  /** Signature algorithm type */
-  signatureType?: SignatureType;
-  /** Optional reply-to message ID */
-  replyTo?: Bytes32;
-}
-
-/**
- * Signed message ready for submission
- */
-export interface SignedMessage extends Message {
-  signature: Uint8Array;
-  signatureType: SignatureType;
-  /** Extended header for SigType 11 (extended mode) */
-  extendedHeader?: ExtendedSignatureHeader;
-}
-
-/**
- * Batched message (within batch context)
- * References batch header for shared data
- */
-export interface BatchedMessage {
-  /** Index into batch author table (0-255) */
-  authorIndex: number;
-  /** Seconds offset from batch base timestamp (0-65535) */
-  timestampDelta: number;
-  /** Per-author sequential counter (0-65535) */
-  nonce: number;
-  /** UTF-8 message content */
-  content: string;
-  /** BLS public key registry index (0-16777215) */
-  pkRegistryIndex?: number;
-  /** Optional reply-to message ID */
-  replyTo?: Bytes32;
-}
-
-/**
- * Batch header containing shared metadata
- */
-export interface BatchHeader {
-  /** Protocol version string (e.g., "0.1") */
-  version: string;
-  /** Compression dictionary reference (32 bytes) */
-  dictionaryRef: Bytes32;
-  /** Base timestamp for delta encoding */
-  baseTimestamp: number;
-  /** Author address lookup table */
-  authors: Address[];
-  /** BLS aggregate signature (48 bytes) */
-  aggregateSignature: Uint8Array;
-}
-
-/**
- * Complete batch structure
- */
-export interface Batch {
-  /** Batch header with metadata */
-  header: BatchHeader;
-  /** Array of batched messages */
-  messages: BatchedMessage[];
-}
-
-/** Compression codec type */
+/** Compression codec type. */
 export type CompressionCodec = 'none' | 'bpe' | 'zstd';
 
 /**
- * Batch encoding options
+ * Batch encoding options (dictionary + compression tuning). `encodeBatch`
+ * currently consumes `codec` only; `dictionary` / `compressionLevel`
+ * remain on the surface for future ZSTD wire-up but are unused.
  */
 export interface BatchOptions {
-  /** Compression codec to use (default 'none') */
+  /** Compression codec to use (default 'none'). */
   codec?: CompressionCodec;
-  /** Compression dictionary bytes (Zstd raw dict for 'zstd', serialized BPE dict for 'bpe') */
+  /** Compression dictionary bytes (Zstd raw dict for 'zstd', serialized BPE dict for 'bpe'). */
   dictionary?: Uint8Array;
-  /** Compression level (1-22, default 12) — only used with 'zstd' codec */
+  /** Compression level (1-22, default 12) — only used with 'zstd' codec. */
   compressionLevel?: number;
-  /** @deprecated Use codec instead. Whether to compress (default true) */
+  /** @deprecated Use codec instead. */
   compress?: boolean;
-}
-
-/**
- * Message flags byte structure
- */
-export interface MessageFlags {
-  /** Signature type (0=none, 1=ECDSA, 2=BLS, 3=extended) */
-  signatureType: 0 | 1 | 2 | 3;
-  /** Content is compressed */
-  compressed: boolean;
-  /** Contains reply reference */
-  hasReply: boolean;
-}
-
-/**
- * Batch flags byte structure
- */
-export interface BatchFlags {
-  /** Signature aggregation type (0=none, 1=ECDSA, 2=BLS, 3=extended) */
-  signatureType: 0 | 1 | 2 | 3;
-  /** Compression enabled */
-  compressed: boolean;
-  /** Messages include PK registry indices */
-  hasPkRegistryIndices: boolean;
-}
-
-/**
- * Decoded batch result
- */
-export interface DecodedBatch {
-  /** Batch header */
-  header: BatchHeader;
-  /** Decoded messages with resolved authors */
-  messages: Message[];
-  /** Original compressed size */
-  compressedSize: number;
-  /** Decompressed size */
-  decompressedSize: number;
-  /** Byte offset where batch starts in the blob (0 if at start) */
-  batchStartOffset?: number;
-}
-
-/**
- * Options for decoding a batch
- */
-export interface DecodeBatchOptions {
-  /** Byte offset where the batch starts in the blob (default: 0) */
-  batchStartOffset?: number;
-}
-
-/**
- * Message encoding result
- */
-export interface EncodedMessage {
-  /** Encoded binary data */
-  data: Uint8Array;
-  /** Computed message ID */
-  messageId: Bytes32;
-  /** Total byte size */
-  size: number;
-}
-
-/**
- * Batch encoding result
- */
-export interface EncodedBatch {
-  /** Encoded binary data */
-  data: Uint8Array;
-  /** Header size in bytes */
-  headerSize: number;
-  /** Compressed data size */
-  compressedSize: number;
-  /** Total size in bytes */
-  totalSize: number;
-  /** Number of messages */
-  messageCount: number;
-  /** Number of unique authors */
-  authorCount: number;
-  /** Compression ratio achieved */
-  compressionRatio: number;
 }
 
 /**
@@ -391,18 +213,6 @@ export interface DictionaryInfo {
 }
 
 /**
- * Message submission result
- */
-export interface SubmitResult {
-  /** Assigned message ID */
-  messageId: Bytes32;
-  /** Current status */
-  status: MessageStatus;
-  /** Estimated inclusion time (seconds) */
-  estimatedInclusionTime?: number;
-}
-
-/**
  * Message status response
  */
 export interface MessageStatusResponse {
@@ -441,4 +251,5 @@ export enum ErrorCode {
   UNSUPPORTED_SCHEME_VERSION = 'E013',
   TOO_MANY_AUTHORS = 'E014',
   AUTHOR_NOT_FOUND = 'E015',
+  CONTENTS_TOO_SHORT = 'E016',
 }

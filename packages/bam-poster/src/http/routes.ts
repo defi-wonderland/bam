@@ -26,16 +26,16 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
 }
 
 /**
- * FU-4: read the request body up to `cap` bytes, and short-circuit
- * with a 413 + socket destroy as soon as the cap is exceeded. We
- * don't wait for `end` — an attacker streaming gigabytes would
- * otherwise tie up the socket even though we already know we'll
- * reject. Returns `'too_large'` (after responding + destroying) or
- * the full buffer once the client's body has completed.
+ * Read the request body up to `cap` bytes, and short-circuit with a
+ * 413 + socket destroy as soon as the cap is exceeded. We don't wait
+ * for `end` — an attacker streaming gigabytes would otherwise tie up
+ * the socket even though we already know we'll reject. Returns
+ * `'too_large'` (after responding + destroying) or the full buffer
+ * once the client's body has completed.
  *
- * Qodo review: also listens for `aborted` + `close` so a client
- * disconnect mid-upload resolves the promise immediately rather
- * than leaving the handler hanging (slowloris-ish concern).
+ * Also listens for `aborted` + `close` so a client disconnect
+ * mid-upload resolves the promise immediately rather than leaving the
+ * handler hanging (slowloris-ish concern).
  */
 async function readBodyBounded(
   req: IncomingMessage,
@@ -127,7 +127,7 @@ export const submitHandler: Handler = async (req, res, ctx) => {
     hintTag ? { contentTag: hintTag as `0x${string}` } : undefined
   );
   if (result.accepted) {
-    return sendJson(res, 201, { accepted: true, messageId: result.messageId });
+    return sendJson(res, 201, { accepted: true, messageHash: result.messageHash });
   }
   return sendJson(res, rejectionToStatus(result.reason), {
     accepted: false,

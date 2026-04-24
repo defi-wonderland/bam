@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createPublicClient, http } from 'viem';
 import { sepolia } from 'viem/chains';
 import { fetchBlobForTx, extractUsableBytes, decodeBlobBatch } from '@/lib/blob-fetch';
+import { decodeSocialContents } from '@/lib/contents-codec';
 
 export async function GET(
   _request: NextRequest,
@@ -47,12 +48,24 @@ export async function GET(
     const usableBytes = extractUsableBytes(blobData);
     const decoded = decodeBlobBatch(usableBytes);
 
-    const messages = decoded.messages.map((m) => ({
-      author: m.author,
-      content: m.content,
-      timestamp: m.timestamp,
-      nonce: m.nonce,
-    }));
+    const messages = decoded.messages.map((m) => {
+      try {
+        const { app } = decodeSocialContents(m.contents);
+        return {
+          sender: m.sender,
+          nonce: m.nonce.toString(),
+          timestamp: app.timestamp,
+          content: app.content,
+        };
+      } catch {
+        return {
+          sender: m.sender,
+          nonce: m.nonce.toString(),
+          timestamp: null,
+          content: null,
+        };
+      }
+    });
 
     return NextResponse.json({
       txHash,

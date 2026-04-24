@@ -19,7 +19,10 @@ import type {
 } from './types.js';
 import { IngestPipeline } from './ingest/pipeline.js';
 import { DEFAULT_RATE_LIMIT, RateLimiter } from './ingest/rate-limit.js';
-import { DEFAULT_MAX_MESSAGE_SIZE_BYTES } from './ingest/size-bound.js';
+import {
+  DEFAULT_MAX_CONTENTS_SIZE_BYTES,
+  DEFAULT_MAX_MESSAGE_SIZE_BYTES,
+} from './ingest/size-bound.js';
 import { createMemoryStore } from './pool/memory-store.js';
 import { defaultBatchPolicy, DEFAULT_BLOB_CAPACITY_BYTES } from './policy/default.js';
 import { SubmissionLoop } from './submission/loop.js';
@@ -33,6 +36,7 @@ import {
 import { WorkerTimer } from './submission/scheduler.js';
 import { defaultEcdsaValidator } from './validator/default-ecdsa.js';
 import {
+  reconcileSchemaVersion,
   reconcileStartup,
   type ReconcileRpcClient,
 } from './startup/reconcile.js';
@@ -43,10 +47,9 @@ import { readHealth } from './surfaces/health.js';
 import { canonicalTag } from './util/canonical.js';
 
 /**
- * Process-local registry: C-10 shared-signer hazard.
- * `createPoster` rejects two instances with the same signer address
- * in the same process. Cross-process coordination is a non-goal
- * (operational README note).
+ * Process-local registry. `createPoster` rejects two instances with
+ * the same signer address in the same process. Cross-process
+ * coordination is a non-goal.
  */
 const signerRegistry = new Set<Address>();
 
@@ -95,9 +98,9 @@ const defaultLogger: PosterLogger = (level, message) => {
 };
 
 /**
- * Constructs a Poster wired with every piece built in Phases 2–6.
- * Startup reconciliation (chain-ID + contract code) runs *before*
- * any submission loop is created; a mismatch throws synchronously.
+ * Constructs a Poster wired with every piece it needs. Startup
+ * reconciliation (chain-ID + contract code) runs *before* any
+ * submission loop is created; a mismatch throws synchronously.
  *
  * `start()` spawns autonomous per-tag submission workers + a
  * reorg-watcher worker; `stop()` cancels them and drains in-flight
@@ -107,7 +110,6 @@ export async function createPoster(
   config: PosterConfig,
   extras: PosterFactoryExtras
 ): Promise<Poster> {
-  // Shared-signer guard (C-10).
   const address = config.signer.account().address;
   if (signerRegistry.has(address)) {
     throw new Error(
@@ -116,10 +118,10 @@ export async function createPoster(
   }
   signerRegistry.add(address);
 
-  // FU-5: clean the registry entry on ANY mid-construction throw,
-  // not just reconcileStartup's. Any later step can also fail and a
-  // leaked entry would spuriously reject the next createPoster with
-  // this signer.
+  // Clean the registry entry on ANY mid-construction throw, not just
+  // reconcileStartup's. Any later step can also fail and a leaked
+  // entry would spuriously reject the next createPoster with this
+  // signer.
   try {
     await reconcileStartup(extras.rpc, {
       chainId: config.chainId,
@@ -127,9 +129,11 @@ export async function createPoster(
     });
 
     const store: PosterStore = config.store ?? createMemoryStore();
-    const validator: MessageValidator = config.validator ?? defaultEcdsaValidator();
+    await reconcileSchemaVersion(store);
+    const validator: MessageValidator = config.validator ?? defaultEcdsaValidator(config.chainId);
     const batchPolicy: BatchPolicy = config.batchPolicy ?? defaultBatchPolicy();
     const maxMessageSize = config.maxMessageSizeBytes ?? DEFAULT_MAX_MESSAGE_SIZE_BYTES;
+    const maxContentsSize = config.maxContentsSizeBytes ?? DEFAULT_MAX_CONTENTS_SIZE_BYTES;
     const blobCapacity = config.blobCapacityBytes ?? DEFAULT_BLOB_CAPACITY_BYTES;
     const reorgWindow = clampReorgWindow(config.reorgWindowBlocks ?? 32);
     const now = config.now ?? (() => new Date());
@@ -154,6 +158,7 @@ export async function createPoster(
       rateLimiter,
       allowlistedTags,
       maxMessageSizeBytes: maxMessageSize,
+      maxContentsSizeBytes: maxContentsSize,
       now,
     });
 

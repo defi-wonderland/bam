@@ -28,7 +28,7 @@ export interface Harness {
 }
 
 /**
- * E2E harness (plan §Demo e2e / T027):
+ * Demo e2e harness:
  *   - In-process Poster with the memory store + `forceFlush` batch
  *     policy so tests can deterministically trigger a submission.
  *   - Mocked `buildAndSubmit` that pretends to land on L1 and

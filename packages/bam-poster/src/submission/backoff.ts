@@ -1,7 +1,7 @@
 import type { BackoffConfig, HealthState } from '../types.js';
 
 /**
- * Default bounded-exponential-backoff parameters (plan §C-6).
+ * Default bounded-exponential-backoff parameters.
  *
  * - Start at 500 ms, double each attempt, cap at 60 s.
  * - After 5 consecutive failures, health flips `ok` → `degraded`.

@@ -1,9 +1,4 @@
-import {
-  computeMessageId,
-  type Address,
-  type Bytes32,
-  type Message,
-} from 'bam-sdk';
+import { computeMessageHash, type Address, type Bytes32 } from 'bam-sdk';
 
 import type {
   DecodedMessage,
@@ -15,12 +10,8 @@ import type {
 import { checkMonotonicity } from './monotonicity.js';
 import { parseEnvelope } from './envelope.js';
 import { RateLimiter } from './rate-limit.js';
-import { checkSignedTag } from './signed-tag.js';
+import { checkContentTag } from './signed-tag.js';
 import { checkSizeBound } from './size-bound.js';
-
-// Hoisted so the per-accept pending-insert doesn't allocate a fresh
-// TextEncoder on every successful ingest.
-const TEXT_ENCODER = new TextEncoder();
 
 export interface IngestPipelineOptions {
   store: PosterStore;
@@ -28,34 +19,34 @@ export interface IngestPipelineOptions {
   rateLimiter: RateLimiter;
   allowlistedTags: readonly Bytes32[];
   maxMessageSizeBytes: number;
+  maxContentsSizeBytes: number;
   now: () => Date;
 }
 
 /**
  * Recovery failures (malformed signatures, oversized nonces, etc.) all
- * land in this sentinel bucket so rotating `author` across bad inputs
+ * land in this sentinel bucket so rotating `sender` across bad inputs
  * can't multiply the attacker's effective budget — every un-recoverable
  * envelope competes for the same slots.
  */
 const RECOVER_FAILED_KEY = '0x0000000000000000000000000000000000000000' as Address;
 
 /**
- * Enforces the exact ingest order (plan §C-1):
+ * Enforces the exact ingest order:
  *
- *     size → signed-tag → recover → rate-limit → monotonicity → validator → insert
+ *     size → content-tag → recover → rate-limit → monotonicity → validator → insert
  *
  * The full sequence runs under a single `PosterStore.withTxn` so
- * concurrent ingests of the same `(author, nonce)` race cleanly:
- * exactly one wins (plan §C-3). Rate-limit state is separate — it
- * doesn't need to roll back on a later-stage reject.
+ * concurrent ingests of the same `(sender, nonce)` race cleanly:
+ * exactly one wins. Rate-limit state is separate — it doesn't need to
+ * roll back on a later-stage reject.
  *
- * The rate-limit key is the **recovered** signer (via
- * `validator.recoverSigner`), not the claimed `author` from the
- * envelope: otherwise a spammer can cycle the `author` field to land
- * in fresh buckets and force the validator to run on every request
- * (cubic review). `verifyECDSA` only runs after monotonicity, same as
- * before — the recover step is cheap enough that doing it up-front
- * closes the amplification without giving up the CPU-grief ordering.
+ * `contentTag` authority is enforced up-front: `contents[0..32]` is
+ * checked against the envelope-level tag hint and against the operator's
+ * allowlist (see `checkContentTag`) before any crypto runs. The pre-batch
+ * identifier is the ERC-8180 `messageHash` (a pure function of
+ * `(sender, nonce, contents)`), surfaced on the accepted response and
+ * used as the monotonicity dedup token.
  */
 export class IngestPipeline {
   constructor(private readonly opts: IngestPipelineOptions) {}
@@ -65,66 +56,67 @@ export class IngestPipeline {
     const size = checkSizeBound(raw, this.opts.maxMessageSizeBytes);
     if (!size.ok) return { accepted: false, reason: size.reason };
 
-    // Parse the envelope. `malformed` covers framing problems; this is
-    // a decode step, not a validator step.
+    // Parse the envelope. `malformed` covers framing + shape problems.
     const parsed = parseEnvelope(raw);
     if (!parsed.ok) return { accepted: false, reason: parsed.result.reason };
     const { contentTag, message } = parsed.envelope;
 
-    // 2. Signed-tag authority vs hint + allowlist. Structural, cheap,
-    //    and independent of crypto — do it before the recover step so
-    //    hint/tag misuse never forces an ecrecover.
-    const tag = checkSignedTag(contentTag, hint?.contentTag, this.opts.allowlistedTags);
+    // Enforce the `contents` byte cap alongside the envelope wire cap.
+    if (message.contents.length > this.opts.maxContentsSizeBytes) {
+      return { accepted: false, reason: 'message_too_large' };
+    }
+
+    // Optional transport-level hint (e.g. an HTTP header). Must match
+    // the envelope's `contentTag` — which is itself checked against
+    // the signed prefix below.
+    if (hint?.contentTag !== undefined && hint.contentTag.toLowerCase() !== contentTag.toLowerCase()) {
+      return { accepted: false, reason: 'content_tag_mismatch' };
+    }
+
+    // 2. Content-tag authority: contentTag must equal contents[0..32]
+    //    AND must be on the operator's allowlist. Runs before any
+    //    crypto so a rogue hint never forces an ecrecover.
+    const tag = checkContentTag(contentTag, message.contents, this.opts.allowlistedTags);
     if (!tag.ok) return { accepted: false, reason: tag.reason };
 
-    // Build the canonical DecodedMessage; compute the message id now so
-    // the monotonicity check has a stable id under concurrent ingest.
-    const sdkMessage: Message = {
-      author: message.author,
-      timestamp: message.timestamp,
-      nonce: Number(message.nonce & 0xffffn),
-      content: message.content,
-    };
-    let messageId: Bytes32;
+    // Compute the ERC-8180 messageHash. Determined purely by
+    // (sender, nonce, contents); stable pre-batch identifier.
+    let messageHash: Bytes32;
     try {
-      messageId = computeMessageId(sdkMessage);
+      messageHash = computeMessageHash(message.sender, message.nonce, message.contents);
     } catch {
       return { accepted: false, reason: 'malformed' };
     }
 
     const decoded: DecodedMessage = {
-      author: message.author,
-      timestamp: message.timestamp,
+      sender: message.sender,
       nonce: message.nonce,
-      content: message.content,
+      contents: message.contents,
       contentTag,
       signature: message.signature,
-      messageId,
+      messageHash,
     };
 
     // 3. Rate-limit, keyed on the recovered signer when the validator
-    //    exposes that capability. Fallback to claimed author preserves
-    //    behavior for custom validators that don't implement signer
-    //    recovery, and the garbage-signature path routes to the
-    //    sentinel bucket so it can't be amplified by rotating author.
-    //    Slots are NOT released on reject — the spam floor is what
-    //    stops CPU-grief, and a caller that keeps resubmitting
-    //    something we reject IS spamming.
+    //    exposes that capability. Fallback to the claimed sender
+    //    preserves behavior for custom validators that don't
+    //    implement signer recovery; the garbage-signature path routes
+    //    to the sentinel bucket so it can't be amplified by rotation.
     const rateLimitKey = this.rateLimitKey(decoded);
     const rl = this.opts.rateLimiter.check(rateLimitKey);
     if (!rl.ok) return { accepted: false, reason: rl.reason };
 
     // 4-6. Monotonicity, validator, insert — all inside one txn so
-    // two concurrent ingests on `(author, nonce, content)` resolve to
-    // exactly one acceptance.
+    // two concurrent ingests on `(sender, nonce)` resolve to exactly
+    // one acceptance.
     return this.opts.store.withTxn(async (txn) => {
-      const mono = await checkMonotonicity(decoded.author, decoded.nonce, messageId, txn);
+      const mono = await checkMonotonicity(decoded.sender, decoded.nonce, messageHash, txn);
       if (mono.decision === 'reject') {
         return { accepted: false, reason: mono.reason };
       }
       if (mono.decision === 'no_op') {
-        // Byte-equal retry — acknowledge with the existing id.
-        return { accepted: true, messageId: mono.existingMessageId };
+        // Byte-equal retry — acknowledge with the existing messageHash.
+        return { accepted: true, messageHash: mono.existingMessageHash };
       }
 
       // 5. Validator runs last — after every cheap gate.
@@ -135,33 +127,28 @@ export class IngestPipeline {
 
       // 6. Atomic: record nonce tracker + insert pending row.
       await txn.setNonce({
-        author: decoded.author as Address,
+        sender: decoded.sender,
         lastNonce: decoded.nonce,
-        lastMessageId: messageId,
+        lastMessageHash: messageHash,
       });
       const seq = await txn.nextIngestSeq(contentTag);
       await txn.insertPending({
-        messageId,
         contentTag,
-        author: decoded.author,
+        sender: decoded.sender,
         nonce: decoded.nonce,
-        timestamp: decoded.timestamp,
-        content: TEXT_ENCODER.encode(decoded.content),
+        contents: decoded.contents,
         signature: decoded.signature,
+        messageHash,
         ingestedAt: this.opts.now().getTime(),
         ingestSeq: seq,
       });
-      return { accepted: true, messageId };
+      return { accepted: true, messageHash };
     });
   }
 
   private rateLimitKey(decoded: DecodedMessage): Address {
     const recoverSigner = this.opts.validator.recoverSigner;
-    if (!recoverSigner) return decoded.author;
-    // A throwing custom recoverSigner must not escape as HTTP 500 —
-    // the pipeline's contract is to return a stable PosterRejection.
-    // Treat any failure the same as a recover-mismatch: sentinel
-    // bucket, so rotation / brokenness can't multiply the budget.
+    if (!recoverSigner) return decoded.sender;
     let recovered: Address | null;
     try {
       recovered = recoverSigner.call(this.opts.validator, decoded);
@@ -169,11 +156,7 @@ export class IngestPipeline {
       return RECOVER_FAILED_KEY;
     }
     if (recovered === null) return RECOVER_FAILED_KEY;
-    // Unauthenticated envelopes (claimed !== recovered) share the
-    // sentinel bucket so rotation across either field can't multiply
-    // the attacker's budget. Recovered addresses that match the
-    // claimed author key on the authenticated identity.
-    if (recovered.toLowerCase() !== decoded.author.toLowerCase()) {
+    if (recovered.toLowerCase() !== decoded.sender.toLowerCase()) {
       return RECOVER_FAILED_KEY;
     }
     return recovered;

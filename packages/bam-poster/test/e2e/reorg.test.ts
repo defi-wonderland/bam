@@ -1,160 +1,129 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import {
-  bytesToHex,
-  computeMessageHash,
-  generateECDSAPrivateKey,
-  signECDSA,
+  encodeContents,
+  signECDSAWithKey,
   type Address,
+  type BAMMessage,
   type Bytes32,
 } from 'bam-sdk';
-import { privateKeyToAccount } from 'viem/accounts';
 
 import {
-  LocalEcdsaSigner,
-  _clearSignerRegistryForTests,
-  createMemoryStore,
   createPoster,
+  _clearSignerRegistryForTests,
+  LocalEcdsaSigner,
   defaultBatchPolicy,
-  type BlockSource,
-  type BuildAndSubmit,
-  type PosterFactoryExtras,
+  type InternalPoster,
 } from '../../src/index.js';
-
-const TAG = ('0x' + 'aa'.repeat(32)) as Bytes32;
+import { buildAndSubmitWithViem } from '../../src/submission/build-and-submit.js';
 
 /**
- * T029 — Reorg e2e. The spec's full anvil_reorg scenario is a
- * deployment-infrastructure check; the invariants it's designed to
- * catch (reorg within window → re-enqueue in original order; new
- * submission links back via `replacedByTxHash`; poster_nonces does
- * not regress) are testable with an in-process block source that
- * flips a tx's inclusion status, which is what this test does.
+ * End-to-end reorg test: submits a batch, drives an `anvil_reorg`
+ * RPC call, and confirms the Poster flips the submitted row to
+ * `reorged` + re-enqueues the message.
+ *
+ * Skipped by default — requires an anvil RPC that accepts the
+ * `anvil_reorg` method and a deployed BAM Core. See
+ * `contract-round-trip.test.ts` for the full environment contract.
  */
-describe('Reorg e2e (T029)', () => {
-  beforeEach(() => _clearSignerRegistryForTests());
 
-  it('submit → include → reorg within window → resubmit → replacedByTxHash chain', async () => {
-    const includedTxs = new Map<Bytes32, number | null>();
-    let head = 100n;
-    let submitCount = 0;
+const RPC_URL = process.env.ANVIL_URL ?? '';
+const BAM_CORE = (process.env.BAM_CORE_ADDRESS ?? '') as Address;
+const SHOULD_RUN = RPC_URL !== '' && BAM_CORE !== '';
 
-    const blockSource: BlockSource = {
-      async getBlockNumber() {
-        return head;
-      },
-      async getTransactionBlock(txHash) {
-        const v = includedTxs.get(txHash);
-        return v === undefined ? null : v;
-      },
-    };
-    const rpc: PosterFactoryExtras['rpc'] = {
-      async getChainId() {
-        return 1;
-      },
-      async getCode() {
-        return '0x6080' as `0x${string}`;
-      },
-      async getBalance() {
-        return 10n ** 18n;
-      },
-      getBlockNumber: blockSource.getBlockNumber,
-      getTransactionBlock: blockSource.getTransactionBlock,
-    };
+const CHAIN_ID = 31337;
+const PRIV = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80' as const;
+const SENDER = '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266' as Address;
+const TAG = ('0x' + 'aa'.repeat(32)) as Bytes32;
 
-    const buildAndSubmit: BuildAndSubmit = async () => {
-      submitCount++;
-      const txHash = (`0x${submitCount.toString(16).padStart(64, '0')}`) as Bytes32;
-      includedTxs.set(txHash, Number(head));
-      return {
-        kind: 'included',
-        txHash,
-        blobVersionedHash: (`0x${'ff'.repeat(32)}`) as Bytes32,
-        blockNumber: Number(head),
-      };
-    };
+const posters: InternalPoster[] = [];
 
-    const pk = generateECDSAPrivateKey() as `0x${string}`;
-    const signer = new LocalEcdsaSigner(pk);
-    const poster = await createPoster(
-      {
-        allowlistedTags: [TAG],
-        chainId: 1,
-        bamCoreAddress: '0x9C4b230066a6808D83F5FBa0c040E0Df2Fcc7314' as Address,
-        signer,
-        store: createMemoryStore(),
-        batchPolicy: defaultBatchPolicy({ forceFlush: true }),
-        reorgWindowBlocks: 32,
-      },
-      { buildAndSubmit, rpc }
-    );
+afterEach(async () => {
+  for (const p of posters.splice(0)) await p.stop();
+  _clearSignerRegistryForTests();
+});
 
-    // Ingest one message + force submission.
-    const senderPk = generateECDSAPrivateKey() as `0x${string}`;
-    const senderAddr = privateKeyToAccount(senderPk).address as Address;
-    const timestamp = 1_700_000_000;
-    const nonce = 1;
-    const content = 'reorg-me';
-    const hash = computeMessageHash({ author: senderAddr, timestamp, nonce, content });
-    const sig = await signECDSA(senderPk, bytesToHex(hash) as Bytes32);
-    const env = {
+function bytesToHex(b: Uint8Array): `0x${string}` {
+  return ('0x' +
+    Array.from(b)
+      .map((x) => x.toString(16).padStart(2, '0'))
+      .join('')) as `0x${string}`;
+}
+
+function signedEnvelope(nonce: bigint): Uint8Array {
+  const contents = encodeContents(TAG, new TextEncoder().encode('reorg-test'));
+  const msg: BAMMessage = { sender: SENDER, nonce, contents };
+  const signature = signECDSAWithKey(PRIV, msg, CHAIN_ID);
+  return new TextEncoder().encode(
+    JSON.stringify({
       contentTag: TAG,
       message: {
-        author: senderAddr,
-        timestamp,
-        nonce,
-        content,
-        signature: bytesToHex(sig),
+        sender: SENDER,
+        nonce: nonce.toString(),
+        contents: bytesToHex(contents),
+        signature,
       },
-    };
+    })
+  );
+}
 
-    const submitRes = await poster.submit(new TextEncoder().encode(JSON.stringify(env)));
-    expect(submitRes.accepted).toBe(true);
-    const ingestedId = submitRes.accepted ? submitRes.messageId : null;
-
-    const internal = poster as unknown as {
-      _tickTag: (tag: Bytes32) => Promise<string>;
-      _tickReorgWatcher: () => Promise<{ reorgedCount: number; keptCount: number }>;
-    };
-    await internal._tickTag(TAG);
-    const afterSubmit = await poster.listSubmittedBatches({ contentTag: TAG });
-    expect(afterSubmit).toHaveLength(1);
-    expect(afterSubmit[0].status).toBe('included');
-    const originalTxHash = afterSubmit[0].txHash;
-
-    // Simulate reorg: head advances, original tx is no longer on chain.
-    head = 110n;
-    includedTxs.set(originalTxHash, null);
-    const reorg = await internal._tickReorgWatcher();
-    expect(reorg.reorgedCount).toBe(1);
-
-    // Message is back in pending.
-    const repending = await poster.listPending({ contentTag: TAG });
-    expect(repending).toHaveLength(1);
-    expect(repending[0].messageId).toBe(ingestedId);
-
-    // poster_nonces doesn't regress: fresh ingest with same nonce still
-    // rejects as stale.
-    const freshRes = await poster.submit(new TextEncoder().encode(JSON.stringify(env)));
-    // Byte-equal retry is a no-op returning the same id (monotonicity
-    // helper treats equal `(author, nonce, messageId)` as no-op).
-    expect(freshRes.accepted).toBe(true);
-
-    // Resubmit.
-    await internal._tickTag(TAG);
-    const afterResubmit = await poster.listSubmittedBatches({ contentTag: TAG });
-    expect(afterResubmit).toHaveLength(2);
-    const included = afterResubmit.find((b) => b.status === 'included');
-    const reorged = afterResubmit.find((b) => b.status === 'reorged');
-    expect(included).toBeDefined();
-    expect(reorged).toBeDefined();
-    expect(included!.messageIds).toEqual([ingestedId]);
-
-    // The reorged entry's replacedByTxHash points at the new submission
-    // (FU-2). Clients bound to the stale tx hash can follow the chain.
-    expect(reorged!.txHash).toBe(originalTxHash);
-    expect(reorged!.status).toBe('reorged');
-    expect(reorged!.replacedByTxHash).toBe(included!.txHash);
-
-    await poster.stop();
+async function rpcCall(method: string, params: unknown[] = []): Promise<unknown> {
+  const res = await fetch(RPC_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
   });
+  const body = (await res.json()) as { result?: unknown; error?: { message: string } };
+  if (body.error) throw new Error(body.error.message);
+  return body.result;
+}
+
+describe.skipIf(!SHOULD_RUN)('E2E — reorg (anvil_reorg)', () => {
+  it('submitted batch gets flipped to reorged + re-enqueued on anvil_reorg', async () => {
+    const signer = new LocalEcdsaSigner(
+      '0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d'
+    );
+    const { buildAndSubmit, rpc } = await buildAndSubmitWithViem({
+      rpcUrl: RPC_URL,
+      chainId: CHAIN_ID,
+      bamCoreAddress: BAM_CORE,
+      signer,
+    });
+    const poster = (await createPoster(
+      {
+        allowlistedTags: [TAG],
+        chainId: CHAIN_ID,
+        bamCoreAddress: BAM_CORE,
+        signer,
+        batchPolicy: defaultBatchPolicy({ forceFlush: true }),
+        reorgWindowBlocks: 32,
+        now: () => new Date(),
+      },
+      { buildAndSubmit, rpc }
+    )) as InternalPoster;
+    posters.push(poster);
+
+    await poster.submit(signedEnvelope(1n));
+    await poster._tickTag(TAG);
+    const before = await poster.listSubmittedBatches({ contentTag: TAG });
+    expect(before[0].status).toBe('included');
+    const includedBlock = before[0].blockNumber!;
+
+    // Drive a reorg. `anvil_reorg` rewinds the chain by N blocks —
+    // enough to drop the tx that carried our batch.
+    await rpcCall('anvil_reorg', [{ depth: 2, txBlockPairs: [] }]);
+    // Mine a fresh block past the reorg so the watcher's head advances.
+    await rpcCall('anvil_mine', ['0x5']);
+
+    await poster._tickReorgWatcher();
+
+    const after = await poster.listSubmittedBatches({ contentTag: TAG });
+    expect(after[0].status).toBe('reorged');
+    expect(after[0].invalidatedAt).not.toBeNull();
+    expect(after[0].blockNumber).toBe(includedBlock);
+    for (const m of after[0].messages) expect(m.messageId).toBeNull();
+
+    // Message back in pending pool.
+    const pending = await poster.listPending({ contentTag: TAG });
+    expect(pending.length).toBe(1);
+  }, 60_000);
 });

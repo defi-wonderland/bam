@@ -1,12 +1,12 @@
 /**
  * Public types and interfaces for the BAM Poster library.
  *
- * This file is declaration-only. Runtime logic lives in the modules that
- * implement these interfaces (`src/ingest/`, `src/pool/`, `src/policy/`,
- * `src/signer/`, `src/submission/`, `src/surfaces/`).
+ * Messages flow as `BAMMessage`-shaped records (`sender, nonce, contents`)
+ * where `contents[0..32]` is the authoritative `contentTag`. App-level
+ * structure lives inside the app-opaque portion of `contents`.
  */
 
-import type { Address, Bytes32, SignedMessage } from 'bam-sdk';
+import type { Address, Bytes32 } from 'bam-sdk';
 import type { Account } from 'viem';
 
 import type { PosterRejection } from './errors.js';
@@ -16,16 +16,16 @@ import type { PosterRejection } from './errors.js';
 // ═══════════════════════════════════════════════════════════════════════
 
 /**
- * Optional transport-supplied hint. The hint is **advisory only** — the
- * signed message payload is the authoritative source for every ingest
- * decision (per ERC-8180 contentTag uniformity).
+ * Optional transport-supplied hint. The hint is advisory only — the tag
+ * bound in `contents[0..32]` is the authoritative source. Any mismatch
+ * is rejected at ingest before signature verification.
  */
 export interface SubmitHint {
   contentTag?: Bytes32;
 }
 
 export type SubmitResult =
-  | { accepted: true; messageId: Bytes32 }
+  | { accepted: true; messageHash: Bytes32 }
   | { accepted: false; reason: PosterRejection };
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -33,36 +33,25 @@ export type SubmitResult =
 // ═══════════════════════════════════════════════════════════════════════
 
 /**
- * Canonical internal representation of a signed, well-formed message
- * that has passed size + structural decoding.
- *
- * `nonce` is `bigint` in the Poster's internal model so the pool and
- * dedup index can forward-compat to uint64 if ERC-8180 widens the
- * nonce field. The SDK's v1 wire format caps `nonce` at 65535; the
- * store codec enforces the current width on insert.
+ * Canonical internal representation of a signed, well-formed message.
+ * `contents` is the full byte string including the 32-byte `contentTag`
+ * prefix; `contents[0..32]` and the top-level `contentTag` are guaranteed
+ * equal after the ingest's `checkContentTag` stage.
  */
 export interface DecodedMessage {
-  /** Signed author (recovered address if recovered, or asserted + checked). */
-  author: Address;
-  /** Per-sender sequential counter. */
+  /** Signed sender (recovered address or asserted + checked). */
+  sender: Address;
+  /** Per-sender sequential counter. uint64. */
   nonce: bigint;
-  /** UTF-8 message content. */
-  content: string;
-  /** Unix epoch seconds as signed over. */
-  timestamp: number;
-  /** Authoritative content tag bound in the signed payload. */
+  /** Full signed content bytes (tag prefix + app-opaque payload). */
+  contents: Uint8Array;
+  /** Authoritative content tag = `contents[0..32]`. */
   contentTag: Bytes32;
-  /** Raw signature bytes (65-byte ECDSA in v1). */
+  /** Raw signature bytes (65-byte ECDSA for scheme 0x01). */
   signature: Uint8Array;
-  /** Canonical id computed via `bam-sdk.computeMessageId`. */
-  messageId: Bytes32;
-  /**
-   * Poster-side ingest time, in ms since epoch. Populated for messages
-   * drawn from the pool via the submission loop; `undefined` for a
-   * fresh decode that hasn't been inserted yet. Used by batch policies
-   * for age-based triggers — the author-signed `timestamp` is
-   * caller-controlled and must not drive submission decisions.
-   */
+  /** ERC-8180 messageHash: keccak256(sender || nonce || contents). Stable client-facing pre-batch identifier. */
+  messageHash: Bytes32;
+  /** Poster-side ingest time, ms since epoch; populated once the message has been inserted. */
   ingestedAt?: number;
 }
 
@@ -71,13 +60,12 @@ export interface DecodedMessage {
 // ═══════════════════════════════════════════════════════════════════════
 
 export interface Pending {
-  messageId: Bytes32;
-  contentTag: Bytes32;
-  author: Address;
+  sender: Address;
   nonce: bigint;
-  content: string;
-  timestamp: number;
+  contentTag: Bytes32;
+  contents: Uint8Array;
   signature: Uint8Array;
+  messageHash: Bytes32;
   ingestedAt: number;
   ingestSeq: number;
 }
@@ -97,35 +85,35 @@ export interface PendingQuery {
 // Submitted-batch read surface
 // ═══════════════════════════════════════════════════════════════════════
 
-export type SubmittedBatchStatus = 'pending' | 'included' | 'reorged';
+export type SubmittedBatchStatus = 'pending' | 'included' | 'reorged' | 'resubmitted';
 
 /**
- * Public per-message entry on a submitted batch. Carries the full
- * decoded body so clients can render "posted" messages directly from
- * this surface — no chain re-fetch + blob-decode round trip needed.
- * The Poster already committed to these exact bytes; a consumer that
- * wants third-party verification can fetch the blob + compute the
- * messageId independently, but the default path trusts the Poster.
+ * Per-message entry on a submitted batch. `messageHash` is stable from
+ * ingest onward; `messageId` is ERC-8180's batch-scoped id, computable
+ * only after the batch has been assembled (populated on submit) and
+ * reset to `null` if the batch is reorged out within the tolerance window.
  */
 export interface SubmittedBatchMessage {
-  messageId: Bytes32;
-  author: Address;
+  sender: Address;
   nonce: bigint;
-  timestamp: number;
-  content: string;
+  contents: Uint8Array;
   signature: Uint8Array;
+  messageHash: Bytes32;
+  messageId: Bytes32 | null;
 }
 
 export interface SubmittedBatch {
   txHash: Bytes32;
   contentTag: Bytes32;
   blobVersionedHash: Bytes32;
+  /** ERC-8180 contentHash for the batch — blob versioned hash or `keccak256(batchData)`. */
+  batchContentHash: Bytes32;
   blockNumber: number | null;
   status: SubmittedBatchStatus;
   replacedByTxHash: Bytes32 | null;
   submittedAt: number;
-  messageIds: Bytes32[];
-  /** Decoded message bodies in original ingest order. */
+  /** ms since epoch when `status` transitioned to `'reorged'`. */
+  invalidatedAt: number | null;
   messages: SubmittedBatchMessage[];
 }
 
@@ -136,7 +124,7 @@ export interface SubmittedBatchesQuery {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// Status + health (disjoint surfaces — see plan C-9)
+// Status + health (disjoint surfaces)
 // ═══════════════════════════════════════════════════════════════════════
 
 export interface Status {
@@ -170,15 +158,9 @@ export type ValidationResult = { ok: true } | { ok: false; reason: PosterRejecti
 export interface MessageValidator {
   validate(msg: DecodedMessage): ValidationResult;
   /**
-   * Optional: recover the *authenticated* signer identity from the
-   * message's signature. Used by the ingest pipeline to key the rate
-   * limiter on a value the client can't spoof — if this is absent (or
-   * returns `null`), rate-limit falls back to the claimed author and
-   * an attacker can multiply their effective budget by rotating the
-   * envelope's `author` field (cubic review).
-   *
-   * Must be side-effect free and cheap enough to run on every accepted
-   * envelope: the default ECDSA validator calls `recoverAddress` once.
+   * Optional: recover the authenticated signer identity from the
+   * message's signature. Used to key the rate limiter on a value the
+   * client can't spoof.
    */
   recoverSigner?(msg: DecodedMessage): Address | null;
 }
@@ -211,14 +193,12 @@ export interface Signer {
 // ═══════════════════════════════════════════════════════════════════════
 
 export interface StoreTxnPendingRow {
-  messageId: Bytes32;
   contentTag: Bytes32;
-  author: Address;
+  sender: Address;
   nonce: bigint;
-  /** Author-signed timestamp (unix seconds) — needed to rebuild SignedMessage for batch encoding. */
-  timestamp: number;
-  content: Uint8Array;
+  contents: Uint8Array;
   signature: Uint8Array;
+  messageHash: Bytes32;
   ingestedAt: number;
   ingestSeq: number;
 }
@@ -226,15 +206,16 @@ export interface StoreTxnPendingRow {
 /**
  * Per-message snapshot retained in `poster_submitted_batches` so the
  * reorg watcher can re-enqueue messages into the pending pool after
- * the original rows were pruned on inclusion.
+ * inclusion-time pruning.
  */
 export interface MessageSnapshot {
-  messageId: Bytes32;
-  author: Address;
+  sender: Address;
   nonce: bigint;
-  timestamp: number;
-  content: string;
+  contents: Uint8Array;
   signature: Uint8Array;
+  messageHash: Bytes32;
+  /** `messageId` is batch-scoped and only meaningful when the parent row's status is `'included'`. */
+  messageId: Bytes32 | null;
   originalIngestSeq: number;
 }
 
@@ -242,43 +223,63 @@ export interface StoreTxnSubmittedRow {
   txHash: Bytes32;
   contentTag: Bytes32;
   blobVersionedHash: Bytes32;
+  batchContentHash: Bytes32;
   blockNumber: number | null;
   status: SubmittedBatchStatus;
   replacedByTxHash: Bytes32 | null;
   submittedAt: number;
-  messageIds: Bytes32[];
+  invalidatedAt: number | null;
   messages: MessageSnapshot[];
 }
 
 export interface NonceTrackerRow {
-  author: Address;
+  sender: Address;
   lastNonce: bigint;
-  lastMessageId: Bytes32;
+  lastMessageHash: Bytes32;
+}
+
+export interface PendingKey {
+  sender: Address;
+  nonce: bigint;
 }
 
 export interface StoreTxn {
   // ── pending CRUD ─────────────────────────────────────────────────────
   insertPending(row: StoreTxnPendingRow): void | Promise<void>;
-  getPendingByMessageId(messageId: Bytes32): StoreTxnPendingRow | null | Promise<StoreTxnPendingRow | null>;
-  listPendingByTag(tag: Bytes32, limit?: number, sinceSeq?: number): StoreTxnPendingRow[] | Promise<StoreTxnPendingRow[]>;
-  listPendingAll(limit?: number, sinceSeq?: number): StoreTxnPendingRow[] | Promise<StoreTxnPendingRow[]>;
-  deletePending(messageIds: Bytes32[]): void | Promise<void>;
+  getPendingByKey(
+    key: PendingKey
+  ): StoreTxnPendingRow | null | Promise<StoreTxnPendingRow | null>;
+  listPendingByTag(
+    tag: Bytes32,
+    limit?: number,
+    sinceSeq?: number
+  ): StoreTxnPendingRow[] | Promise<StoreTxnPendingRow[]>;
+  listPendingAll(
+    limit?: number,
+    sinceSeq?: number
+  ): StoreTxnPendingRow[] | Promise<StoreTxnPendingRow[]>;
+  deletePending(keys: PendingKey[]): void | Promise<void>;
   countPendingByTag(tag: Bytes32): number | Promise<number>;
   nextIngestSeq(tag: Bytes32): number | Promise<number>;
 
   // ── nonce tracker CRUD ───────────────────────────────────────────────
-  getNonce(author: Address): NonceTrackerRow | null | Promise<NonceTrackerRow | null>;
+  getNonce(sender: Address): NonceTrackerRow | null | Promise<NonceTrackerRow | null>;
   setNonce(row: NonceTrackerRow): void | Promise<void>;
 
   // ── submitted-batches CRUD ───────────────────────────────────────────
   insertSubmitted(row: StoreTxnSubmittedRow): void | Promise<void>;
-  getSubmittedByTx(txHash: Bytes32): StoreTxnSubmittedRow | null | Promise<StoreTxnSubmittedRow | null>;
-  listSubmitted(query: SubmittedBatchesQuery): StoreTxnSubmittedRow[] | Promise<StoreTxnSubmittedRow[]>;
+  getSubmittedByTx(
+    txHash: Bytes32
+  ): StoreTxnSubmittedRow | null | Promise<StoreTxnSubmittedRow | null>;
+  listSubmitted(
+    query: SubmittedBatchesQuery
+  ): StoreTxnSubmittedRow[] | Promise<StoreTxnSubmittedRow[]>;
   updateSubmittedStatus(
     txHash: Bytes32,
     status: SubmittedBatchStatus,
     replacedByTxHash: Bytes32 | null,
-    blockNumber: number | null
+    blockNumber: number | null,
+    invalidatedAt?: number | null
   ): void | Promise<void>;
 }
 
@@ -291,67 +292,39 @@ export interface PosterStore {
 // PosterConfig
 // ═══════════════════════════════════════════════════════════════════════
 
-/**
- * Injected logger. The library writes submission-loop outcomes and
- * build-and-submit failures through this surface so consumers can
- * route output (or silence it) rather than inheriting `stdout`/`stderr`.
- * Default: `info`/`warn` → stdout, `error` → stderr, each with a
- * `[bam-poster]` prefix preserved from the previous inline writes.
- */
 export type PosterLogger = (level: 'info' | 'warn' | 'error', message: string) => void;
 
 export interface RateLimitConfig {
-  /** Sliding-window width in milliseconds. */
   windowMs: number;
-  /** Maximum accepted submits per signer address per window. */
   maxPerWindow: number;
 }
 
 export interface BackoffConfig {
   baseMs: number;
   capMs: number;
-  /** Attempts before health flips from `ok` to `degraded`. */
   degradedAfterAttempts: number;
-  /** Attempts before health flips from `degraded` to `unhealthy`. */
   unhealthyAfterAttempts: number;
 }
 
 export interface PosterConfig {
-  /** Required — operator's tag allowlist. */
   allowlistedTags: Bytes32[];
-  /** Required — expected chain-ID for startup reconciliation. */
   chainId: number;
-  /** Required — BAM Core contract address. */
   bamCoreAddress: Address;
-  /** Required — the signer that owns the Poster's wallet. */
   signer: Signer;
-  /** Optional — custom validator; default is ECDSA verify via `bam-sdk`. */
   validator?: MessageValidator;
-  /** Optional — custom batch policy; default is per-tag FIFO size/age. */
   batchPolicy?: BatchPolicy;
-  /** Max per-message size in bytes (default: aligned with BAM blob capacity). */
+  /** Max per-message wire-envelope size in bytes. */
   maxMessageSizeBytes?: number;
-  /** Blob capacity exposed to the default batch policy (default: 126 KiB). */
+  /** Max `contents` (tag prefix + app bytes) size in bytes. */
+  maxContentsSizeBytes?: number;
   blobCapacityBytes?: number;
-  /** Reorg re-enqueue window, in blocks. Clamped `[4, 128]`; default 32. */
   reorgWindowBlocks?: number;
-  /** Rate-limit tuning — see `RateLimitConfig`. */
   rateLimit?: RateLimitConfig;
-  /** Submission backoff tuning — see `BackoffConfig`. */
   backoff?: BackoffConfig;
-  /** Override the pool store. Defaults to in-memory for tests, DB-backed in prod. */
   store?: PosterStore;
-  /** Wall-clock source; default `() => new Date()`. Exposed for tests. */
   now?: () => Date;
-  /** Idle-poll delay for the per-tag submission workers, in ms. Default 1000. */
   idlePollMs?: number;
-  /** Reorg-watcher tick interval, in ms. Default 12000 (L1 block time). */
   reorgPollMs?: number;
-  /**
-   * Injected logger. Default routes info→stdout, warn/error→stderr
-   * with a `[bam-poster]` prefix. Pass a no-op (or your own sink) to
-   * silence / redirect library output (qodo review).
-   */
   logger?: PosterLogger;
 }
 
@@ -365,11 +338,6 @@ export interface Poster {
   listSubmittedBatches(query?: SubmittedBatchesQuery): Promise<SubmittedBatch[]>;
   status(): Promise<Status>;
   health(): Promise<Health>;
-  /** Starts per-tag submission loops + reorg watcher. */
   start(): Promise<void>;
-  /** Graceful shutdown. */
   stop(): Promise<void>;
 }
-
-// Re-export helpful SDK types so consumers don't need to dual-import.
-export type { SignedMessage };

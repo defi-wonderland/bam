@@ -4,8 +4,6 @@ Node-only library + HTTP service + CLI that batches ingested BAM messages
 and submits them to L1 as blob batches via the existing BAM Core
 `registerBlobBatch` entrypoint.
 
-Feature spec: [`docs/specs/features/001-bam-poster`](../../docs/specs/features/001-bam-poster/spec.md).
-
 ## Scope
 
 - **Library surface** — `createPoster(config)` returns an object with

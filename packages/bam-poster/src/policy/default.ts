@@ -1,12 +1,11 @@
-import { estimateBatchSize, type Message } from 'bam-sdk';
-import type { Bytes32 } from 'bam-sdk';
+import { estimateBatchSize } from 'bam-sdk';
+import type { BAMMessage, Bytes32 } from 'bam-sdk';
 
 import type { BatchPolicy, DecodedMessage, PoolView } from '../types.js';
 
 /**
  * Default blob-capacity exposed to the policy. Leaves headroom under
- * the 128 KiB EIP-4844 blob cap for batch framing and compression
- * slack (plan §C-5).
+ * the 128 KiB EIP-4844 blob cap for batch framing and compression slack.
  */
 export const DEFAULT_BLOB_CAPACITY_BYTES = 126 * 1024;
 
@@ -25,7 +24,7 @@ export interface DefaultBatchPolicyConfig {
 }
 
 /**
- * Per-tag FIFO selection under blob capacity (plan §C-5).
+ * Per-tag FIFO selection under blob capacity.
  *
  * - Walks the tag's pending pool in ingest order, greedy-adding
  *   messages so long as the resulting batch fits under
@@ -60,7 +59,7 @@ export function defaultBatchPolicy(
       const picked: DecodedMessage[] = [];
       for (const next of pending) {
         const candidate = [...picked, next];
-        const size = estimateBatchSize(candidate.map(toSdkMessage));
+        const size = estimateBatchSize(candidate.map(toBAMMessage));
         if (size > blobCapacityBytes) break;
         picked.push(next);
       }
@@ -69,7 +68,7 @@ export function defaultBatchPolicy(
       if (config.forceFlush) return { msgs: picked };
 
       // Size trigger: selected set already fills enough of a blob.
-      const selectedSize = estimateBatchSize(picked.map(toSdkMessage));
+      const selectedSize = estimateBatchSize(picked.map(toBAMMessage));
       if (selectedSize >= blobCapacityBytes * sizeTriggerRatio) {
         return { msgs: picked };
       }
@@ -105,11 +104,10 @@ export function defaultBatchPolicy(
   };
 }
 
-function toSdkMessage(d: DecodedMessage): Message {
+function toBAMMessage(d: DecodedMessage): BAMMessage {
   return {
-    author: d.author,
-    timestamp: d.timestamp,
-    nonce: Number(d.nonce & 0xffffn),
-    content: d.content,
+    sender: d.sender,
+    nonce: d.nonce,
+    contents: d.contents,
   };
 }

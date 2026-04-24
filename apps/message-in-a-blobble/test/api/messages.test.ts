@@ -82,6 +82,35 @@ describe('api/messages — proxy', () => {
     expect(body.error).toBe('poster_unreachable');
   });
 
+  it('POST backfills contentTag when the body has `message` but no `contentTag`', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ accepted: true, messageHash: '0xabc' }), {
+        status: 201,
+        headers: { 'content-type': 'application/json' },
+      })
+    );
+    const { POST } = await import('../../src/app/api/messages/route');
+    const req = new NextRequest('http://localhost/api/messages', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        message: {
+          sender: '0x1234567890123456789012345678901234567890',
+          nonce: '1',
+          contents: '0x' + '00'.repeat(32),
+          signature: '0x' + '00'.repeat(65),
+        },
+      }),
+    });
+    await POST(req);
+    const [, init] = fetchMock.mock.calls[0];
+    const forwardedBody = (init as { body: Uint8Array }).body;
+    const forwardedJson = JSON.parse(new TextDecoder().decode(forwardedBody));
+    // Must have a contentTag even though the client omitted it.
+    expect(forwardedJson.contentTag).toMatch(/^0x[0-9a-f]{64}$/);
+    expect(forwardedJson.message.sender).toBe('0x1234567890123456789012345678901234567890');
+  });
+
   it('GET forwards to /pending filtered by contentTag', async () => {
     fetchMock.mockResolvedValueOnce(
       new Response(JSON.stringify({ pending: [] }), {

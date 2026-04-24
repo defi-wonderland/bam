@@ -1,81 +1,127 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
-  bytesToHex,
   computeMessageHash,
-  computeMessageId,
-  deriveAddress,
-  generateECDSAPrivateKey,
-  signECDSA,
+  encodeContents,
+  signECDSAWithKey,
   type Address,
+  type BAMMessage,
   type Bytes32,
 } from 'bam-sdk';
 
 import { defaultEcdsaValidator } from '../../src/validator/default-ecdsa.js';
 import type { DecodedMessage } from '../../src/types.js';
 
+const CHAIN_ID = 31337;
+const PRIV = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80' as const;
+const SENDER = '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266' as Address;
 const TAG = ('0x' + 'aa'.repeat(32)) as Bytes32;
 
-async function makeSigned(content: string, nonce = 1): Promise<DecodedMessage> {
-  const pk = generateECDSAPrivateKey();
-  const author = deriveAddress(pk);
-  const timestamp = 1_700_000_000;
-  const hash = computeMessageHash({ author, timestamp, nonce, content });
-  const sig = await signECDSA(pk, bytesToHex(hash) as Bytes32);
-  const messageId = computeMessageId({ author, timestamp, nonce, content });
+function hexToBytes(hex: string): Uint8Array {
+  const c = hex.startsWith('0x') ? hex.slice(2) : hex;
+  const out = new Uint8Array(c.length / 2);
+  for (let i = 0; i < out.length; i++) out[i] = parseInt(c.slice(i * 2, i * 2 + 2), 16);
+  return out;
+}
+
+function buildDecoded(opts: {
+  nonce?: bigint;
+  tamperTag?: boolean;
+  tamperAppBytes?: boolean;
+  wrongSender?: Address;
+  signatureOverride?: Uint8Array;
+}): DecodedMessage {
+  const nonce = opts.nonce ?? 1n;
+  const contents = encodeContents(TAG, new TextEncoder().encode('hello'));
+  const msg: BAMMessage = { sender: SENDER, nonce, contents };
+  const sigHex = signECDSAWithKey(PRIV, msg, CHAIN_ID);
+  const signature = opts.signatureOverride ?? hexToBytes(sigHex);
+
+  let outContents = contents;
+  if (opts.tamperTag) {
+    outContents = new Uint8Array(contents);
+    outContents[0] ^= 0xff;
+  } else if (opts.tamperAppBytes) {
+    outContents = new Uint8Array(contents);
+    outContents[32] ^= 0xff;
+  }
+
   return {
-    author,
-    timestamp,
-    nonce: BigInt(nonce),
-    content,
+    sender: opts.wrongSender ?? SENDER,
+    nonce,
+    contents: outContents,
     contentTag: TAG,
-    signature: sig,
-    messageId,
+    signature,
+    messageHash: computeMessageHash(SENDER, nonce, outContents),
   };
 }
 
 describe('defaultEcdsaValidator', () => {
-  it('accepts a valid signature produced by the bam-sdk signer', async () => {
-    const msg = await makeSigned('hello');
-    const v = defaultEcdsaValidator();
-    const res = v.validate(msg);
-    expect(res.ok).toBe(true);
+  const validator = defaultEcdsaValidator(CHAIN_ID);
+
+  it('valid signature → ok', () => {
+    const decoded = buildDecoded({});
+    const result = validator.validate(decoded);
+    expect(result.ok).toBe(true);
   });
 
-  it('rejects a forged signature with bad_signature', async () => {
-    const msg = await makeSigned('hello');
-    // Flip a bit in the signature.
-    const tampered = new Uint8Array(msg.signature);
-    tampered[0] ^= 0xff;
-    const v = defaultEcdsaValidator();
-    const res = v.validate({ ...msg, signature: tampered });
-    expect(res.ok).toBe(false);
-    if (!res.ok) expect(res.reason).toBe('bad_signature');
+  it('wrong chain id (validator built for a different chain) → bad_signature', () => {
+    const validatorWrong = defaultEcdsaValidator(1);
+    const decoded = buildDecoded({});
+    const result = validatorWrong.validate(decoded);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe('bad_signature');
   });
 
-  it('rejects signatures signed by a different author', async () => {
-    const msg = await makeSigned('hello');
-    // Recover fails when we swap the claimed author.
-    const otherAuthor = '0x1234567890123456789012345678901234567890' as Address;
-    const v = defaultEcdsaValidator();
-    const res = v.validate({ ...msg, author: otherAuthor });
-    expect(res.ok).toBe(false);
-    if (!res.ok) expect(res.reason).toBe('bad_signature');
+  it('tampered contentTag prefix → bad_signature', () => {
+    const decoded = buildDecoded({ tamperTag: true });
+    const result = validator.validate(decoded);
+    expect(result.ok).toBe(false);
   });
 
-  it('rejects a signature over different content (hash mismatch)', async () => {
-    const msg = await makeSigned('hello');
-    const v = defaultEcdsaValidator();
-    // Same signature, different content — hash no longer matches.
-    const res = v.validate({ ...msg, content: 'tampered' });
-    expect(res.ok).toBe(false);
-    if (!res.ok) expect(res.reason).toBe('bad_signature');
+  it('tampered app bytes → bad_signature', () => {
+    const decoded = buildDecoded({ tamperAppBytes: true });
+    const result = validator.validate(decoded);
+    expect(result.ok).toBe(false);
   });
 
-  it('rejects nonces outside the v1 uint16 range with malformed', async () => {
-    const msg = await makeSigned('hello');
-    const v = defaultEcdsaValidator();
-    const res = v.validate({ ...msg, nonce: 1n << 20n });
-    expect(res.ok).toBe(false);
-    if (!res.ok) expect(res.reason).toBe('malformed');
+  it('wrong expected sender → bad_signature', () => {
+    const decoded = buildDecoded({ wrongSender: ('0x' + '22'.repeat(20)) as Address });
+    const result = validator.validate(decoded);
+    expect(result.ok).toBe(false);
+  });
+
+  it('48-byte signature (BLS length) → bad_signature (cross-scheme safety)', () => {
+    const decoded = buildDecoded({ signatureOverride: new Uint8Array(48) });
+    const result = validator.validate(decoded);
+    expect(result.ok).toBe(false);
+  });
+
+  it('recoverSigner returns the asserted sender when verification passes', () => {
+    const decoded = buildDecoded({});
+    const recovered = validator.recoverSigner?.(decoded);
+    expect(recovered?.toLowerCase()).toBe(SENDER.toLowerCase());
+  });
+
+  it('recoverSigner returns null when the signature is invalid (rate-limit bypass guard)', () => {
+    // Tampered app bytes ⇒ the signature no longer matches `contents`;
+    // recoverSigner must reject so the ingest routes this envelope to
+    // the shared RECOVER_FAILED rate-limit bucket instead of giving
+    // the attacker a fresh per-sender budget.
+    const decoded = buildDecoded({ tamperAppBytes: true });
+    const recovered = validator.recoverSigner?.(decoded);
+    expect(recovered).toBeNull();
+  });
+
+  it('recoverSigner returns null for wrong chain id', () => {
+    const validatorWrong = defaultEcdsaValidator(1);
+    const decoded = buildDecoded({});
+    const recovered = validatorWrong.recoverSigner?.(decoded);
+    expect(recovered).toBeNull();
+  });
+
+  it('recoverSigner returns null when signature length is wrong (cross-scheme safety)', () => {
+    const decoded = buildDecoded({ signatureOverride: new Uint8Array(48) });
+    const recovered = validator.recoverSigner?.(decoded);
+    expect(recovered).toBeNull();
   });
 });

@@ -25,19 +25,19 @@ async function allTsFiles(dir: string): Promise<string[]> {
 }
 
 /**
- * Gate G-7 / plan §C-4: every rejection emitted across the library
- * boundary must come from the `PosterRejection` enum. This static
- * check scans the `src/` tree for `reason: '...'` or `reason: "..."`
- * forms — the fields where a PosterRejection value would be
- * returned — and asserts every such occurrence resolves to a value
- * in the enum (which it must by construction when the enum is used,
- * but the assertion protects against typos or drift).
+ * Every rejection emitted across the library boundary must come from
+ * the `PosterRejection` enum. This static check scans the `src/` tree
+ * for `reason: '...'` or `reason: "..."` forms — the fields where a
+ * PosterRejection value would be returned — and asserts every such
+ * occurrence resolves to a value in the enum (which it must by
+ * construction when the enum is used, but the assertion protects
+ * against typos or drift).
  *
  * Free-form strings in other positions (`HealthState` enum values,
  * JSON keys, logger names) are outside the scope — those don't
  * surface as rejection reasons.
  */
-describe('error hygiene — stable rejection codes only (G-7)', () => {
+describe('error hygiene — stable rejection codes only', () => {
   it('every `reason:` string literal outside errors.ts is a valid PosterRejection value', async () => {
     const files = await allTsFiles(SRC_ROOT);
     const errorsFile = path.resolve(SRC_ROOT, 'errors.ts');
@@ -72,7 +72,7 @@ describe('error hygiene — stable rejection codes only (G-7)', () => {
 
     expect(
       violations,
-      `error-hygiene violations (G-7): ${JSON.stringify(violations, null, 2)}`
+      `error-hygiene violations: ${JSON.stringify(violations, null, 2)}`
     ).toEqual([]);
   });
 });

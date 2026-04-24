@@ -6,8 +6,8 @@ import {
   encodeBatch,
   loadTrustedSetup,
   type Address,
+  type BAMMessage,
   type Bytes32,
-  type SignedMessage,
 } from 'bam-sdk';
 import { BAM_CORE_ABI } from 'bam-sdk';
 import {
@@ -56,7 +56,7 @@ export interface BuildAndSubmitOptions {
 
 /**
  * Narrow transport surface the submitter needs. Extracted so tests
- * can inject mocks without spinning up a real RPC (FU-9).
+ * can inject mocks without spinning up a real RPC.
  */
 export interface BuildAndSubmitTransport {
   sendBlobTransaction(args: {
@@ -127,8 +127,8 @@ export function classifySubmissionError(err: unknown): SubmitOutcome {
 export async function buildAndSubmitWithViem(
   opts: BuildAndSubmitOptions
 ): Promise<BuildAndSubmitBundle> {
-  const decoder = (opts.decoderAddress ?? zeroAddress) as Address;
-  const sigRegistry = (opts.signatureRegistryAddress ?? zeroAddress) as Address;
+  const decoder = (opts.decoderAddress ?? zeroAddress);
+  const sigRegistry = (opts.signatureRegistryAddress ?? zeroAddress);
   const gwei = opts.maxFeePerBlobGasGwei ?? '30';
 
   const transport = opts.transport ?? viemTransport(opts);
@@ -162,15 +162,13 @@ export async function buildAndSubmitWithViem(
       // "KZG trusted setup not loaded. Call loadTrustedSetup() first."
       const kzg = await ensureKzg();
 
-      const signed: SignedMessage[] = messages.map((m) => ({
-        author: m.author,
-        timestamp: m.timestamp,
-        nonce: Number(m.nonce & 0xffffn),
-        content: m.content,
-        signature: m.signature,
-        signatureType: 'ecdsa',
+      const bamMsgs: BAMMessage[] = messages.map((m) => ({
+        sender: m.sender,
+        nonce: m.nonce,
+        contents: m.contents,
       }));
-      const batch = encodeBatch(signed);
+      const signatures = messages.map((m) => m.signature);
+      const batch = encodeBatch(bamMsgs, signatures);
       const blob = createBlob(batch.data);
       const { versionedHash } = commitToBlob(blob);
       const data = encodeFunctionData({
@@ -191,7 +189,7 @@ export async function buildAndSubmitWithViem(
         blobs: [blob],
         maxFeePerBlobGas: parseGwei(gwei),
         kzg,
-      })) as Bytes32;
+      }));
       const receipt = await transport.waitForReceipt(txHash);
 
       return {
@@ -263,7 +261,7 @@ function viemTransport(opts: BuildAndSubmitOptions): BuildAndSubmitTransport {
     },
     async getBytecode(address) {
       const code = (await publicClient.getBytecode({ address })) ?? '0x';
-      return code as `0x${string}`;
+      return code;
     },
     async getBalance(address) {
       return publicClient.getBalance({ address });

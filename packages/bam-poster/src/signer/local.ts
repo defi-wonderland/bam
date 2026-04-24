@@ -10,7 +10,7 @@ import type { Signer } from '../types.js';
  *
  * `toString` / `toJSON` are pinned so that an accidental log /
  * serialization of the signer or its account never surfaces private
- * material (G-6, plan §Signer-leak).
+ * material.
  */
 export class LocalEcdsaSigner implements Signer {
   private readonly _account: Account;

@@ -1,8 +1,8 @@
 import type { PosterRejection } from '../errors.js';
 
 /**
- * Stable mapping from `PosterRejection` → HTTP status code (plan §C-4).
- * The response body always carries `{ reason }` with the enum value; no
+ * Stable mapping from `PosterRejection` → HTTP status code. The
+ * response body always carries `{ reason }` with the enum value; no
  * free-form text ever crosses the library boundary.
  */
 export function rejectionToStatus(reason: PosterRejection): number {

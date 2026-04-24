@@ -1,7 +1,7 @@
 # Nonce scope and multi-app identity
 
 **Status:** open design question
-**Raised:** 2026-04 (during the BAM Poster feature plan, `docs/specs/features/001-bam-poster/`)
+**Raised:** 2026-04 (during BAM Poster feature planning)
 **Relevant ERC:** [ERC-8180](../specs/erc-8180.md) §*Nonce Semantics*, §*Signing Domain and Message Hash Convention*
 
 > **What this document is:** a record of a design tension surfaced by the reference implementation, pushing it back to the ERC authors per constitution principle III. The BAM Poster ships under the current ERC; this doc captures the question and its implications so the learning isn't lost.
@@ -60,7 +60,7 @@ Out of scope for this note: how to handle a message that legitimately belongs to
 
 ## Current stance (2026-04)
 
-The BAM Poster feature (`docs/specs/features/001-bam-poster/`) ships under the **current** ERC-8180:
+The BAM Poster ships under the **current** ERC-8180:
 
 - Per-sender nonce monotonicity, scoped per sender globally across all served tags.
 - Byte-equal resubmissions of the last-accepted message tolerated as no-ops (retry).
@@ -72,12 +72,10 @@ If the ERC evolves to per-tag signing domains, the Poster's rule narrows to per-
 
 - [ ] **Raise with ERC-8180 authors** (Vitalik, Kimmo, Skeletor Spaceman). Share this note as the motivating use case. Venue: `ethereum-magicians.org` ERC-8180 discussion thread or direct review.
 - [ ] **Gather signal from demo usage.** If users hit the multi-app coordination cost during the BAM Poster's demo integration, collect the anecdote and fold it into the ERC discussion.
-- [ ] **If ERC accepts the change**, create a separate feature (`docs/specs/features/NNN-erc-8180-v2-signing-domain/`) to thread the change through `bam-sdk`, the sync indexer, and any other callers. The Poster update ships as part of that feature.
+- [ ] **If ERC accepts the change**, open a separate feature to thread it through `bam-sdk`, the sync indexer, and any other callers. The Poster update ships as part of that feature.
 - [ ] **If ERC declines**, document the rationale here and update guidance for multi-app BAM clients (recommend per-app keys, or shared-Poster nonce-read helper).
 
 ## References
 
 - ERC-8180 §*Nonce Semantics* — `docs/specs/erc-8180.md` (lines 332–343)
 - ERC-8180 §*Signing Domain and Message Hash Convention* — `docs/specs/erc-8180.md` (lines 517–545)
-- BAM Poster feature spec — `docs/specs/features/001-bam-poster/spec.md`
-- BAM Poster feature plan — `docs/specs/features/001-bam-poster/plan.md` (§*Risks deferred*, §*Security impact* → C-11)

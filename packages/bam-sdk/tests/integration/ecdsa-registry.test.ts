@@ -4,11 +4,11 @@
  * Runs identical (owner, hash, signature, delegate?) inputs through:
  *   • the SDK's `verifyEcdsaLocal` helper, and
  *   • `ECDSARegistry.verify` / `verifyWithRegisteredKey` on a live anvil,
- * and asserts the two answers agree byte-for-byte. This is the red-team C-9
- * gate: if SDK and contract ever drift, `/implement` catches it here.
+ * and asserts the two answers agree byte-for-byte. If SDK and contract
+ * ever drift, this test catches it.
  *
- * Also asserts the post-deploy invariant that the dispatcher's scheme-0x01
- * slot points at the deployed registry (G-5 / red-team C-7).
+ * Also asserts the post-deploy invariant that the dispatcher's
+ * scheme-0x01 slot points at the deployed registry.
  *
  * Skips (rather than failing) if anvil is not on the PATH — CI is expected
  * to provide it; local developers without Foundry can still run unit tests.

@@ -4,12 +4,12 @@ import { getPending, posterErrorToResponse, submitMessage } from '@/lib/poster-c
 import { MESSAGE_IN_A_BLOBBLE_TAG } from '@/lib/constants';
 
 /**
- * Thin HTTP proxy to the Poster (feature 001-bam-poster, plan §Architecture).
- * GET forwards to the Poster's `/pending` (the demo treats pending as the
- * Poster's truth; confirmed messages are served by the sync indexer via
- * a separate read surface — see `api/submitted-batches/route.ts`).
- * POST wraps the request body in the Poster's envelope shape and
- * forwards to `/submit`, returning the Poster's response verbatim.
+ * Thin HTTP proxy to the Poster. GET forwards to the Poster's
+ * `/pending` (the demo treats pending as the Poster's truth; confirmed
+ * messages are served by the sync indexer via a separate read surface
+ * — see `api/submitted-batches/route.ts`). POST wraps the request body
+ * in the Poster's envelope shape and forwards to `/submit`, returning
+ * the Poster's response verbatim.
  */
 
 export async function GET(): Promise<NextResponse> {
@@ -24,20 +24,37 @@ export async function GET(): Promise<NextResponse> {
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
+  // Feature 002: the composer posts the full envelope
+  // `{ contentTag, message: { sender, nonce, contents, signature } }`
+  // and the Poster's `/submit` accepts it verbatim.
   let body: unknown;
   try {
     body = await request.json();
   } catch {
-    // Invalid JSON → controlled 400 instead of an unhandled 500.
     return NextResponse.json(
       { accepted: false, reason: 'malformed' },
       { status: 400 }
     );
   }
-  const envelope = {
-    contentTag: MESSAGE_IN_A_BLOBBLE_TAG,
-    message: body,
-  };
+  // If the client omitted the contentTag (older clients), default to
+  // this demo's tag. Keeps the thin-proxy contract stable, and covers
+  // the case where `message` is supplied but `contentTag` isn't — the
+  // Poster rejects envelopes without a `contentTag` field, so always
+  // backfill it before forwarding.
+  const parsed =
+    body && typeof body === 'object' && !Array.isArray(body)
+      ? (body as Record<string, unknown>)
+      : null;
+  const envelope =
+    parsed && 'message' in parsed
+      ? {
+          contentTag:
+            typeof parsed.contentTag === 'string'
+              ? parsed.contentTag
+              : MESSAGE_IN_A_BLOBBLE_TAG,
+          message: parsed.message,
+        }
+      : { contentTag: MESSAGE_IN_A_BLOBBLE_TAG, message: body };
   try {
     const poster = await submitMessage({
       rawEnvelope: new TextEncoder().encode(JSON.stringify(envelope)),

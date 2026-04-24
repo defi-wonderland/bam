@@ -1,6 +1,6 @@
 {
   "name": "bam-sdk",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "BAM SDK - Blob Authenticated Messaging protocol toolkit",
   "type": "module",
   "main": "dist/esm/index.js",
@@ -25,6 +25,7 @@
     "clean": "rm -rf dist",
     "test": "vitest",
     "test:run": "vitest --run",
+    "test:browser": "vitest --run -c vitest.browser.config.ts",
     "test:integration": "vitest --run -c /dev/null tests/integration/",
     "lint": "eslint src tests"
   },
@@ -37,7 +38,8 @@
     "viem": "^2.21.0"
   },
   "devDependencies": {
-    "@types/node": "^20.11.0"
+    "@types/node": "^20.11.0",
+    "jsdom": "^29.0.2"
   },
   "engines": {
     "node": ">=20.0.0"

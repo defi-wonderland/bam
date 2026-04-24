@@ -6,8 +6,8 @@ import { BlobAuthenticatedMessagingCore } from "../src/core/BlobAuthenticatedMes
 
 /// @title DeployBamCore
 /// @notice Deploys the amended ERC-8180 `BlobAuthenticatedMessagingCore` at a new
-///         address. Per red-team C-1 this is a fresh deployment, not an in-place
-///         upgrade — pre-amendment event logs at any prior address remain intact.
+///         address. Fresh deployment, not an in-place upgrade — pre-amendment
+///         event logs at any prior address remain intact.
 ///
 /// Usage:
 ///   forge script script/DeployBamCore.s.sol:DeployBamCore \

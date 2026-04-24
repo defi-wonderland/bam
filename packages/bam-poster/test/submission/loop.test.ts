@@ -1,214 +1,173 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import type { Address, Bytes32 } from 'bam-sdk';
 
-import { MemoryPosterStore } from '../../src/pool/memory-store.js';
-import { defaultBatchPolicy, DEFAULT_BLOB_CAPACITY_BYTES } from '../../src/policy/default.js';
 import { SubmissionLoop } from '../../src/submission/loop.js';
 import { DEFAULT_BACKOFF } from '../../src/submission/backoff.js';
+import { MemoryPosterStore } from '../../src/pool/memory-store.js';
 import type { BuildAndSubmit, SubmitOutcome } from '../../src/submission/types.js';
-import type { StoreTxnPendingRow } from '../../src/types.js';
+import type { BatchPolicy, DecodedMessage, PoolView } from '../../src/types.js';
 
 const TAG = ('0x' + 'aa'.repeat(32)) as Bytes32;
-const AUTHOR = '0x1111111111111111111111111111111111111111' as Address;
+const SENDER = ('0x' + '11'.repeat(20)) as Address;
 
-function makePending(i: number): StoreTxnPendingRow {
+function decoded(nonce: number, ingestSeq = nonce): DecodedMessage {
+  const contents = new Uint8Array(40);
+  contents.fill(0xaa, 0, 32);
   return {
-    messageId: (`0x${i.toString(16).padStart(64, '0')}`) as Bytes32,
+    sender: SENDER,
+    nonce: BigInt(nonce),
+    contents,
     contentTag: TAG,
-    author: AUTHOR,
-    nonce: BigInt(i),
-    timestamp: 1_700_000_000 + i,
-    content: new TextEncoder().encode(`msg-${i}`),
     signature: new Uint8Array(65),
-    ingestedAt: 1_700_000_000_000 + i,
-    ingestSeq: i,
+    messageHash: (('0x' + nonce.toString(16).padStart(64, '0')) as Bytes32),
+    ingestedAt: 1_000 + ingestSeq,
   };
 }
 
-async function seedPool(store: MemoryPosterStore, count: number): Promise<void> {
-  await store.withTxn(async (txn) => {
-    for (let i = 1; i <= count; i++) await txn.insertPending(makePending(i));
-  });
+function mkPolicy(select: (pool: PoolView) => DecodedMessage[] | null): BatchPolicy {
+  return {
+    select: (_tag, pool) => {
+      const msgs = select(pool);
+      return msgs === null ? null : { msgs };
+    },
+  };
 }
 
-function makeLoop(
-  store: MemoryPosterStore,
-  buildAndSubmit: BuildAndSubmit,
-  overrides: { forceFlush?: boolean; now?: () => Date } = {}
-): SubmissionLoop {
-  return new SubmissionLoop({
+interface Harness {
+  store: MemoryPosterStore;
+  loop: SubmissionLoop;
+  outcomes: SubmitOutcome[];
+  build: BuildAndSubmit;
+}
+
+function mkHarness(opts: {
+  outcome: SubmitOutcome | 'sequence';
+  sequence?: SubmitOutcome[];
+  policyPicks?: number;
+}): Harness {
+  const store = new MemoryPosterStore();
+  const picks = opts.policyPicks ?? 2;
+  const policy = mkPolicy((pool) => {
+    const msgs = pool.list(TAG);
+    if (msgs.length === 0) return null;
+    return msgs.slice(0, picks);
+  });
+  const calls: SubmitOutcome[] = [];
+  let idx = 0;
+  const build: BuildAndSubmit = async () => {
+    const out =
+      opts.outcome === 'sequence' ? opts.sequence![idx++] : opts.outcome;
+    calls.push(out);
+    return out;
+  };
+  const loop = new SubmissionLoop({
     tag: TAG,
     store,
-    policy: defaultBatchPolicy({ forceFlush: overrides.forceFlush ?? true }),
-    blobCapacityBytes: DEFAULT_BLOB_CAPACITY_BYTES,
-    buildAndSubmit,
+    policy,
+    blobCapacityBytes: 100_000,
+    buildAndSubmit: build,
     backoff: DEFAULT_BACKOFF,
-    now: overrides.now ?? (() => new Date(1_700_000_000_000)),
+    now: () => new Date(5_000),
     reorgWindowBlocks: 32,
+  });
+  return { store, loop, outcomes: calls, build };
+}
+
+async function seedPending(store: MemoryPosterStore, count: number): Promise<void> {
+  await store.withTxn(async (txn) => {
+    for (let i = 1; i <= count; i++) {
+      const contents = new Uint8Array(40);
+      contents.fill(0xaa, 0, 32);
+      txn.insertPending({
+        contentTag: TAG,
+        sender: SENDER,
+        nonce: BigInt(i),
+        contents,
+        signature: new Uint8Array(65),
+        messageHash: (('0x' + i.toString(16).padStart(64, '0')) as Bytes32),
+        ingestedAt: 1_000 + i,
+        ingestSeq: i,
+      });
+    }
   });
 }
 
-describe('SubmissionLoop — success path', () => {
-  it('submits, records the batch, and prunes pending on inclusion', async () => {
-    const store = new MemoryPosterStore();
-    await seedPool(store, 3);
-    const txHash = ('0x' + 'ab'.repeat(32)) as Bytes32;
-    const vhash = ('0x' + 'cd'.repeat(32)) as Bytes32;
-
-    let calls = 0;
-    const buildAndSubmit: BuildAndSubmit = async (args) => {
-      calls++;
-      expect(args.contentTag).toBe(TAG);
-      expect(args.messages).toHaveLength(3);
-      return { kind: 'included', txHash, blobVersionedHash: vhash, blockNumber: 42 };
-    };
-    const loop = makeLoop(store, buildAndSubmit);
-
-    const outcome = await loop.tick();
-    expect(outcome).toBe('success');
-    expect(calls).toBe(1);
-    expect(loop.healthState()).toBe('ok');
-
-    const remaining = await store.withTxn(async (txn) => txn.listPendingByTag(TAG));
-    expect(remaining).toHaveLength(0);
-    const submitted = await store.withTxn(async (txn) =>
-      txn.listSubmitted({ contentTag: TAG })
-    );
-    expect(submitted).toHaveLength(1);
-    expect(submitted[0].txHash).toBe(txHash);
-    expect(submitted[0].blockNumber).toBe(42);
-    expect(submitted[0].messageIds).toHaveLength(3);
-  });
-});
-
-describe('SubmissionLoop — retry + backoff', () => {
-  it('records no submitted row on retryable fail and ramps the backoff', async () => {
-    const store = new MemoryPosterStore();
-    await seedPool(store, 1);
-    const buildAndSubmit: BuildAndSubmit = async () =>
-      ({ kind: 'retryable', detail: 'rpc down' } as SubmitOutcome);
-    const loop = makeLoop(store, buildAndSubmit);
-
-    const outcome = await loop.tick();
-    expect(outcome).toBe('retry');
-    expect(loop.attempts()).toBe(1);
-    expect(loop.nextDelayMs()).toBe(DEFAULT_BACKOFF.baseMs);
-
-    const pending = await store.withTxn(async (txn) => txn.listPendingByTag(TAG));
-    expect(pending).toHaveLength(1);
-    const submitted = await store.withTxn(async (txn) => txn.listSubmitted({}));
-    expect(submitted).toHaveLength(0);
-
-    await loop.tick();
-    expect(loop.attempts()).toBe(2);
-    expect(loop.nextDelayMs()).toBe(DEFAULT_BACKOFF.baseMs * 2);
-  });
-
-  it('flips health to degraded after N consecutive retryable failures', async () => {
-    const store = new MemoryPosterStore();
-    await seedPool(store, 1);
-    const buildAndSubmit: BuildAndSubmit = async () =>
-      ({ kind: 'retryable', detail: 'gas too high' } as SubmitOutcome);
-    const loop = makeLoop(store, buildAndSubmit);
-
-    for (let i = 0; i < DEFAULT_BACKOFF.degradedAfterAttempts; i++) {
-      await loop.tick();
-    }
-    expect(loop.healthState()).toBe('degraded');
-  });
-
-  it('retryable-then-success clears backoff state', async () => {
-    const store = new MemoryPosterStore();
-    await seedPool(store, 2);
-    let call = 0;
-    const buildAndSubmit: BuildAndSubmit = async () => {
-      call++;
-      if (call === 1) return { kind: 'retryable', detail: 'flake' };
-      return {
-        kind: 'included',
-        txHash: ('0x' + '11'.repeat(32)) as Bytes32,
-        blobVersionedHash: ('0x' + '22'.repeat(32)) as Bytes32,
-        blockNumber: 100,
-      };
-    };
-    const loop = makeLoop(store, buildAndSubmit);
-    expect(await loop.tick()).toBe('retry');
-    expect(loop.attempts()).toBe(1);
-    expect(await loop.tick()).toBe('success');
-    expect(loop.attempts()).toBe(0);
-    expect(loop.healthState()).toBe('ok');
-  });
-});
-
-describe('SubmissionLoop — permanent failure', () => {
-  it('flips health to unhealthy and stops retrying', async () => {
-    const store = new MemoryPosterStore();
-    await seedPool(store, 1);
-    let calls = 0;
-    const buildAndSubmit: BuildAndSubmit = async () => {
-      calls++;
-      return { kind: 'permanent', detail: 'tx reverted' };
-    };
-    const loop = makeLoop(store, buildAndSubmit);
-    const first = await loop.tick();
-    expect(first).toBe('permanent');
-    expect(loop.healthState()).toBe('unhealthy');
-    const second = await loop.tick();
-    expect(second).toBe('permanent');
-    expect(calls).toBe(1); // never retried after permanent
-  });
-});
-
-describe('SubmissionLoop — empty selection', () => {
-  it('short-circuits without invoking buildAndSubmit when pool is empty', async () => {
-    const store = new MemoryPosterStore();
-    let calls = 0;
-    const buildAndSubmit: BuildAndSubmit = async () => {
-      calls++;
-      return {
-        kind: 'included',
-        txHash: ('0x' + '99'.repeat(32)) as Bytes32,
-        blobVersionedHash: ('0x' + '99'.repeat(32)) as Bytes32,
-        blockNumber: 1,
-      };
-    };
-    const loop = makeLoop(store, buildAndSubmit);
-    const outcome = await loop.tick();
-    expect(outcome).toBe('idle');
-    expect(calls).toBe(0);
-  });
-
-  it('short-circuits when the policy returns null (no trigger met)', async () => {
-    const store = new MemoryPosterStore();
-    await seedPool(store, 1);
-    let calls = 0;
-    const buildAndSubmit: BuildAndSubmit = async () => {
-      calls++;
-      return {
-        kind: 'included',
-        txHash: ('0x' + '99'.repeat(32)) as Bytes32,
-        blobVersionedHash: ('0x' + '99'.repeat(32)) as Bytes32,
-        blockNumber: 1,
-      };
-    };
-    // forceFlush: false + high thresholds = policy returns null
-    const loop = new SubmissionLoop({
-      tag: TAG,
-      store,
-      policy: defaultBatchPolicy({
-        forceFlush: false,
-        sizeTriggerRatio: 0.999,
-        ageTriggerMs: 10 ** 9,
-        countTrigger: 10 ** 9,
-      }),
-      blobCapacityBytes: DEFAULT_BLOB_CAPACITY_BYTES,
-      buildAndSubmit,
-      backoff: DEFAULT_BACKOFF,
-      now: () => new Date(1_700_000_000_000),
-      reorgWindowBlocks: 32,
+describe('SubmissionLoop', () => {
+  it('empty pool → idle, no submission', async () => {
+    const h = mkHarness({
+      outcome: { kind: 'included', txHash: '0x01' as Bytes32, blockNumber: 1, blobVersionedHash: '0x02' as Bytes32 },
     });
-    const outcome = await loop.tick();
-    expect(outcome).toBe('idle');
-    expect(calls).toBe(0);
+    const res = await h.loop.tick();
+    expect(res).toBe('idle');
+    expect(h.outcomes.length).toBe(0);
+  });
+
+  it('successful submit records submitted batch, prunes pending, resets backoff', async () => {
+    const h = mkHarness({
+      outcome: {
+        kind: 'included',
+        txHash: ('0x' + 'aa'.repeat(32)) as Bytes32,
+        blockNumber: 100,
+        blobVersionedHash: ('0x' + 'bb'.repeat(32)) as Bytes32,
+      },
+      policyPicks: 2,
+    });
+    await seedPending(h.store, 3);
+    const res = await h.loop.tick();
+    expect(res).toBe('success');
+    const remaining = await h.store.withTxn((txn) =>
+      Promise.resolve(txn.listPendingByTag(TAG))
+    );
+    expect(remaining.map((r) => Number(r.nonce))).toEqual([3]);
+    const submitted = await h.store.withTxn((txn) =>
+      Promise.resolve(txn.listSubmitted({ contentTag: TAG }))
+    );
+    expect(submitted.length).toBe(1);
+    expect(submitted[0].batchContentHash).toBe('0x' + 'bb'.repeat(32));
+    expect(submitted[0].messages.length).toBe(2);
+    // Each message gets a batch-scoped messageId.
+    expect(submitted[0].messages[0].messageId).toMatch(/^0x[0-9a-f]{64}$/);
+    expect(h.loop.attempts()).toBe(0);
+    expect(h.loop.healthState()).toBe('ok');
+  });
+
+  it('retryable failure increments backoff without pruning pending', async () => {
+    const h = mkHarness({
+      outcome: { kind: 'retryable', detail: 'rpc_down' },
+      policyPicks: 1,
+    });
+    await seedPending(h.store, 1);
+    const res = await h.loop.tick();
+    expect(res).toBe('retry');
+    const remaining = await h.store.withTxn((txn) =>
+      Promise.resolve(txn.listPendingByTag(TAG))
+    );
+    expect(remaining.length).toBe(1);
+    expect(h.loop.attempts()).toBe(1);
+    expect(h.loop.nextDelayMs()).toBeGreaterThan(0);
+  });
+
+  it('permanent failure stops the worker (subsequent ticks return "permanent")', async () => {
+    const h = mkHarness({
+      outcome: { kind: 'permanent', detail: 'abi_mismatch' },
+      policyPicks: 1,
+    });
+    await seedPending(h.store, 1);
+    await h.loop.tick();
+    expect(h.loop.healthState()).toBe('unhealthy');
+    const follow = await h.loop.tick();
+    expect(follow).toBe('permanent');
+  });
+
+  it('degraded health after N consecutive retryable failures', async () => {
+    const h = mkHarness({
+      outcome: { kind: 'retryable', detail: 'rpc_down' },
+      policyPicks: 1,
+    });
+    await seedPending(h.store, 1);
+    for (let i = 0; i < DEFAULT_BACKOFF.degradedAfterAttempts; i++) {
+      await h.loop.tick();
+    }
+    expect(h.loop.healthState()).toBe('degraded');
   });
 });
