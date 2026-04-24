@@ -20,6 +20,10 @@ import type {
 } from './types.js';
 import { decodeNonce, encodeNonce } from './nonce-codec.js';
 import { SCHEMA_VERSION, SQL_CREATE_POSTGRES } from './schema.js';
+import {
+  decodeMessageSnapshot,
+  encodeMessageSnapshot,
+} from './snapshot-codec.js';
 
 function isSerializationFailure(err: unknown): boolean {
   return (
@@ -59,6 +63,7 @@ interface BatchRowRaw {
   replaced_by_tx_hash: string | null;
   submitted_at: string | number | null;
   invalidated_at: string | number | null;
+  message_snapshot: string;
 }
 
 interface CursorRowRaw {
@@ -114,6 +119,7 @@ function mapBatch(raw: BatchRowRaw): BatchRow {
     replacedByTxHash: (raw.replaced_by_tx_hash ?? null) as Bytes32 | null,
     submittedAt: toIntOrNull(raw.submitted_at),
     invalidatedAt: toIntOrNull(raw.invalidated_at),
+    messageSnapshot: decodeMessageSnapshot(raw.message_snapshot),
   };
 }
 
@@ -248,7 +254,7 @@ function makePgTxn(client: PgPoolClient): StoreTxn {
 
 
   return {
-    // ── old Poster-facing pending CRUD (bridged) ────────────────────
+    // ── pending CRUD (bridged to messages) ──────────────────────────
     async insertPending(row: StoreTxnPendingRow): Promise<void> {
       const existing = await client.query<MessageRowRaw>(
         'SELECT status FROM messages WHERE author = $1 AND nonce = $2',
@@ -256,7 +262,7 @@ function makePgTxn(client: PgPoolClient): StoreTxn {
       );
       if (existing.rows[0]) {
         const s = existing.rows[0].status;
-        if (s !== 'reorged' && s !== 'duplicate') {
+        if (s !== 'reorged') {
           throw new Error('insertPending: duplicate (sender, nonce)');
         }
         await client.query(
@@ -410,7 +416,8 @@ function makePgTxn(client: PgPoolClient): StoreTxn {
       if (e) {
         if (e.message_hash !== row.messageHash) {
           throw new Error(
-            'upsertObserved: existing row has a different messageHash — caller must call markDuplicate (or markReorged) before replacing'
+            'upsertObserved: existing row has a different messageHash at the same (author, nonce). ' +
+              'The nonce-replay-across-batchers duplicate flow is deferred to 004-reader.'
           );
         }
         if (e.status === 'confirmed') {
@@ -418,23 +425,6 @@ function makePgTxn(client: PgPoolClient): StoreTxn {
         }
       }
       await upsertMessage(row);
-    },
-
-    async markDuplicate(messageHash: Bytes32): Promise<void> {
-      const res = await client.query<{ author: string; nonce: string }>(
-        "SELECT author, nonce FROM messages WHERE message_hash = $1 AND status != 'confirmed' LIMIT 1",
-        [messageHash]
-      );
-      const r = res.rows[0];
-      if (!r) {
-        throw new Error(
-          `markDuplicate: no non-confirmed row with messageHash=${messageHash}`
-        );
-      }
-      await client.query(
-        `UPDATE messages SET status = 'duplicate' WHERE author = $1 AND nonce = $2`,
-        [r.author, r.nonce]
-      );
     },
 
     async markReorged(txHash: Bytes32, invalidatedAt: number): Promise<void> {
@@ -517,12 +507,13 @@ function makePgTxn(client: PgPoolClient): StoreTxn {
 
     // ── unified-schema batch CRUD ────────────────────────────────────
     async upsertBatch(row: BatchRow): Promise<void> {
+      const snapshotJson = encodeMessageSnapshot(row.messageSnapshot);
       await client.query(
         `INSERT INTO batches
           (tx_hash, chain_id, content_tag, blob_versioned_hash,
            batch_content_hash, block_number, tx_index, status,
-           replaced_by_tx_hash, submitted_at, invalidated_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+           replaced_by_tx_hash, submitted_at, invalidated_at, message_snapshot)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
          ON CONFLICT (tx_hash) DO UPDATE SET
            chain_id            = EXCLUDED.chain_id,
            content_tag         = EXCLUDED.content_tag,
@@ -531,9 +522,13 @@ function makePgTxn(client: PgPoolClient): StoreTxn {
            block_number        = EXCLUDED.block_number,
            tx_index            = EXCLUDED.tx_index,
            status              = EXCLUDED.status,
-           replaced_by_tx_hash = EXCLUDED.replaced_by_tx_hash,
-           submitted_at        = EXCLUDED.submitted_at,
-           invalidated_at      = EXCLUDED.invalidated_at`,
+           replaced_by_tx_hash = COALESCE(EXCLUDED.replaced_by_tx_hash, batches.replaced_by_tx_hash),
+           submitted_at        = COALESCE(EXCLUDED.submitted_at, batches.submitted_at),
+           invalidated_at      = EXCLUDED.invalidated_at,
+           message_snapshot    = CASE
+             WHEN EXCLUDED.message_snapshot = '[]' THEN batches.message_snapshot
+             ELSE EXCLUDED.message_snapshot
+           END`,
         [
           row.txHash,
           row.chainId,
@@ -546,6 +541,7 @@ function makePgTxn(client: PgPoolClient): StoreTxn {
           row.replacedByTxHash,
           row.submittedAt,
           row.invalidatedAt,
+          snapshotJson,
         ]
       );
     },

@@ -36,46 +36,49 @@ export interface PendingKey {
 
 export interface StoreTxn {
   // ── pending CRUD ─────────────────────────────────────────────────────
-  insertPending(row: StoreTxnPendingRow): void | Promise<void>;
-  getPendingByKey(
-    key: PendingKey
-  ): StoreTxnPendingRow | null | Promise<StoreTxnPendingRow | null>;
+  insertPending(row: StoreTxnPendingRow): Promise<void>;
+  getPendingByKey(key: PendingKey): Promise<StoreTxnPendingRow | null>;
   listPendingByTag(
     tag: Bytes32,
     limit?: number,
     sinceSeq?: number
-  ): StoreTxnPendingRow[] | Promise<StoreTxnPendingRow[]>;
-  listPendingAll(
-    limit?: number,
-    sinceSeq?: number
-  ): StoreTxnPendingRow[] | Promise<StoreTxnPendingRow[]>;
-  countPendingByTag(tag: Bytes32): number | Promise<number>;
-  nextIngestSeq(tag: Bytes32): number | Promise<number>;
+  ): Promise<StoreTxnPendingRow[]>;
+  listPendingAll(limit?: number, sinceSeq?: number): Promise<StoreTxnPendingRow[]>;
+  countPendingByTag(tag: Bytes32): Promise<number>;
+  nextIngestSeq(tag: Bytes32): Promise<number>;
 
   // ── nonce tracker CRUD ───────────────────────────────────────────────
-  getNonce(sender: Address): NonceTrackerRow | null | Promise<NonceTrackerRow | null>;
-  setNonce(row: NonceTrackerRow): void | Promise<void>;
+  getNonce(sender: Address): Promise<NonceTrackerRow | null>;
+  setNonce(row: NonceTrackerRow): Promise<void>;
 
   // ── unified-schema lifecycle transitions ────────────────────────────
-  /** Poster-side: move rows from `pending` to `submitted` and attach a batch ref. */
-  markSubmitted(keys: PendingKey[], batchRef: Bytes32): void | Promise<void>;
+  /**
+   * Poster-side: move rows from `pending` to `submitted` and attach a batch ref.
+   * Used by callers whose `buildAndSubmit` returns before chain inclusion (the
+   * Poster's current `buildAndSubmit` blocks on the receipt and goes
+   * pending → confirmed directly, but the substrate keeps `submitted` as a
+   * first-class state for an async-receipt variant).
+   */
+  markSubmitted(keys: PendingKey[], batchRef: Bytes32): Promise<void>;
   /** Reader-side: idempotent upsert of an observed message keyed by (author, nonce). */
-  upsertObserved(row: MessageRow): void | Promise<void>;
-  /** Reader-side: mark a later-arriving row as a duplicate of an already-confirmed (author, nonce). */
-  markDuplicate(messageHash: Bytes32, reason?: string): void | Promise<void>;
+  upsertObserved(row: MessageRow): Promise<void>;
   /** Poster-side or Reader-side: mark a submitted/confirmed row as reorged. */
-  markReorged(txHash: Bytes32, invalidatedAt: number): void | Promise<void>;
+  markReorged(txHash: Bytes32, invalidatedAt: number): Promise<void>;
 
   // ── unified-schema reads ──────────────────────────────────────────────
-  listMessages(query: MessagesQuery): MessageRow[] | Promise<MessageRow[]>;
-  getByMessageId(messageId: Bytes32): MessageRow | null | Promise<MessageRow | null>;
-  getByAuthorNonce(
-    author: Address,
-    nonce: bigint
-  ): MessageRow | null | Promise<MessageRow | null>;
+  listMessages(query: MessagesQuery): Promise<MessageRow[]>;
+  getByMessageId(messageId: Bytes32): Promise<MessageRow | null>;
+  getByAuthorNonce(author: Address, nonce: bigint): Promise<MessageRow | null>;
 
   // ── unified-schema batch CRUD ────────────────────────────────────────
-  upsertBatch(row: BatchRow): void | Promise<void>;
+  /**
+   * Insert or refresh a batch row. The first writer's `messageSnapshot` is
+   * preserved across subsequent calls (a Reader observing a Poster-written
+   * batch with an empty snapshot will not clobber the Poster's keys).
+   * `submittedAt` and `replacedByTxHash` are similarly COALESCEd so a
+   * second writer's nulls don't overwrite the first writer's values.
+   */
+  upsertBatch(row: BatchRow): Promise<void>;
   updateBatchStatus(
     txHash: Bytes32,
     status: BatchStatus,
@@ -85,12 +88,12 @@ export interface StoreTxn {
       replacedByTxHash?: Bytes32 | null;
       invalidatedAt?: number | null;
     }
-  ): void | Promise<void>;
-  listBatches(query: BatchesQuery): BatchRow[] | Promise<BatchRow[]>;
+  ): Promise<void>;
+  listBatches(query: BatchesQuery): Promise<BatchRow[]>;
 
   // ── reader cursor ────────────────────────────────────────────────────
-  getCursor(chainId: number): ReaderCursorRow | null | Promise<ReaderCursorRow | null>;
-  setCursor(row: ReaderCursorRow): void | Promise<void>;
+  getCursor(chainId: number): Promise<ReaderCursorRow | null>;
+  setCursor(row: ReaderCursorRow): Promise<void>;
 }
 
 export interface BamStore {
@@ -107,13 +110,15 @@ export interface BamStore {
  *   pending   — Poster accepted, not yet submitted.
  *   submitted — Poster submitted (tx broadcast); not yet confirmed.
  *   confirmed — Landed on L1 at configured depth.
- *   duplicate — A later-arriving `(author, nonce)` whose original row
- *               was already `confirmed` by a different Poster; the first
- *               row wins and the duplicate is retained but discarded
- *               downstream. Original row is never mutated.
  *   reorged   — A previously-confirmed row whose batch reorged out.
+ *
+ * The spec's "nonce-replay-across-batchers" duplicate flow is not a
+ * distinct lifecycle state. Today the substrate rejects a different-bytes
+ * arrival at the same `(author, nonce)`; first-confirmed wins and the
+ * later arrival has nowhere to land. The Reader (004) will introduce a
+ * proper duplicate sink (separate table or alternate key) for that path.
  */
-export type MessageStatus = 'pending' | 'submitted' | 'confirmed' | 'duplicate' | 'reorged';
+export type MessageStatus = 'pending' | 'submitted' | 'confirmed' | 'reorged';
 
 export type BatchStatus = 'pending_tx' | 'confirmed' | 'reorged';
 
@@ -158,9 +163,29 @@ export interface MessageRow {
 }
 
 /**
- * Unified batch row — on-chain metadata only. No duplicated message
- * payloads. Carries a `chainId` so a future multi-chain Reader operates
- * without a schema change.
+ * Per-message entry in a batch's snapshot — captures the batch-scoped
+ * attributes (messageId, position) that don't survive on the messages
+ * table once a message is reorged-and-resubmitted into a different
+ * batch. Stored on the batch row, immutable after first write.
+ */
+export interface BatchMessageSnapshotEntry {
+  author: Address;
+  nonce: bigint;
+  /** ERC-8180 batch-scoped messageId, computed at confirmation. */
+  messageId: Bytes32;
+  /** Position within the batch's encoded message list. */
+  messageIndexWithinBatch: number;
+  /** ERC-8180 messageHash — stable identity, useful for overlap checks. */
+  messageHash: Bytes32;
+}
+
+/**
+ * Unified batch row — on-chain metadata + a frozen snapshot of which
+ * messages were in this batch at confirmation time. The snapshot
+ * preserves the batch → messages association across subsequent message
+ * mutations (reorg + re-enqueue + resubmit), which a single
+ * `messages.batch_ref` column cannot represent. Carries a `chainId` so
+ * a future multi-chain Reader operates without a schema change.
  */
 export interface BatchRow {
   txHash: Bytes32;
@@ -175,6 +200,13 @@ export interface BatchRow {
   replacedByTxHash: Bytes32 | null;
   submittedAt: number | null;
   invalidatedAt: number | null;
+  /**
+   * Frozen snapshot of which messages were in this batch at confirmation.
+   * Empty array allowed (e.g. a Reader has observed the batch but not yet
+   * decoded it). Adapters preserve a non-empty snapshot across upserts —
+   * a later writer's empty snapshot does not clobber the original.
+   */
+  messageSnapshot: BatchMessageSnapshotEntry[];
 }
 
 /**

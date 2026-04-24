@@ -10,14 +10,21 @@ export interface DbStoreOptions {
 }
 
 /**
- * Selects the DB adapter at startup: POSTGRES_URL wins; otherwise
- * SQLite.
+ * Adapter selector: pick Postgres when `postgresUrl` is set, SQLite
+ * otherwise. Reads no environment variables — the caller (e.g. the
+ * Poster's CLI `parseEnv`) is responsible for resolving the URL/path
+ * from its own configuration. This keeps `bam-store` free of host-env
+ * side-effects so library consumers see only what they pass in.
  */
 export function createDbStore(options: DbStoreOptions): BamStore {
-  const pgUrl = options.postgresUrl ?? process.env.POSTGRES_URL;
-  if (pgUrl && pgUrl.length > 0) {
-    return new PostgresBamStore(pgUrl);
+  if (options.postgresUrl && options.postgresUrl.length > 0) {
+    return new PostgresBamStore(options.postgresUrl);
   }
-  const path = options.sqlitePath ?? process.env.POSTER_SQLITE_PATH ?? './poster.db';
-  return new SqliteBamStore(path);
+  if (options.sqlitePath && options.sqlitePath.length > 0) {
+    return new SqliteBamStore(options.sqlitePath);
+  }
+  throw new Error(
+    'createDbStore: provide either `sqlitePath` or `postgresUrl`. ' +
+      'No env-var fallbacks — resolve from your config and pass in.'
+  );
 }

@@ -25,7 +25,7 @@ afterEach(async () => {
 describe('SqliteBamStore — schema', () => {
   it('fresh DB self-initialises to the current SCHEMA_VERSION', () => {
     const store = newStore();
-    expect(store.readSchemaVersion()).toBe(3);
+    expect(store.readSchemaVersion()).toBe(4);
   });
 
   it('all unified tables exist on a fresh DB', () => {

@@ -17,6 +17,10 @@ import type {
 } from './types.js';
 import { decodeNonce, encodeNonce } from './nonce-codec.js';
 import { SCHEMA_VERSION, SQL_CREATE_SQLITE } from './schema.js';
+import {
+  decodeMessageSnapshot,
+  encodeMessageSnapshot,
+} from './snapshot-codec.js';
 
 interface MessageRowRaw {
   author: string;
@@ -47,6 +51,7 @@ interface BatchRowRaw {
   replaced_by_tx_hash: string | null;
   submitted_at: number | null;
   invalidated_at: number | null;
+  message_snapshot: string;
 }
 
 interface CursorRowRaw {
@@ -94,6 +99,7 @@ function mapBatch(raw: BatchRowRaw): BatchRow {
     replacedByTxHash: (raw.replaced_by_tx_hash ?? null) as Bytes32 | null,
     submittedAt: raw.submitted_at,
     invalidatedAt: raw.invalidated_at,
+    messageSnapshot: decodeMessageSnapshot(raw.message_snapshot),
   };
 }
 
@@ -235,14 +241,14 @@ export class SqliteBamStore implements BamStore {
     }
 
     return {
-      // ── old Poster-facing pending CRUD (bridged to `messages`) ────────
-      insertPending(row: StoreTxnPendingRow): void {
+      // ── pending CRUD (bridged to `messages`) ──────────────────────
+      async insertPending(row: StoreTxnPendingRow): Promise<void> {
         const existing = selectMsgByKey.get(
           row.sender.toLowerCase(),
           encodeNonce(row.nonce)
         ) as MessageRowRaw | undefined;
         if (existing) {
-          if (existing.status !== 'reorged' && existing.status !== 'duplicate') {
+          if (existing.status !== 'reorged') {
             throw new Error('insertPending: duplicate (sender, nonce)');
           }
           // Overwrite the stale terminal row with a fresh pending one.
@@ -269,7 +275,7 @@ export class SqliteBamStore implements BamStore {
         });
       },
 
-      getPendingByKey(key: PendingKey): StoreTxnPendingRow | null {
+      async getPendingByKey(key: PendingKey): Promise<StoreTxnPendingRow | null> {
         const raw = db
           .prepare(
             "SELECT * FROM messages WHERE author = ? AND nonce = ? AND status = 'pending'"
@@ -280,11 +286,11 @@ export class SqliteBamStore implements BamStore {
         return raw ? mapPending(raw) : null;
       },
 
-      listPendingByTag(
+      async listPendingByTag(
         tag: Bytes32,
         limit?: number,
         sinceSeq?: number
-      ): StoreTxnPendingRow[] {
+      ): Promise<StoreTxnPendingRow[]> {
         const clauses: string[] = ["content_tag = ?", "status = 'pending'"];
         const params: Array<string | number> = [tag];
         if (sinceSeq !== undefined) {
@@ -302,7 +308,7 @@ export class SqliteBamStore implements BamStore {
         return rows.map(mapPending);
       },
 
-      listPendingAll(limit?: number, sinceSeq?: number): StoreTxnPendingRow[] {
+      async listPendingAll(limit?: number, sinceSeq?: number): Promise<StoreTxnPendingRow[]> {
         const clauses: string[] = ["status = 'pending'"];
         const params: Array<string | number> = [];
         if (sinceSeq !== undefined) {
@@ -320,7 +326,7 @@ export class SqliteBamStore implements BamStore {
         return rows.map(mapPending);
       },
 
-      countPendingByTag(tag: Bytes32): number {
+      async countPendingByTag(tag: Bytes32): Promise<number> {
         const row = db
           .prepare(
             "SELECT COUNT(*) AS c FROM messages WHERE content_tag = ? AND status = 'pending'"
@@ -329,7 +335,7 @@ export class SqliteBamStore implements BamStore {
         return row?.c ?? 0;
       },
 
-      nextIngestSeq(tag: Bytes32): number {
+      async nextIngestSeq(tag: Bytes32): Promise<number> {
         const row = db
           .prepare(
             `INSERT INTO tag_seq (content_tag, last_seq) VALUES (?, 1)
@@ -344,7 +350,7 @@ export class SqliteBamStore implements BamStore {
       },
 
       // ── nonce tracker ────────────────────────────────────────────────
-      getNonce(sender: Address): NonceTrackerRow | null {
+      async getNonce(sender: Address): Promise<NonceTrackerRow | null> {
         const raw = db
           .prepare('SELECT * FROM nonces WHERE sender = ?')
           .get(sender.toLowerCase()) as NonceRowRaw | undefined;
@@ -355,7 +361,7 @@ export class SqliteBamStore implements BamStore {
           lastMessageHash: raw.last_message_hash as Bytes32,
         };
       },
-      setNonce(row: NonceTrackerRow): void {
+      async setNonce(row: NonceTrackerRow): Promise<void> {
         db.prepare(
           `INSERT INTO nonces (sender, last_nonce, last_message_hash)
            VALUES (?, ?, ?)
@@ -366,7 +372,7 @@ export class SqliteBamStore implements BamStore {
       },
 
       // ── unified-schema lifecycle transitions ─────────────────────────
-      markSubmitted(keys: PendingKey[], batchRef: Bytes32): void {
+      async markSubmitted(keys: PendingKey[], batchRef: Bytes32): Promise<void> {
         if (keys.length === 0) return;
         const CHUNK = 500;
         for (let i = 0; i < keys.length; i += CHUNK) {
@@ -391,7 +397,7 @@ export class SqliteBamStore implements BamStore {
         }
       },
 
-      upsertObserved(row: MessageRow): void {
+      async upsertObserved(row: MessageRow): Promise<void> {
         const existing = selectMsgByKey.get(
           row.author.toLowerCase(),
           encodeNonce(row.nonce)
@@ -399,7 +405,8 @@ export class SqliteBamStore implements BamStore {
         if (existing) {
           if (existing.message_hash !== row.messageHash) {
             throw new Error(
-              'upsertObserved: existing row has a different messageHash — caller must call markDuplicate (or markReorged) before replacing'
+              'upsertObserved: existing row has a different messageHash at the same (author, nonce). ' +
+                'The nonce-replay-across-batchers duplicate flow is deferred to 004-reader.'
             );
           }
           if (existing.status === 'confirmed') {
@@ -409,23 +416,7 @@ export class SqliteBamStore implements BamStore {
         upsertMessage(row);
       },
 
-      markDuplicate(messageHash: Bytes32): void {
-        const raw = db
-          .prepare(
-            "SELECT author, nonce FROM messages WHERE message_hash = ? AND status != 'confirmed' LIMIT 1"
-          )
-          .get(messageHash) as { author: string; nonce: string } | undefined;
-        if (!raw) {
-          throw new Error(
-            `markDuplicate: no non-confirmed row with messageHash=${messageHash}`
-          );
-        }
-        db.prepare(
-          `UPDATE messages SET status = 'duplicate' WHERE author = ? AND nonce = ?`
-        ).run(raw.author, raw.nonce);
-      },
-
-      markReorged(txHash: Bytes32, invalidatedAt: number): void {
+      async markReorged(txHash: Bytes32, invalidatedAt: number): Promise<void> {
         const res = db
           .prepare(
             `UPDATE batches SET status = 'reorged', invalidated_at = ? WHERE tx_hash = ?`
@@ -440,7 +431,7 @@ export class SqliteBamStore implements BamStore {
       },
 
       // ── unified-schema reads ─────────────────────────────────────────
-      listMessages(query: MessagesQuery): MessageRow[] {
+      async listMessages(query: MessagesQuery): Promise<MessageRow[]> {
         const clauses: string[] = [];
         const params: Array<string | number> = [];
         if (query.contentTag !== undefined) {
@@ -492,14 +483,14 @@ export class SqliteBamStore implements BamStore {
         return rows.map(mapMessage);
       },
 
-      getByMessageId(messageId: Bytes32): MessageRow | null {
+      async getByMessageId(messageId: Bytes32): Promise<MessageRow | null> {
         const raw = db
           .prepare('SELECT * FROM messages WHERE message_id = ?')
           .get(messageId) as MessageRowRaw | undefined;
         return raw ? mapMessage(raw) : null;
       },
 
-      getByAuthorNonce(author: Address, nonce: bigint): MessageRow | null {
+      async getByAuthorNonce(author: Address, nonce: bigint): Promise<MessageRow | null> {
         const raw = selectMsgByKey.get(
           author.toLowerCase(),
           encodeNonce(nonce)
@@ -508,13 +499,17 @@ export class SqliteBamStore implements BamStore {
       },
 
       // ── unified-schema batch CRUD ────────────────────────────────────
-      upsertBatch(row: BatchRow): void {
+      async upsertBatch(row: BatchRow): Promise<void> {
+        const snapshotJson = encodeMessageSnapshot(row.messageSnapshot);
+        // Preserve first-writer's snapshot if the new caller's is empty.
+        // COALESCE submitted_at + replaced_by_tx_hash so a second writer's
+        // null doesn't clobber the first writer's value.
         db.prepare(
           `INSERT INTO batches
             (tx_hash, chain_id, content_tag, blob_versioned_hash,
              batch_content_hash, block_number, tx_index, status,
-             replaced_by_tx_hash, submitted_at, invalidated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             replaced_by_tx_hash, submitted_at, invalidated_at, message_snapshot)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(tx_hash) DO UPDATE SET
              chain_id             = excluded.chain_id,
              content_tag          = excluded.content_tag,
@@ -523,9 +518,13 @@ export class SqliteBamStore implements BamStore {
              block_number         = excluded.block_number,
              tx_index             = excluded.tx_index,
              status               = excluded.status,
-             replaced_by_tx_hash  = excluded.replaced_by_tx_hash,
-             submitted_at         = excluded.submitted_at,
-             invalidated_at       = excluded.invalidated_at`
+             replaced_by_tx_hash  = COALESCE(excluded.replaced_by_tx_hash, batches.replaced_by_tx_hash),
+             submitted_at         = COALESCE(excluded.submitted_at, batches.submitted_at),
+             invalidated_at       = excluded.invalidated_at,
+             message_snapshot     = CASE
+               WHEN excluded.message_snapshot = '[]' THEN batches.message_snapshot
+               ELSE excluded.message_snapshot
+             END`
         ).run(
           row.txHash,
           row.chainId,
@@ -537,11 +536,12 @@ export class SqliteBamStore implements BamStore {
           row.status,
           row.replacedByTxHash,
           row.submittedAt,
-          row.invalidatedAt
+          row.invalidatedAt,
+          snapshotJson
         );
       },
 
-      updateBatchStatus(
+      async updateBatchStatus(
         txHash: Bytes32,
         status: BatchStatus,
         opts?: {
@@ -550,7 +550,7 @@ export class SqliteBamStore implements BamStore {
           replacedByTxHash?: Bytes32 | null;
           invalidatedAt?: number | null;
         }
-      ): void {
+      ): Promise<void> {
         const sets = ['status = ?'];
         const params: Array<string | number | null> = [status];
         if (opts?.blockNumber !== undefined) {
@@ -577,7 +577,7 @@ export class SqliteBamStore implements BamStore {
         }
       },
 
-      listBatches(query: BatchesQuery): BatchRow[] {
+      async listBatches(query: BatchesQuery): Promise<BatchRow[]> {
         const clauses: string[] = [];
         const params: Array<string | number> = [];
         if (query.contentTag !== undefined) {
@@ -608,7 +608,7 @@ export class SqliteBamStore implements BamStore {
       },
 
       // ── reader cursor ────────────────────────────────────────────────
-      getCursor(chainId: number): ReaderCursorRow | null {
+      async getCursor(chainId: number): Promise<ReaderCursorRow | null> {
         const raw = db
           .prepare('SELECT * FROM reader_cursor WHERE chain_id = ?')
           .get(chainId) as CursorRowRaw | undefined;
@@ -620,7 +620,7 @@ export class SqliteBamStore implements BamStore {
           updatedAt: raw.updated_at,
         };
       },
-      setCursor(row: ReaderCursorRow): void {
+      async setCursor(row: ReaderCursorRow): Promise<void> {
         db.prepare(
           `INSERT INTO reader_cursor
             (chain_id, last_block_number, last_tx_index, updated_at)
@@ -634,3 +634,4 @@ export class SqliteBamStore implements BamStore {
     };
   }
 }
+

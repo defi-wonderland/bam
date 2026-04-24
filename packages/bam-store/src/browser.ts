@@ -9,6 +9,7 @@
 
 export type {
   BamStore,
+  BatchMessageSnapshotEntry,
   BatchRow,
   BatchStatus,
   BatchesQuery,

@@ -72,6 +72,13 @@ async function seedBatch(
       replacedByTxHash: null,
       submittedAt: 2_000,
       invalidatedAt: opts.invalidatedAt ?? null,
+      messageSnapshot: msgs.map((m, i) => ({
+        author: SENDER,
+        nonce: BigInt(m.nonce),
+        messageId: (('0x' + (m.nonce + 1000).toString(16).padStart(64, '0')) as Bytes32),
+        messageHash: (('0x' + m.nonce.toString(16).padStart(64, '0')) as Bytes32),
+        messageIndexWithinBatch: i,
+      })),
     });
     for (let i = 0; i < msgs.length; i++) {
       const m = msgs[i];

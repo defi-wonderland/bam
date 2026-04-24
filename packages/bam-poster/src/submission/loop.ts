@@ -1,4 +1,5 @@
 import { computeMessageId, type Bytes32 } from 'bam-sdk';
+import type { BatchMessageSnapshotEntry } from 'bam-store';
 
 import type {
   BatchPolicy,
@@ -96,7 +97,7 @@ export class SubmissionLoop {
     });
 
     if (outcome.kind === 'included') {
-      // 4. Snapshot payloads + insert submitted row + prune pending +
+      // 4. Snapshot payloads + insert confirmed batch + prune pending +
       //    link any prior `reorged` rows whose messages we just
       //    resubmitted — all in ONE `withTxn`. Each message gets its
       //    batch-scoped `messageId` computed from the blob-versioned
@@ -105,8 +106,31 @@ export class SubmissionLoop {
       const batchContentHash = outcome.blobVersionedHash;
       const submittedAt = this.opts.now().getTime();
       await this.opts.store.withTxn(async (txn) => {
-        // Batch row: the tx is already included at a block by the time
-        // buildAndSubmit returned 'included', so we write status=confirmed.
+        // Compute the message snapshot up-front (before any row mutation)
+        // so it captures the message keys + batch-scoped messageIds even
+        // for any picked messages whose pending rows may have already
+        // been transitioned by a concurrent path.
+        const snapshot: BatchMessageSnapshotEntry[] = [];
+        const pendingByIndex: Array<StoreTxnPendingRow | null> = [];
+        for (let i = 0; i < picked.length; i++) {
+          const m = picked[i];
+          const row = await txn.getPendingByKey({ sender: m.sender, nonce: m.nonce });
+          pendingByIndex.push(row);
+          if (row === null) continue;
+          const messageId = computeMessageId(row.sender, row.nonce, batchContentHash);
+          snapshot.push({
+            author: row.sender,
+            nonce: row.nonce,
+            messageId,
+            messageHash: row.messageHash,
+            messageIndexWithinBatch: i,
+          });
+        }
+
+        // Batch row: tx is already included at a block by the time
+        // buildAndSubmit returned 'included', so write status=confirmed.
+        // The snapshot is the durable record of which messages were in
+        // this batch — it survives subsequent reorg + re-enqueue.
         await txn.upsertBatch({
           txHash: outcome.txHash,
           chainId: this.opts.chainId,
@@ -114,21 +138,17 @@ export class SubmissionLoop {
           blobVersionedHash: outcome.blobVersionedHash,
           batchContentHash,
           blockNumber: outcome.blockNumber,
-          txIndex: null,
+          txIndex: outcome.txIndex,
           status: 'confirmed',
           replacedByTxHash: null,
           submittedAt,
           invalidatedAt: null,
+          messageSnapshot: snapshot,
         });
 
-        // Pending → confirmed for every message we picked. Each
-        // message gets its batch-scoped messageId (ERC-8180:
-        // keccak256(sender, nonce, batchContentHash)) and the batch's
-        // block number so Reader-side listMessages sorts it correctly.
-        const includedHashes: Bytes32[] = [];
+        // Pending → confirmed for every message we picked.
         for (let i = 0; i < picked.length; i++) {
-          const m = picked[i];
-          const row = await txn.getPendingByKey({ sender: m.sender, nonce: m.nonce });
+          const row = pendingByIndex[i];
           if (row === null) continue;
           const messageId = computeMessageId(row.sender, row.nonce, batchContentHash);
           await txn.upsertObserved({
@@ -144,16 +164,17 @@ export class SubmissionLoop {
             ingestedAt: row.ingestedAt,
             ingestSeq: row.ingestSeq,
             blockNumber: outcome.blockNumber,
-            txIndex: null,
+            txIndex: outcome.txIndex,
             messageIndexWithinBatch: i,
           });
-          includedHashes.push(row.messageHash);
         }
 
         // Chain any prior reorged batch whose messages overlap with
-        // this submission: mark it resubmitted (represented as
-        // status=reorged with replacedByTxHash set).
-        const includedHashSet = new Set(includedHashes.map((h) => h.toLowerCase()));
+        // this submission: mark it resubmitted (status=reorged with
+        // replacedByTxHash set). Overlap is computed against the
+        // reorged batch's frozen snapshot, not against current
+        // `messages.batch_ref` — which has been cleared by re-enqueue.
+        const includedHashSet = new Set(snapshot.map((e) => e.messageHash.toLowerCase()));
         const windowStart = BigInt(
           Math.max(0, outcome.blockNumber - this.opts.reorgWindowBlocks)
         );
@@ -164,9 +185,8 @@ export class SubmissionLoop {
         });
         for (const b of reorged) {
           if (b.replacedByTxHash !== null) continue;
-          const msgs = await txn.listMessages({ batchRef: b.txHash });
-          const overlaps = msgs.some((m) =>
-            includedHashSet.has(m.messageHash.toLowerCase())
+          const overlaps = b.messageSnapshot.some((e) =>
+            includedHashSet.has(e.messageHash.toLowerCase())
           );
           if (overlaps) {
             await txn.updateBatchStatus(b.txHash, 'reorged', {

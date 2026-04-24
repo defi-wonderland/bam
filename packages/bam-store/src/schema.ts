@@ -5,9 +5,17 @@
  * version rather than auto-migrating.
  *
  * Nonces are stored as zero-padded TEXT(20) per `nonce-codec.ts`.
+ *
+ * `batches.message_snapshot` is a JSON-encoded
+ * `BatchMessageSnapshotEntry[]` written at confirmation. The snapshot is
+ * how the substrate represents the M:N batch ↔ messages relationship
+ * without a join table: a single message's `(author, nonce)` may appear
+ * in multiple batches' snapshots over its lifecycle (resubmission after
+ * reorg), while `messages.batch_ref` only ever holds the latest batch.
+ * Adapters preserve a non-empty snapshot across upserts.
  */
 
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 export const SQL_CREATE_SQLITE = [
   `CREATE TABLE IF NOT EXISTS bam_store_schema (
@@ -51,7 +59,8 @@ export const SQL_CREATE_SQLITE = [
     status               TEXT NOT NULL,
     replaced_by_tx_hash  TEXT,
     submitted_at         INTEGER,
-    invalidated_at       INTEGER
+    invalidated_at       INTEGER,
+    message_snapshot     TEXT NOT NULL DEFAULT '[]'
   )`,
   `CREATE INDEX IF NOT EXISTS idx_batches_tag_block
     ON batches (content_tag, block_number)`,
@@ -120,7 +129,8 @@ export const SQL_CREATE_POSTGRES = [
     status               TEXT NOT NULL,
     replaced_by_tx_hash  TEXT,
     submitted_at         BIGINT,
-    invalidated_at       BIGINT
+    invalidated_at       BIGINT,
+    message_snapshot     TEXT NOT NULL DEFAULT '[]'
   )`,
   `CREATE INDEX IF NOT EXISTS idx_batches_tag_block
     ON batches (content_tag, block_number)`,

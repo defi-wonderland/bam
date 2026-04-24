@@ -72,8 +72,10 @@ export async function runCli(): Promise<void> {
   }
 
   const signer = new LocalEcdsaSigner(env.signerPrivateKey);
+  // CLI default: SQLite at ./poster.db when nothing more specific is set.
+  // bam-store itself reads no environment variables; the CLI resolves them.
   const store = createDbStore({
-    sqlitePath: env.sqlitePath,
+    sqlitePath: env.sqlitePath ?? './poster.db',
     postgresUrl: env.postgresUrl,
   });
 

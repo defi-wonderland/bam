@@ -1,8 +1,12 @@
+import type { Bytes32 } from 'bam-sdk';
+
 import type {
   BamStore,
   BatchRow,
   MessageRow,
+  StoreTxn,
   SubmittedBatch,
+  SubmittedBatchMessage,
   SubmittedBatchStatus,
   SubmittedBatchesQuery,
 } from '../types.js';
@@ -13,8 +17,12 @@ import type {
  * with their current `status` so clients bound to a stale tx hash
  * can follow the chain.
  *
- * Each per-message entry carries `messageHash` (stable) and `messageId`
- * (batch-scoped; nulled when the parent batch has been reorged out).
+ * Each batch's messages are read via the batch's frozen
+ * `messageSnapshot` rather than by querying `messages.batch_ref`. The
+ * snapshot is set at confirmation and never overwritten, so a reorged
+ * batch still surfaces the messages it contained even after the
+ * underlying message rows have been re-enqueued and resubmitted in a
+ * different batch.
  */
 export async function listSubmittedBatches(
   store: BamStore,
@@ -28,11 +36,33 @@ export async function listSubmittedBatches(
     });
     const out: SubmittedBatch[] = [];
     for (const b of batches) {
-      const msgs = await txn.listMessages({ batchRef: b.txHash });
+      const msgs = await readSnapshotMessages(txn, b);
       out.push(mapBatch(b, msgs));
     }
     return out;
   });
+}
+
+interface SnapshotJoinRow {
+  row: MessageRow | null;
+  messageIdAtConfirm: Bytes32;
+  messageIdxWithinBatch: number;
+}
+
+async function readSnapshotMessages(
+  txn: StoreTxn,
+  b: BatchRow
+): Promise<SnapshotJoinRow[]> {
+  const out: SnapshotJoinRow[] = [];
+  for (const e of b.messageSnapshot) {
+    const row = await txn.getByAuthorNonce(e.author, e.nonce);
+    out.push({
+      row,
+      messageIdAtConfirm: e.messageId,
+      messageIdxWithinBatch: e.messageIndexWithinBatch,
+    });
+  }
+  return out;
 }
 
 function batchToOldStatus(b: BatchRow): SubmittedBatchStatus {
@@ -41,14 +71,35 @@ function batchToOldStatus(b: BatchRow): SubmittedBatchStatus {
   return b.replacedByTxHash !== null ? 'resubmitted' : 'reorged';
 }
 
-function mapBatch(b: BatchRow, msgs: MessageRow[]): SubmittedBatch {
+function mapBatch(b: BatchRow, msgs: SnapshotJoinRow[]): SubmittedBatch {
   const status = batchToOldStatus(b);
   const reorged = status === 'reorged' || status === 'resubmitted';
-  // Sort messages by the message_index_within_batch so the response is
-  // deterministic and matches the ingest order preserved on write.
+  // Snapshot order is the encoded batch order; sort defensively in case
+  // a backend returned the snapshot in a different order.
   const ordered = [...msgs].sort(
-    (a, b) => (a.messageIndexWithinBatch ?? 0) - (b.messageIndexWithinBatch ?? 0)
+    (a, b) => a.messageIdxWithinBatch - b.messageIdxWithinBatch
   );
+  const mappedMessages: SubmittedBatchMessage[] = [];
+  for (const m of ordered) {
+    if (m.row === null) {
+      // Snapshot entry whose underlying messages row was deleted —
+      // shouldn't happen in v1 (no retention/pruning), but skip defensively.
+      continue;
+    }
+    mappedMessages.push({
+      sender: m.row.author,
+      nonce: m.row.nonce,
+      contents: new Uint8Array(m.row.contents),
+      signature: new Uint8Array(m.row.signature),
+      messageHash: m.row.messageHash,
+      // After reorg, surface messageId as null (the batch-scoped id is
+      // no longer valid). For active batches, return the snapshot's
+      // messageId — this is the value that was correct at confirmation,
+      // even if the messages row's `message_id` column has since been
+      // overwritten by a resubmission to a different batch.
+      messageId: reorged ? null : m.messageIdAtConfirm,
+    });
+  }
   return {
     txHash: b.txHash,
     contentTag: b.contentTag,
@@ -59,13 +110,6 @@ function mapBatch(b: BatchRow, msgs: MessageRow[]): SubmittedBatch {
     replacedByTxHash: b.replacedByTxHash,
     submittedAt: b.submittedAt ?? 0,
     invalidatedAt: b.invalidatedAt,
-    messages: ordered.map((m) => ({
-      sender: m.author,
-      nonce: m.nonce,
-      contents: new Uint8Array(m.contents),
-      signature: new Uint8Array(m.signature),
-      messageHash: m.messageHash,
-      messageId: reorged ? null : m.messageId,
-    })),
+    messages: mappedMessages,
   };
 }

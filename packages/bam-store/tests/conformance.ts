@@ -1,7 +1,7 @@
 /**
- * Shared conformance suite — the body run against every backend.
- * T005 wires the memory backend; T006 SQLite; T007 Postgres. Each
- * adapter that passes every case here is a conforming BamStore.
+ * Shared conformance suite — the body run against every backend
+ * (memory / SQLite / Postgres). Each adapter that passes every case
+ * here is a conforming `BamStore`.
  */
 
 import { afterEach, describe, expect, it } from 'vitest';
@@ -9,21 +9,22 @@ import type { Address, Bytes32 } from 'bam-sdk';
 
 import type {
   BamStore,
+  BatchMessageSnapshotEntry,
   BatchRow,
   MessageRow,
-  StoreTxn,
 } from '../src/types.js';
 
 export type StoreFactory = () => BamStore | Promise<BamStore>;
 
 const TAG_A = ('0x' + 'aa'.repeat(32)) as Bytes32;
-const TAG_B = ('0x' + 'bb'.repeat(32)) as Bytes32;
 const ADDR_1 = ('0x' + '11'.repeat(20)) as Address;
 const ADDR_2 = ('0x' + '22'.repeat(20)) as Address;
 const TX_A = ('0x' + '01'.repeat(32)) as Bytes32;
 const TX_B = ('0x' + '02'.repeat(32)) as Bytes32;
 const BVH = ('0x' + '03'.repeat(32)) as Bytes32;
 const BCH = ('0x' + '04'.repeat(32)) as Bytes32;
+const MID_1 = ('0x' + '99'.repeat(32)) as Bytes32;
+const MHASH_1 = ('0x' + '77'.repeat(32)) as Bytes32;
 
 function messageRow(overrides: Partial<MessageRow> = {}): MessageRow {
   const contents = new Uint8Array(40);
@@ -35,7 +36,7 @@ function messageRow(overrides: Partial<MessageRow> = {}): MessageRow {
     contentTag: TAG_A,
     contents,
     signature: new Uint8Array(65),
-    messageHash: ('0x' + '77'.repeat(32)) as Bytes32,
+    messageHash: MHASH_1,
     status: 'pending',
     batchRef: null,
     ingestedAt: null,
@@ -43,6 +44,19 @@ function messageRow(overrides: Partial<MessageRow> = {}): MessageRow {
     blockNumber: null,
     txIndex: null,
     messageIndexWithinBatch: null,
+    ...overrides,
+  };
+}
+
+function snapshotEntry(
+  overrides: Partial<BatchMessageSnapshotEntry> = {}
+): BatchMessageSnapshotEntry {
+  return {
+    author: ADDR_1,
+    nonce: 1n,
+    messageId: MID_1,
+    messageHash: MHASH_1,
+    messageIndexWithinBatch: 0,
     ...overrides,
   };
 }
@@ -60,6 +74,7 @@ function batchRow(overrides: Partial<BatchRow> = {}): BatchRow {
     replacedByTxHash: null,
     submittedAt: 1_000,
     invalidatedAt: null,
+    messageSnapshot: [],
     ...overrides,
   };
 }
@@ -84,19 +99,17 @@ export function runConformance(make: StoreFactory): void {
         blockNumber: 10,
         txIndex: 0,
         messageIndexWithinBatch: 0,
-        messageId: ('0x' + '99'.repeat(32)) as Bytes32,
+        messageId: MID_1,
       });
-      await store.withTxn(async (txn: StoreTxn) => txn.upsertBatch(batchRow({ status: 'confirmed', blockNumber: 10 })));
-      await store.withTxn(async (txn) => txn.upsertObserved(row));
-      await store.withTxn(async (txn) => txn.upsertObserved(row));
-      const back = await store.withTxn((txn) =>
-        Promise.resolve(txn.getByAuthorNonce(ADDR_1, 1n))
-      );
+      await store.withTxn((txn) => txn.upsertBatch(batchRow({ status: 'confirmed', blockNumber: 10 })));
+      await store.withTxn((txn) => txn.upsertObserved(row));
+      await store.withTxn((txn) => txn.upsertObserved(row));
+      const back = await store.withTxn((txn) => txn.getByAuthorNonce(ADDR_1, 1n));
       expect(back).not.toBeNull();
       expect(back!.status).toBe('confirmed');
     });
 
-    it('upsert on a row whose confirmed messageHash differs rejects (caller must markDuplicate)', async () => {
+    it('upsert on a row whose confirmed messageHash differs rejects', async () => {
       const store = await newStore();
       const first = messageRow({
         status: 'confirmed',
@@ -106,22 +119,22 @@ export function runConformance(make: StoreFactory): void {
         txIndex: 0,
         messageIndexWithinBatch: 0,
       });
-      await store.withTxn(async (txn) => txn.upsertBatch(batchRow({ status: 'confirmed', blockNumber: 10 })));
-      await store.withTxn(async (txn) => txn.upsertObserved(first));
+      await store.withTxn((txn) => txn.upsertBatch(batchRow({ status: 'confirmed', blockNumber: 10 })));
+      await store.withTxn((txn) => txn.upsertObserved(first));
       const second = messageRow({
         status: 'confirmed',
         messageHash: ('0x' + '22'.repeat(32)) as Bytes32,
       });
       await expect(
-        store.withTxn(async (txn) => txn.upsertObserved(second))
+        store.withTxn((txn) => txn.upsertObserved(second))
       ).rejects.toThrow();
     });
 
-    it('matching-bytes guard also applies to pending/submitted/reorged/duplicate rows', async () => {
+    it('matching-bytes guard also applies to pending/submitted/reorged rows', async () => {
       const store = await newStore();
       const mhash = ('0x' + '11'.repeat(32)) as Bytes32;
       // Pending row with one messageHash.
-      await store.withTxn(async (txn) =>
+      await store.withTxn((txn) =>
         txn.insertPending({
           contentTag: TAG_A,
           sender: ADDR_1,
@@ -140,14 +153,14 @@ export function runConformance(make: StoreFactory): void {
         messageHash: ('0x' + '22'.repeat(32)) as Bytes32,
       });
       await expect(
-        store.withTxn(async (txn) => txn.upsertObserved(mismatching))
+        store.withTxn((txn) => txn.upsertObserved(mismatching))
       ).rejects.toThrow();
     });
 
     it('matching-bytes upsert on a pending row transitions it to confirmed', async () => {
       const store = await newStore();
       const mhash = ('0x' + '11'.repeat(32)) as Bytes32;
-      await store.withTxn(async (txn) =>
+      await store.withTxn((txn) =>
         txn.insertPending({
           contentTag: TAG_A,
           sender: ADDR_1,
@@ -159,10 +172,10 @@ export function runConformance(make: StoreFactory): void {
           ingestSeq: 1,
         })
       );
-      await store.withTxn(async (txn) =>
+      await store.withTxn((txn) =>
         txn.upsertBatch(batchRow({ status: 'confirmed', blockNumber: 10 }))
       );
-      await store.withTxn(async (txn) =>
+      await store.withTxn((txn) =>
         txn.upsertObserved(
           messageRow({
             messageHash: mhash,
@@ -171,64 +184,13 @@ export function runConformance(make: StoreFactory): void {
             blockNumber: 10,
             txIndex: 0,
             messageIndexWithinBatch: 0,
-            messageId: ('0x' + '99'.repeat(32)) as Bytes32,
+            messageId: MID_1,
           })
         )
       );
-      const back = await store.withTxn((txn) =>
-        Promise.resolve(txn.getByAuthorNonce(ADDR_1, 1n))
-      );
+      const back = await store.withTxn((txn) => txn.getByAuthorNonce(ADDR_1, 1n));
       expect(back!.status).toBe('confirmed');
-      expect(back!.messageId).toBe('0x' + '99'.repeat(32));
-    });
-  });
-
-  describe('markDuplicate — first-confirmed wins, original not mutated', () => {
-    it('the already-confirmed row is untouched; the later arrival is flagged duplicate', async () => {
-      const store = await newStore();
-      const confirmedHash = ('0x' + '11'.repeat(32)) as Bytes32;
-      await store.withTxn(async (txn) => {
-        await txn.upsertBatch(batchRow({ status: 'confirmed', blockNumber: 10 }));
-        await txn.upsertObserved(
-          messageRow({
-            status: 'confirmed',
-            messageHash: confirmedHash,
-            batchRef: TX_A,
-            blockNumber: 10,
-            txIndex: 0,
-            messageIndexWithinBatch: 0,
-          })
-        );
-      });
-      // A later arrival with the same (author, nonce) but different bytes
-      // — represented here as a separate pending/submitted row with a
-      // distinct messageHash — gets marked as a duplicate.
-      const dupHash = ('0x' + '22'.repeat(32)) as Bytes32;
-      await store.withTxn(async (txn) =>
-        await txn.upsertObserved(
-          messageRow({
-            // The same author+nonce key would collide; in the real
-            // flow, the later row is inserted under a different key path
-            // (a second-Poster's view) — but in this unit test we
-            // simulate by placing it under (ADDR_2, 1n) purely to
-            // exercise markDuplicate mechanics.
-            author: ADDR_2,
-            status: 'submitted',
-            messageHash: dupHash,
-          })
-        )
-      );
-      await store.withTxn(async (txn) => txn.markDuplicate(dupHash));
-      const back = await store.withTxn((txn) =>
-        Promise.resolve(txn.getByAuthorNonce(ADDR_2, 1n))
-      );
-      expect(back!.status).toBe('duplicate');
-      // First row is unchanged.
-      const first = await store.withTxn((txn) =>
-        Promise.resolve(txn.getByAuthorNonce(ADDR_1, 1n))
-      );
-      expect(first!.status).toBe('confirmed');
-      expect(first!.messageHash).toBe(confirmedHash);
+      expect(back!.messageId).toBe(MID_1);
     });
   });
 
@@ -260,18 +222,12 @@ export function runConformance(make: StoreFactory): void {
           })
         );
       });
-      await store.withTxn(async (txn) => txn.markReorged(TX_A, 5_000));
-      const batches = await store.withTxn((txn) =>
-        Promise.resolve(txn.listBatches({}))
-      );
+      await store.withTxn((txn) => txn.markReorged(TX_A, 5_000));
+      const batches = await store.withTxn((txn) => txn.listBatches({}));
       expect(batches[0].status).toBe('reorged');
       expect(batches[0].invalidatedAt).toBe(5_000);
-      const r1 = await store.withTxn((txn) =>
-        Promise.resolve(txn.getByAuthorNonce(ADDR_1, 1n))
-      );
-      const r2 = await store.withTxn((txn) =>
-        Promise.resolve(txn.getByAuthorNonce(ADDR_2, 1n))
-      );
+      const r1 = await store.withTxn((txn) => txn.getByAuthorNonce(ADDR_1, 1n));
+      const r2 = await store.withTxn((txn) => txn.getByAuthorNonce(ADDR_2, 1n));
       expect(r1!.status).toBe('reorged');
       expect(r2!.status).toBe('reorged');
     });
@@ -293,9 +249,7 @@ export function runConformance(make: StoreFactory): void {
           messageRow({ author: ADDR_1, nonce: 2n, batchRef: TX_A, blockNumber: 10, txIndex: 3, messageIndexWithinBatch: 0 })
         );
       });
-      const rows = await store.withTxn((txn) =>
-        Promise.resolve(txn.listMessages({}))
-      );
+      const rows = await store.withTxn((txn) => txn.listMessages({}));
       const coords = rows.map((r) => [r.blockNumber, r.txIndex, r.messageIndexWithinBatch]);
       expect(coords).toEqual([
         [10, 3, 0],
@@ -318,11 +272,9 @@ export function runConformance(make: StoreFactory): void {
         );
       });
       const rows = await store.withTxn((txn) =>
-        Promise.resolve(
-          txn.listMessages({
-            cursor: { blockNumber: 10, txIndex: 0, messageIndexWithinBatch: 0 },
-          })
-        )
+        txn.listMessages({
+          cursor: { blockNumber: 10, txIndex: 0, messageIndexWithinBatch: 0 },
+        })
       );
       expect(rows.length).toBe(2);
       expect(rows[0].nonce).toBe(2n);
@@ -333,11 +285,11 @@ export function runConformance(make: StoreFactory): void {
   describe('batch status transitions', () => {
     it('pending_tx → confirmed on updateBatchStatus with block_number', async () => {
       const store = await newStore();
-      await store.withTxn(async (txn) => txn.upsertBatch(batchRow({ status: 'pending_tx' })));
-      await store.withTxn(async (txn) =>
-        await txn.updateBatchStatus(TX_A, 'confirmed', { blockNumber: 42, txIndex: 3 })
+      await store.withTxn((txn) => txn.upsertBatch(batchRow({ status: 'pending_tx' })));
+      await store.withTxn((txn) =>
+        txn.updateBatchStatus(TX_A, 'confirmed', { blockNumber: 42, txIndex: 3 })
       );
-      const [b] = await store.withTxn((txn) => Promise.resolve(txn.listBatches({})));
+      const [b] = await store.withTxn((txn) => txn.listBatches({}));
       expect(b.status).toBe('confirmed');
       expect(b.blockNumber).toBe(42);
       expect(b.txIndex).toBe(3);
@@ -345,13 +297,13 @@ export function runConformance(make: StoreFactory): void {
 
     it('confirmed → reorged via updateBatchStatus with invalidatedAt', async () => {
       const store = await newStore();
-      await store.withTxn(async (txn) =>
-        await txn.upsertBatch(batchRow({ status: 'confirmed', blockNumber: 10 }))
+      await store.withTxn((txn) =>
+        txn.upsertBatch(batchRow({ status: 'confirmed', blockNumber: 10 }))
       );
-      await store.withTxn(async (txn) =>
-        await txn.updateBatchStatus(TX_A, 'reorged', { invalidatedAt: 9_000 })
+      await store.withTxn((txn) =>
+        txn.updateBatchStatus(TX_A, 'reorged', { invalidatedAt: 9_000 })
       );
-      const [b] = await store.withTxn((txn) => Promise.resolve(txn.listBatches({})));
+      const [b] = await store.withTxn((txn) => txn.listBatches({}));
       expect(b.status).toBe('reorged');
       expect(b.invalidatedAt).toBe(9_000);
     });
@@ -360,18 +312,82 @@ export function runConformance(make: StoreFactory): void {
   describe('reader cursor get/set', () => {
     it('getCursor on a fresh chain returns null; set+get round-trips; overwrite', async () => {
       const store = await newStore();
-      const miss = await store.withTxn((txn) => Promise.resolve(txn.getCursor(1)));
+      const miss = await store.withTxn((txn) => txn.getCursor(1));
       expect(miss).toBeNull();
-      await store.withTxn(async (txn) =>
-        await txn.setCursor({ chainId: 1, lastBlockNumber: 100, lastTxIndex: 5, updatedAt: 1_000 })
+      await store.withTxn((txn) =>
+        txn.setCursor({ chainId: 1, lastBlockNumber: 100, lastTxIndex: 5, updatedAt: 1_000 })
       );
-      const hit = await store.withTxn((txn) => Promise.resolve(txn.getCursor(1)));
+      const hit = await store.withTxn((txn) => txn.getCursor(1));
       expect(hit).toEqual({ chainId: 1, lastBlockNumber: 100, lastTxIndex: 5, updatedAt: 1_000 });
-      await store.withTxn(async (txn) =>
-        await txn.setCursor({ chainId: 1, lastBlockNumber: 200, lastTxIndex: 0, updatedAt: 2_000 })
+      await store.withTxn((txn) =>
+        txn.setCursor({ chainId: 1, lastBlockNumber: 200, lastTxIndex: 0, updatedAt: 2_000 })
       );
-      const updated = await store.withTxn((txn) => Promise.resolve(txn.getCursor(1)));
+      const updated = await store.withTxn((txn) => txn.getCursor(1));
       expect(updated!.lastBlockNumber).toBe(200);
+    });
+  });
+
+  describe('batch messageSnapshot', () => {
+    it('round-trips multi-entry snapshot through upsertBatch + listBatches', async () => {
+      const store = await newStore();
+      const snap: BatchMessageSnapshotEntry[] = [
+        snapshotEntry({ author: ADDR_1, nonce: 1n, messageIndexWithinBatch: 0, messageId: ('0x' + 'a1'.repeat(32)) as Bytes32 }),
+        snapshotEntry({ author: ADDR_2, nonce: 7n, messageIndexWithinBatch: 1, messageId: ('0x' + 'b2'.repeat(32)) as Bytes32, messageHash: ('0x' + '88'.repeat(32)) as Bytes32 }),
+      ];
+      await store.withTxn((txn) =>
+        txn.upsertBatch(batchRow({ status: 'confirmed', blockNumber: 10, messageSnapshot: snap }))
+      );
+      const [b] = await store.withTxn((txn) => txn.listBatches({}));
+      expect(b.messageSnapshot).toHaveLength(2);
+      expect(b.messageSnapshot[0].author.toLowerCase()).toBe(ADDR_1.toLowerCase());
+      expect(b.messageSnapshot[0].nonce).toBe(1n);
+      expect(b.messageSnapshot[1].nonce).toBe(7n);
+      expect(b.messageSnapshot[1].messageIndexWithinBatch).toBe(1);
+    });
+
+    it('a non-empty snapshot is preserved when a later writer upserts with empty snapshot', async () => {
+      const store = await newStore();
+      const snap: BatchMessageSnapshotEntry[] = [snapshotEntry()];
+      await store.withTxn((txn) =>
+        txn.upsertBatch(batchRow({ status: 'confirmed', blockNumber: 10, messageSnapshot: snap }))
+      );
+      // Second writer upserts the same batch with an empty snapshot
+      // (e.g. a Reader observes the batch metadata but hasn't decoded it).
+      await store.withTxn((txn) =>
+        txn.upsertBatch(batchRow({ status: 'confirmed', blockNumber: 10, messageSnapshot: [] }))
+      );
+      const [b] = await store.withTxn((txn) => txn.listBatches({}));
+      expect(b.messageSnapshot).toHaveLength(1);
+      expect(b.messageSnapshot[0].nonce).toBe(1n);
+    });
+
+    it('upsertBatch COALESCEs submittedAt + replacedByTxHash so a null second-writer does not clobber', async () => {
+      const store = await newStore();
+      // First writer sets submittedAt and replacedByTxHash to non-null.
+      await store.withTxn((txn) =>
+        txn.upsertBatch(
+          batchRow({
+            status: 'reorged',
+            blockNumber: 10,
+            submittedAt: 1_234,
+            replacedByTxHash: TX_B,
+          })
+        )
+      );
+      // Second writer passes nulls for both.
+      await store.withTxn((txn) =>
+        txn.upsertBatch(
+          batchRow({
+            status: 'reorged',
+            blockNumber: 10,
+            submittedAt: null,
+            replacedByTxHash: null,
+          })
+        )
+      );
+      const [b] = await store.withTxn((txn) => txn.listBatches({}));
+      expect(b.submittedAt).toBe(1_234);
+      expect(b.replacedByTxHash).toBe(TX_B);
     });
   });
 
@@ -385,7 +401,7 @@ export function runConformance(make: StoreFactory): void {
           nonce: 1n,
           contents: new Uint8Array(40),
           signature: new Uint8Array(65),
-          messageHash: ('0x' + '77'.repeat(32)) as Bytes32,
+          messageHash: MHASH_1,
           ingestedAt: 1_000,
           ingestSeq: 1,
         });
@@ -403,12 +419,8 @@ export function runConformance(make: StoreFactory): void {
           })
         );
       });
-      const poster = await store.withTxn((txn) =>
-        Promise.resolve(txn.getByAuthorNonce(ADDR_1, 1n))
-      );
-      const reader = await store.withTxn((txn) =>
-        Promise.resolve(txn.getByAuthorNonce(ADDR_2, 5n))
-      );
+      const poster = await store.withTxn((txn) => txn.getByAuthorNonce(ADDR_1, 1n));
+      const reader = await store.withTxn((txn) => txn.getByAuthorNonce(ADDR_2, 5n));
       expect(poster!.status).toBe('submitted');
       expect(reader!.status).toBe('confirmed');
     });
@@ -434,7 +446,7 @@ export function runConformance(make: StoreFactory): void {
           );
         }
       });
-      const rows = await store.withTxn((txn) => Promise.resolve(txn.listMessages({})));
+      const rows = await store.withTxn((txn) => txn.listMessages({}));
       expect(rows.length).toBe(N);
     });
 
@@ -457,9 +469,9 @@ export function runConformance(make: StoreFactory): void {
           throw new Error('abort');
         })
       ).rejects.toThrow('abort');
-      const rows = await store.withTxn((txn) => Promise.resolve(txn.listMessages({})));
+      const rows = await store.withTxn((txn) => txn.listMessages({}));
       expect(rows.length).toBe(0);
-      const batches = await store.withTxn((txn) => Promise.resolve(txn.listBatches({})));
+      const batches = await store.withTxn((txn) => txn.listBatches({}));
       expect(batches.length).toBe(0);
     });
   });

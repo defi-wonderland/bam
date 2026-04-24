@@ -2,6 +2,7 @@ import type { Address, Bytes32 } from 'bam-sdk';
 
 import type {
   BamStore,
+  BatchMessageSnapshotEntry,
   BatchRow,
   BatchStatus,
   BatchesQuery,
@@ -87,15 +88,14 @@ export class MemoryBamStore implements BamStore {
     const { messages, batches, tagSeq, nonces, readerCursor } = this.state;
 
     return {
-      // ── old Poster-facing pending CRUD (bridged to unified messages) ──
-      insertPending(row: StoreTxnPendingRow): void {
+      // ── pending CRUD (bridged to unified messages) ─────────────────
+      async insertPending(row: StoreTxnPendingRow): Promise<void> {
         const k = pendingKey(row.sender, row.nonce);
         const existing = messages.get(k);
         if (existing) {
           // The reorg watcher re-enqueues a row whose prior status was
-          // `reorged`. Duplicates (from the nonce-replay-across-batchers
-          // case) may also be overwritten. Any live status rejects.
-          if (existing.status !== 'reorged' && existing.status !== 'duplicate') {
+          // `reorged`. Any other live status rejects.
+          if (existing.status !== 'reorged') {
             throw new Error('insertPending: duplicate (sender, nonce)');
           }
         }
@@ -117,17 +117,17 @@ export class MemoryBamStore implements BamStore {
         });
       },
 
-      getPendingByKey(key: PendingKey): StoreTxnPendingRow | null {
+      async getPendingByKey(key: PendingKey): Promise<StoreTxnPendingRow | null> {
         const r = messages.get(pendingKey(key.sender, key.nonce));
         if (!r || r.status !== 'pending') return null;
         return toPending(r);
       },
 
-      listPendingByTag(
+      async listPendingByTag(
         tag: Bytes32,
         limit?: number,
         sinceSeq?: number
-      ): StoreTxnPendingRow[] {
+      ): Promise<StoreTxnPendingRow[]> {
         const out: StoreTxnPendingRow[] = [];
         for (const r of messages.values()) {
           if (r.status !== 'pending') continue;
@@ -139,7 +139,7 @@ export class MemoryBamStore implements BamStore {
         return typeof limit === 'number' ? out.slice(0, limit) : out;
       },
 
-      listPendingAll(limit?: number, sinceSeq?: number): StoreTxnPendingRow[] {
+      async listPendingAll(limit?: number, sinceSeq?: number): Promise<StoreTxnPendingRow[]> {
         const out: StoreTxnPendingRow[] = [];
         for (const r of messages.values()) {
           if (r.status !== 'pending') continue;
@@ -153,7 +153,7 @@ export class MemoryBamStore implements BamStore {
         return typeof limit === 'number' ? out.slice(0, limit) : out;
       },
 
-      countPendingByTag(tag: Bytes32): number {
+      async countPendingByTag(tag: Bytes32): Promise<number> {
         let n = 0;
         for (const r of messages.values()) {
           if (r.status === 'pending' && r.contentTag === tag) n++;
@@ -161,7 +161,7 @@ export class MemoryBamStore implements BamStore {
         return n;
       },
 
-      nextIngestSeq(tag: Bytes32): number {
+      async nextIngestSeq(tag: Bytes32): Promise<number> {
         const cur = tagSeq.get(tag) ?? 0;
         const next = cur + 1;
         tagSeq.set(tag, next);
@@ -169,17 +169,17 @@ export class MemoryBamStore implements BamStore {
       },
 
       // ── nonce tracker ────────────────────────────────────────────────
-      getNonce(sender: Address): NonceTrackerRow | null {
+      async getNonce(sender: Address): Promise<NonceTrackerRow | null> {
         const row = nonces.get(sender.toLowerCase() as Address);
         return row ? { ...row } : null;
       },
-      setNonce(row: NonceTrackerRow): void {
+      async setNonce(row: NonceTrackerRow): Promise<void> {
         const key = row.sender.toLowerCase() as Address;
         nonces.set(key, { ...row, sender: key });
       },
 
       // ── unified-schema lifecycle transitions ─────────────────────────
-      markSubmitted(keys: PendingKey[], batchRef: Bytes32): void {
+      async markSubmitted(keys: PendingKey[], batchRef: Bytes32): Promise<void> {
         for (const k of keys) {
           const mk = pendingKey(k.sender, k.nonce);
           const r = messages.get(mk);
@@ -193,19 +193,20 @@ export class MemoryBamStore implements BamStore {
         }
       },
 
-      upsertObserved(row: MessageRow): void {
+      async upsertObserved(row: MessageRow): Promise<void> {
         const k = pendingKey(row.author, row.nonce);
         const existing = messages.get(k);
-        // Bytes must match for any upsert onto an existing row — the
-        // "different bytes at the same (author, nonce)" case is the
-        // Reader's duplicate case and must go through markDuplicate /
-        // markReorged first. A confirmed row with matching bytes is a
-        // no-op re-observation; anything else with matching bytes is a
-        // metadata update (pending → confirmed, reorged → pending, …).
+        // Bytes must match for any upsert onto an existing row. The
+        // "different bytes at the same (author, nonce)" duplicate flow
+        // is deferred to 004-reader; today the substrate rejects it.
+        // Matching bytes on a confirmed row are a no-op re-observation;
+        // matching bytes on any other status are a metadata update
+        // (pending → confirmed, reorged → pending, …).
         if (existing) {
           if (existing.messageHash !== row.messageHash) {
             throw new Error(
-              'upsertObserved: existing row has a different messageHash — caller must call markDuplicate (or markReorged) before replacing'
+              'upsertObserved: existing row has a different messageHash at the same (author, nonce). ' +
+                'The nonce-replay-across-batchers duplicate flow is deferred to 004-reader.'
             );
           }
           if (existing.status === 'confirmed') {
@@ -215,20 +216,10 @@ export class MemoryBamStore implements BamStore {
         messages.set(k, cloneMessage(row));
       },
 
-      markDuplicate(messageHash: Bytes32): void {
-        for (const [k, r] of messages) {
-          if (r.messageHash === messageHash && r.status !== 'confirmed') {
-            messages.set(k, { ...cloneMessage(r), status: 'duplicate' });
-            return;
-          }
-        }
-        throw new Error(`markDuplicate: no non-confirmed row with messageHash=${messageHash}`);
-      },
-
-      markReorged(txHash: Bytes32, invalidatedAt: number): void {
+      async markReorged(txHash: Bytes32, invalidatedAt: number): Promise<void> {
         const b = batches.get(txHash);
         if (!b) throw new Error(`markReorged: no batch for tx_hash=${txHash}`);
-        batches.set(txHash, { ...b, status: 'reorged', invalidatedAt });
+        batches.set(txHash, { ...cloneBatch(b), status: 'reorged', invalidatedAt });
         // Cascade: every confirmed row under this batch flips to
         // reorged with the same invalidatedAt.
         for (const [k, r] of messages) {
@@ -238,8 +229,8 @@ export class MemoryBamStore implements BamStore {
         }
       },
 
-      // ── unified-schema reads (T005) ──────────────────────────────────
-      listMessages(query: MessagesQuery): MessageRow[] {
+      // ── unified-schema reads ─────────────────────────────────────────
+      async listMessages(query: MessagesQuery): Promise<MessageRow[]> {
         const out: MessageRow[] = [];
         for (const r of messages.values()) {
           if (query.contentTag !== undefined && r.contentTag !== query.contentTag) continue;
@@ -262,24 +253,38 @@ export class MemoryBamStore implements BamStore {
         return typeof query.limit === 'number' ? out.slice(0, query.limit) : out;
       },
 
-      getByMessageId(messageId: Bytes32): MessageRow | null {
+      async getByMessageId(messageId: Bytes32): Promise<MessageRow | null> {
         for (const r of messages.values()) {
           if (r.messageId === messageId) return cloneMessage(r);
         }
         return null;
       },
 
-      getByAuthorNonce(author: Address, nonce: bigint): MessageRow | null {
+      async getByAuthorNonce(author: Address, nonce: bigint): Promise<MessageRow | null> {
         const r = messages.get(pendingKey(author, nonce));
         return r ? cloneMessage(r) : null;
       },
 
-      // ── unified-schema batch CRUD (T005) ─────────────────────────────
-      upsertBatch(row: BatchRow): void {
-        batches.set(row.txHash, { ...row });
+      // ── unified-schema batch CRUD ────────────────────────────────────
+      async upsertBatch(row: BatchRow): Promise<void> {
+        const existing = batches.get(row.txHash);
+        const merged: BatchRow = {
+          ...cloneBatch(row),
+          // Preserve first-writer's snapshot when the second writer's is empty.
+          messageSnapshot:
+            row.messageSnapshot.length > 0
+              ? cloneSnapshot(row.messageSnapshot)
+              : existing
+                ? cloneSnapshot(existing.messageSnapshot)
+                : [],
+          // COALESCE: don't let a second writer's null clobber the first's value.
+          submittedAt: row.submittedAt ?? existing?.submittedAt ?? null,
+          replacedByTxHash: row.replacedByTxHash ?? existing?.replacedByTxHash ?? null,
+        };
+        batches.set(row.txHash, merged);
       },
 
-      updateBatchStatus(
+      async updateBatchStatus(
         txHash: Bytes32,
         status: BatchStatus,
         opts?: {
@@ -288,11 +293,11 @@ export class MemoryBamStore implements BamStore {
           replacedByTxHash?: Bytes32 | null;
           invalidatedAt?: number | null;
         }
-      ): void {
+      ): Promise<void> {
         const b = batches.get(txHash);
         if (!b) throw new Error(`updateBatchStatus: no batch for tx_hash=${txHash}`);
         batches.set(txHash, {
-          ...b,
+          ...cloneBatch(b),
           status,
           blockNumber: opts?.blockNumber === undefined ? b.blockNumber : opts.blockNumber,
           txIndex: opts?.txIndex === undefined ? b.txIndex : opts.txIndex,
@@ -303,7 +308,7 @@ export class MemoryBamStore implements BamStore {
         });
       },
 
-      listBatches(query: BatchesQuery): BatchRow[] {
+      async listBatches(query: BatchesQuery): Promise<BatchRow[]> {
         const out: BatchRow[] = [];
         for (const b of batches.values()) {
           if (query.contentTag !== undefined && b.contentTag !== query.contentTag) continue;
@@ -313,18 +318,18 @@ export class MemoryBamStore implements BamStore {
             if (b.blockNumber === null) continue;
             if (BigInt(b.blockNumber) < query.sinceBlock) continue;
           }
-          out.push({ ...b });
+          out.push(cloneBatch(b));
         }
         out.sort((a, b) => (b.submittedAt ?? 0) - (a.submittedAt ?? 0));
         return typeof query.limit === 'number' ? out.slice(0, query.limit) : out;
       },
 
-      // ── reader cursor (T005) ─────────────────────────────────────────
-      getCursor(chainId: number): ReaderCursorRow | null {
+      // ── reader cursor ────────────────────────────────────────────────
+      async getCursor(chainId: number): Promise<ReaderCursorRow | null> {
         const row = readerCursor.get(chainId);
         return row ? { ...row } : null;
       },
-      setCursor(row: ReaderCursorRow): void {
+      async setCursor(row: ReaderCursorRow): Promise<void> {
         readerCursor.set(row.chainId, { ...row });
       },
     };
@@ -358,6 +363,14 @@ function cloneMessage(r: MessageRow): MessageRow {
     contents: new Uint8Array(r.contents),
     signature: new Uint8Array(r.signature),
   };
+}
+
+function cloneSnapshot(s: BatchMessageSnapshotEntry[]): BatchMessageSnapshotEntry[] {
+  return s.map((e) => ({ ...e }));
+}
+
+function cloneBatch(b: BatchRow): BatchRow {
+  return { ...b, messageSnapshot: cloneSnapshot(b.messageSnapshot) };
 }
 
 function afterCursor(r: MessageRow, c: { blockNumber: number; txIndex: number; messageIndexWithinBatch: number }): boolean {

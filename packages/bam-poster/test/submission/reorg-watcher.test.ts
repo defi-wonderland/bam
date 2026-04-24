@@ -18,7 +18,7 @@ interface Snapshot {
   contents: Uint8Array;
   signature: Uint8Array;
   messageHash: Bytes32;
-  messageId: Bytes32 | null;
+  messageId: Bytes32;
   originalIngestSeq: number;
 }
 
@@ -52,6 +52,13 @@ async function seedConfirmedBatch(
       replacedByTxHash: null,
       submittedAt: args.submittedAt,
       invalidatedAt: null,
+      messageSnapshot: args.messages.map((m, i) => ({
+        author: m.sender,
+        nonce: m.nonce,
+        messageId: m.messageId,
+        messageHash: m.messageHash,
+        messageIndexWithinBatch: i,
+      })),
     });
     for (let i = 0; i < args.messages.length; i++) {
       const m = args.messages[i];

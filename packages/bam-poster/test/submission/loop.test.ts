@@ -95,7 +95,7 @@ async function seedPending(store: MemoryBamStore, count: number): Promise<void> 
 describe('SubmissionLoop', () => {
   it('empty pool → idle, no submission', async () => {
     const h = mkHarness({
-      outcome: { kind: 'included', txHash: '0x01' as Bytes32, blockNumber: 1, blobVersionedHash: '0x02' as Bytes32 },
+      outcome: { kind: 'included', txHash: '0x01' as Bytes32, blockNumber: 1, txIndex: 0, blobVersionedHash: '0x02' as Bytes32 },
     });
     const res = await h.loop.tick();
     expect(res).toBe('idle');
@@ -108,6 +108,7 @@ describe('SubmissionLoop', () => {
         kind: 'included',
         txHash: ('0x' + 'aa'.repeat(32)) as Bytes32,
         blockNumber: 100,
+        txIndex: 0,
         blobVersionedHash: ('0x' + 'bb'.repeat(32)) as Bytes32,
       },
       policyPicks: 2,

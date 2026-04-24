@@ -45,7 +45,7 @@ function mkTransport(overrides: Partial<BuildAndSubmitTransport> = {}): BuildAnd
       return ('0x' + '99'.repeat(32)) as `0x${string}`;
     },
     async waitForReceipt() {
-      return { blockNumber: 1234n };
+      return { blockNumber: 1234n, transactionIndex: 0 };
     },
     async getChainId() {
       return 31337;
@@ -113,7 +113,7 @@ describe('buildAndSubmitWithViem (transport injection)', () => {
         return ('0x' + 'ab'.repeat(32)) as `0x${string}`;
       },
       async waitForReceipt() {
-        return { blockNumber: 42n };
+        return { blockNumber: 42n, transactionIndex: 7 };
       },
     });
     const { buildAndSubmit } = await buildAndSubmitWithViem({
@@ -129,6 +129,7 @@ describe('buildAndSubmitWithViem (transport injection)', () => {
     if (outcome.kind === 'included') {
       expect(outcome.txHash).toBe('0x' + 'ab'.repeat(32));
       expect(outcome.blockNumber).toBe(42);
+      expect(outcome.txIndex).toBe(7);
     }
   });
 
