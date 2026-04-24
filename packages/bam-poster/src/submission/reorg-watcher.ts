@@ -20,6 +20,11 @@ export interface BlockSource {
 export interface ReorgWatcherOptions {
   store: BamStore;
   blockSource: BlockSource;
+  /** Chain id this Poster is configured for. The watcher filters batch
+   * candidates to this chain so a shared DB containing batches from
+   * multiple chains never causes the wrong chain's batches to be
+   * reorged. */
+  chainId: number;
   /** Window within which reorgs are re-enqueued. Clamped [4, 128]. */
   reorgWindowBlocks: number;
   now: () => Date;
@@ -65,7 +70,10 @@ export class ReorgWatcher {
     const windowStart = head - BigInt(window);
 
     const candidates = await this.opts.store.withTxn(async (txn) => {
-      const recent = await txn.listBatches({ sinceBlock: windowStart });
+      const recent = await txn.listBatches({
+        chainId: this.opts.chainId,
+        sinceBlock: windowStart,
+      });
       return recent.filter((b) => b.status === 'confirmed' && b.blockNumber !== null);
     });
 

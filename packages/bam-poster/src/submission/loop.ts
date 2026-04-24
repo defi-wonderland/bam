@@ -106,26 +106,21 @@ export class SubmissionLoop {
       const batchContentHash = outcome.blobVersionedHash;
       const submittedAt = this.opts.now().getTime();
       await this.opts.store.withTxn(async (txn) => {
-        // Compute the message snapshot up-front (before any row mutation)
-        // so it captures the message keys + batch-scoped messageIds even
-        // for any picked messages whose pending rows may have already
-        // been transitioned by a concurrent path.
-        const snapshot: BatchMessageSnapshotEntry[] = [];
-        const pendingByIndex: Array<StoreTxnPendingRow | null> = [];
-        for (let i = 0; i < picked.length; i++) {
-          const m = picked[i];
-          const row = await txn.getPendingByKey({ sender: m.sender, nonce: m.nonce });
-          pendingByIndex.push(row);
-          if (row === null) continue;
-          const messageId = computeMessageId(row.sender, row.nonce, batchContentHash);
-          snapshot.push({
-            author: row.sender,
-            nonce: row.nonce,
-            messageId,
-            messageHash: row.messageHash,
-            messageIndexWithinBatch: i,
-          });
-        }
+        // The batch's `messageSnapshot` is built from `picked` directly —
+        // every message that was submitted on-chain MUST appear in the
+        // snapshot, regardless of whether the pending row has already
+        // been transitioned out of `pending` by another writer in a
+        // shared-DB scenario. If we built from getPendingByKey() we'd
+        // silently drop entries whose row was already confirmed, leaving
+        // listSubmittedBatches with a partial messages list and breaking
+        // resubmission overlap detection.
+        const snapshot: BatchMessageSnapshotEntry[] = picked.map((m, i) => ({
+          author: m.sender,
+          nonce: m.nonce,
+          messageId: computeMessageId(m.sender, m.nonce, batchContentHash),
+          messageHash: m.messageHash,
+          messageIndexWithinBatch: i,
+        }));
 
         // Batch row: tx is already included at a block by the time
         // buildAndSubmit returned 'included', so write status=confirmed.
@@ -146,19 +141,24 @@ export class SubmissionLoop {
           messageSnapshot: snapshot,
         });
 
-        // Pending → confirmed for every message we picked.
+        // Pending → confirmed for every message we picked. Read each
+        // row's current state via getByAuthorNonce (not getPendingByKey,
+        // which filters to status='pending'); this keeps ingestedAt /
+        // ingestSeq stable even when another writer has already moved
+        // the row out of pending.
         for (let i = 0; i < picked.length; i++) {
-          const row = pendingByIndex[i];
+          const m = picked[i];
+          const row = await txn.getByAuthorNonce(m.sender, m.nonce);
           if (row === null) continue;
-          const messageId = computeMessageId(row.sender, row.nonce, batchContentHash);
+          const messageId = computeMessageId(m.sender, m.nonce, batchContentHash);
           await txn.upsertObserved({
             messageId,
-            author: row.sender,
-            nonce: row.nonce,
+            author: m.sender,
+            nonce: m.nonce,
             contentTag: this.opts.tag,
-            contents: new Uint8Array(row.contents),
-            signature: new Uint8Array(row.signature),
-            messageHash: row.messageHash,
+            contents: new Uint8Array(m.contents),
+            signature: new Uint8Array(m.signature),
+            messageHash: m.messageHash,
             status: 'confirmed',
             batchRef: outcome.txHash,
             ingestedAt: row.ingestedAt,

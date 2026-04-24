@@ -185,6 +185,7 @@ export async function createPoster(
     const reorgWatcher = new ReorgWatcher({
       store,
       blockSource: extras.rpc,
+      chainId: config.chainId,
       reorgWindowBlocks: reorgWindow,
       now,
     });
@@ -315,6 +316,7 @@ export async function createPoster(
         const q: SubmittedBatchesQuery = query ?? {};
         return listSubmittedBatches(
           store,
+          config.chainId,
           q.contentTag !== undefined
             ? { ...q, contentTag: canonicalTag(q.contentTag) }
             : q
@@ -326,6 +328,7 @@ export async function createPoster(
           rpc: extras.rpc,
           signer: config.signer,
           configuredTags: allowlistedTags,
+          chainId: config.chainId,
         });
       },
       async health(): Promise<Health> {

@@ -139,7 +139,7 @@ describe('listSubmittedBatches', () => {
   it('status "included" → messageId is populated, invalidatedAt null', async () => {
     const store = new MemoryBamStore();
     await seedBatch(store);
-    const rows = await listSubmittedBatches(store, {});
+    const rows = await listSubmittedBatches(store, 31337, {});
     expect(rows.length).toBe(1);
     expect(rows[0].status).toBe('included');
     expect(rows[0].invalidatedAt).toBeNull();
@@ -149,7 +149,7 @@ describe('listSubmittedBatches', () => {
   it('status "reorged" → messageId is surfaced as null on every message', async () => {
     const store = new MemoryBamStore();
     await seedBatch(store, { batchStatus: 'reorged', invalidatedAt: 3_000 });
-    const rows = await listSubmittedBatches(store, {});
+    const rows = await listSubmittedBatches(store, 31337, {});
     expect(rows[0].status).toBe('reorged');
     expect(rows[0].invalidatedAt).toBe(3_000);
     for (const m of rows[0].messages) expect(m.messageId).toBeNull();
@@ -158,7 +158,7 @@ describe('listSubmittedBatches', () => {
   it('returns batchContentHash on every entry', async () => {
     const store = new MemoryBamStore();
     await seedBatch(store);
-    const rows = await listSubmittedBatches(store, {});
+    const rows = await listSubmittedBatches(store, 31337, {});
     expect(rows[0].batchContentHash).toBe('0x' + '03'.repeat(32));
   });
 
@@ -166,9 +166,61 @@ describe('listSubmittedBatches', () => {
     const store = new MemoryBamStore();
     await seedBatch(store, { txHash: ('0x' + '01'.repeat(32)) as Bytes32, blockNumber: 10 });
     await seedBatch(store, { txHash: ('0x' + '02'.repeat(32)) as Bytes32, blockNumber: 20 });
-    const rows = await listSubmittedBatches(store, { sinceBlock: 15n });
+    const rows = await listSubmittedBatches(store, 31337, { sinceBlock: 15n });
     expect(rows.length).toBe(1);
     expect(rows[0].blockNumber).toBe(20);
+  });
+
+  it('filters out batches from a different chainId', async () => {
+    const store = new MemoryBamStore();
+    await seedBatch(store, { txHash: ('0x' + '01'.repeat(32)) as Bytes32, blockNumber: 10 });
+    // Write a batch on a different chain directly (bypassing seedBatch
+    // which hardcodes 31337) to simulate a shared DB.
+    await store.withTxn(async (txn) => {
+      await txn.upsertBatch({
+        txHash: ('0x' + '02'.repeat(32)) as Bytes32,
+        chainId: 999,
+        contentTag: TAG_A,
+        blobVersionedHash: ('0x' + '02'.repeat(32)) as Bytes32,
+        batchContentHash: ('0x' + '03'.repeat(32)) as Bytes32,
+        blockNumber: 11,
+        txIndex: null,
+        status: 'confirmed',
+        replacedByTxHash: null,
+        submittedAt: 2_000,
+        invalidatedAt: null,
+        messageSnapshot: [],
+      });
+    });
+    const rows = await listSubmittedBatches(store, 31337, {});
+    expect(rows.length).toBe(1);
+    expect(rows[0].txHash).toBe('0x' + '01'.repeat(32));
+  });
+
+  it('filters out batches with null submittedAt (Reader-observed, never submitted by us)', async () => {
+    const store = new MemoryBamStore();
+    await seedBatch(store, { txHash: ('0x' + '01'.repeat(32)) as Bytes32 });
+    // A batch a Reader observed without us ever submitting it: same
+    // chain, but submittedAt is null because we didn't write it.
+    await store.withTxn(async (txn) => {
+      await txn.upsertBatch({
+        txHash: ('0x' + '02'.repeat(32)) as Bytes32,
+        chainId: 31337,
+        contentTag: TAG_A,
+        blobVersionedHash: ('0x' + '02'.repeat(32)) as Bytes32,
+        batchContentHash: ('0x' + '03'.repeat(32)) as Bytes32,
+        blockNumber: 200,
+        txIndex: 0,
+        status: 'confirmed',
+        replacedByTxHash: null,
+        submittedAt: null,
+        invalidatedAt: null,
+        messageSnapshot: [],
+      });
+    });
+    const rows = await listSubmittedBatches(store, 31337, {});
+    expect(rows.length).toBe(1);
+    expect(rows[0].txHash).toBe('0x' + '01'.repeat(32));
   });
 });
 
@@ -189,6 +241,7 @@ describe('readStatus', () => {
       rpc,
       signer: new StubSigner(),
       configuredTags: [TAG_A, TAG_B],
+      chainId: 31337,
     });
     expect(s.walletAddress).toBe(WALLET);
     expect(s.walletBalanceWei).toBe(10n ** 18n);
@@ -209,6 +262,7 @@ describe('readStatus', () => {
       rpc,
       signer: new StubSigner(),
       configuredTags: [TAG_A],
+      chainId: 31337,
     });
     expect(s.lastSubmittedByTag.length).toBe(1);
     expect(s.lastSubmittedByTag[0].txHash).toBe('0x' + '01'.repeat(32));

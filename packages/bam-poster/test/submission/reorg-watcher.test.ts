@@ -143,6 +143,7 @@ describe('ReorgWatcher', () => {
     const watcher = new ReorgWatcher({
       store,
       blockSource: mkBlockSource({ head: 110n, reorgedTxs: [TX_A] }),
+      chainId: 31337,
       reorgWindowBlocks: 32,
       now: () => new Date(5_000),
     });
@@ -168,6 +169,7 @@ describe('ReorgWatcher', () => {
     const watcher = new ReorgWatcher({
       store,
       blockSource: mkBlockSource({ head: 110n, reorgedTxs: [TX_A] }),
+      chainId: 31337,
       reorgWindowBlocks: 32,
       now: () => new Date(5_000),
     });
@@ -198,6 +200,7 @@ describe('ReorgWatcher', () => {
     const watcher = new ReorgWatcher({
       store,
       blockSource: mkBlockSource({ head: 110n, reorgedTxs: [TX_A] }),
+      chainId: 31337,
       reorgWindowBlocks: 32,
       now: () => new Date(5_000),
     });
@@ -222,6 +225,7 @@ describe('ReorgWatcher', () => {
       // Head 200, window 32 → windowStart = 168, row at block 50 falls
       // outside the window.
       blockSource: mkBlockSource({ head: 200n, reorgedTxs: [TX_A] }),
+      chainId: 31337,
       reorgWindowBlocks: 32,
       now: () => new Date(5_000),
     });
@@ -245,6 +249,7 @@ describe('ReorgWatcher', () => {
     const watcher = new ReorgWatcher({
       store,
       blockSource: mkBlockSource({ head: 110n, reorgedTxs: [] }),
+      chainId: 31337,
       reorgWindowBlocks: 32,
       now: () => new Date(5_000),
     });
@@ -267,6 +272,7 @@ describe('ReorgWatcher', () => {
     const watcher = new ReorgWatcher({
       store,
       blockSource: mkBlockSource({ head: 110n, reorgedTxs: [TX_A] }),
+      chainId: 31337,
       reorgWindowBlocks: 32,
       now: () => new Date(5_000),
     });

@@ -17,6 +17,13 @@ import type {
  * with their current `status` so clients bound to a stale tx hash
  * can follow the chain.
  *
+ * Filters to batches the caller's Poster wrote: same `chainId` AND a
+ * non-null `submittedAt`. In a shared-DB Poster+Reader scenario, a
+ * batch observed by the Reader without ever being submitted by us has
+ * `submittedAt = null`; that batch isn't ours to surface as
+ * "submitted." Filtering on `submittedAt !== null` keeps the response
+ * faithful to the surface's name.
+ *
  * Each batch's messages are read via the batch's frozen
  * `messageSnapshot` rather than by querying `messages.batch_ref`. The
  * snapshot is set at confirmation and never overwritten, so a reorged
@@ -26,16 +33,19 @@ import type {
  */
 export async function listSubmittedBatches(
   store: BamStore,
+  chainId: number,
   query: SubmittedBatchesQuery
 ): Promise<SubmittedBatch[]> {
   return store.withTxn(async (txn) => {
     const batches = await txn.listBatches({
+      chainId,
       contentTag: query.contentTag,
       sinceBlock: query.sinceBlock,
       limit: query.limit,
     });
     const out: SubmittedBatch[] = [];
     for (const b of batches) {
+      if (b.submittedAt === null) continue;
       const msgs = await readSnapshotMessages(txn, b);
       out.push(mapBatch(b, msgs));
     }
@@ -108,7 +118,10 @@ function mapBatch(b: BatchRow, msgs: SnapshotJoinRow[]): SubmittedBatch {
     blockNumber: b.blockNumber,
     status,
     replacedByTxHash: b.replacedByTxHash,
-    submittedAt: b.submittedAt ?? 0,
+    // `submittedAt === null` rows are filtered out by listSubmittedBatches
+    // before mapBatch runs, so the cast is sound — this surface only ever
+    // shows batches the Poster itself wrote.
+    submittedAt: b.submittedAt as number,
     invalidatedAt: b.invalidatedAt,
     messages: mappedMessages,
   };

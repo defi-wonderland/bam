@@ -151,12 +151,15 @@ export class PostgresBamStore implements BamStore {
       for (const stmt of SQL_CREATE_POSTGRES) {
         await client.query(stmt);
       }
-      const existing = await client.query<{ version: number }>(
-        'SELECT version FROM bam_store_schema LIMIT 1'
+      // Two processes starting concurrently against the same DB can both
+      // observe zero rows and then both attempt the INSERT. ON CONFLICT
+      // DO NOTHING makes the second writer a no-op without crashing. We
+      // do not check the existing version here — that's the schema-version
+      // guard's job (`reconcileSchemaVersion`), which runs separately.
+      await client.query(
+        'INSERT INTO bam_store_schema (version) VALUES ($1) ON CONFLICT DO NOTHING',
+        [SCHEMA_VERSION]
       );
-      if (existing.rowCount === 0) {
-        await client.query('INSERT INTO bam_store_schema (version) VALUES ($1)', [SCHEMA_VERSION]);
-      }
     } finally {
       client.release();
     }
