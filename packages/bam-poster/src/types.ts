@@ -11,14 +11,10 @@ import type {
   BamStore,
   BatchRow,
   MessageRow,
-  MessageSnapshot,
   NonceTrackerRow,
   PendingKey,
   StoreTxn,
   StoreTxnPendingRow,
-  StoreTxnSubmittedRow,
-  SubmittedBatchStatus,
-  SubmittedBatchesQuery,
 } from 'bam-store';
 import type { Account } from 'viem';
 
@@ -30,15 +26,26 @@ export type {
   BamStore,
   BatchRow,
   MessageRow,
-  MessageSnapshot,
   NonceTrackerRow,
   PendingKey,
   StoreTxn,
   StoreTxnPendingRow,
-  StoreTxnSubmittedRow,
-  SubmittedBatchStatus,
-  SubmittedBatchesQuery,
 };
+
+/**
+ * Submitted-batch lifecycle states as exposed through the Poster's
+ * public HTTP read surface. Internally the store tracks three
+ * BatchStatus values (`pending_tx | confirmed | reorged`);
+ * surfaces/submitted.ts maps `reorged` with a non-null
+ * `replacedByTxHash` back to `resubmitted` for HTTP shape parity.
+ */
+export type SubmittedBatchStatus = 'pending' | 'included' | 'reorged' | 'resubmitted';
+
+export interface SubmittedBatchesQuery {
+  contentTag?: Bytes32;
+  sinceBlock?: bigint;
+  limit?: number;
+}
 
 // ═══════════════════════════════════════════════════════════════════════
 // Submit API

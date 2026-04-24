@@ -23,7 +23,7 @@ export class StartupReconciliationError extends Error {}
  * Startup self-check:
  *   - `eth_chainId` matches `config.chainId`.
  *   - `eth_getCode(bamCoreAddress)` is non-empty.
- *   - If the store is DB-backed, its `poster_schema.version` row
+ *   - If the store is DB-backed, its `bam_store_schema.version` row
  *     matches the current `SCHEMA_VERSION` constant.
  *
  * Throws before the submission loop starts. Mis-matched chain-ID,
@@ -72,9 +72,9 @@ export async function reconcileSchemaVersion(store: BamStore): Promise<void> {
   if (found !== SCHEMA_VERSION) {
     throw new StartupReconciliationError(
       `schema-version mismatch: DB=${found} expected=${SCHEMA_VERSION}. ` +
-        `Drop the pool tables (poster_pending, poster_nonces, ` +
-        `poster_submitted_batches, poster_tag_seq, poster_schema) ` +
-        `and restart so the adapter can recreate them at the current version.`
+        `Drop the store tables (messages, batches, tag_seq, nonces, ` +
+        `reader_cursor, bam_store_schema) and restart so the adapter ` +
+        `can recreate them at the current version.`
     );
   }
 }

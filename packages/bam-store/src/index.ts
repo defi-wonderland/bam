@@ -13,7 +13,6 @@ export type {
   BatchesQuery,
   ChainCoord,
   MessageRow,
-  MessageSnapshot,
   MessageStatus,
   MessagesQuery,
   NonceTrackerRow,
@@ -21,9 +20,6 @@ export type {
   ReaderCursorRow,
   StoreTxn,
   StoreTxnPendingRow,
-  StoreTxnSubmittedRow,
-  SubmittedBatchStatus,
-  SubmittedBatchesQuery,
 } from './types.js';
 
 export { createMemoryStore, MemoryBamStore } from './memory-store.js';

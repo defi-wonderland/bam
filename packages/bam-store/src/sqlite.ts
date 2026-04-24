@@ -7,7 +7,6 @@ import type {
   BatchStatus,
   BatchesQuery,
   MessageRow,
-  MessageSnapshot,
   MessageStatus,
   MessagesQuery,
   NonceTrackerRow,
@@ -15,14 +14,9 @@ import type {
   ReaderCursorRow,
   StoreTxn,
   StoreTxnPendingRow,
-  StoreTxnSubmittedRow,
-  SubmittedBatchStatus,
-  SubmittedBatchesQuery,
 } from './types.js';
 import { decodeNonce, encodeNonce } from './nonce-codec.js';
 import { SCHEMA_VERSION, SQL_CREATE_SQLITE } from './schema.js';
-
-const BRIDGE_CHAIN_ID = 0;
 
 interface MessageRowRaw {
   author: string;
@@ -116,41 +110,6 @@ function mapPending(raw: MessageRowRaw): StoreTxnPendingRow {
   };
 }
 
-function oldStatusToBatch(s: SubmittedBatchStatus): BatchStatus {
-  switch (s) {
-    case 'pending':
-      return 'pending_tx';
-    case 'included':
-      return 'confirmed';
-    case 'reorged':
-      return 'reorged';
-    case 'resubmitted':
-      return 'reorged';
-  }
-}
-
-function batchToOldStatus(b: BatchRow): SubmittedBatchStatus {
-  switch (b.status) {
-    case 'pending_tx':
-      return 'pending';
-    case 'confirmed':
-      return 'included';
-    case 'reorged':
-      return b.replacedByTxHash !== null ? 'resubmitted' : 'reorged';
-  }
-}
-
-function messageStatusForBatch(bs: BatchStatus): MessageStatus {
-  switch (bs) {
-    case 'pending_tx':
-      return 'submitted';
-    case 'confirmed':
-      return 'confirmed';
-    case 'reorged':
-      return 'reorged';
-  }
-}
-
 export class SqliteBamStore implements BamStore {
   private readonly db: Database.Database;
   private txnChain: Promise<unknown> = Promise.resolve();
@@ -166,16 +125,16 @@ export class SqliteBamStore implements BamStore {
 
   private initSchemaVersion(): void {
     const row = this.db
-      .prepare('SELECT version FROM poster_schema LIMIT 1')
+      .prepare('SELECT version FROM bam_store_schema LIMIT 1')
       .get() as { version: number } | undefined;
     if (row === undefined) {
-      this.db.prepare('INSERT INTO poster_schema (version) VALUES (?)').run(SCHEMA_VERSION);
+      this.db.prepare('INSERT INTO bam_store_schema (version) VALUES (?)').run(SCHEMA_VERSION);
     }
   }
 
   readSchemaVersion(): number {
     const row = this.db
-      .prepare('SELECT version FROM poster_schema LIMIT 1')
+      .prepare('SELECT version FROM bam_store_schema LIMIT 1')
       .get() as { version: number } | undefined;
     return row?.version ?? SCHEMA_VERSION;
   }
@@ -275,38 +234,6 @@ export class SqliteBamStore implements BamStore {
       );
     }
 
-    function collectMessagesForBatch(txHash: Bytes32): MessageSnapshot[] {
-      const rows = db
-        .prepare(
-          'SELECT * FROM messages WHERE batch_ref = ? ORDER BY ingest_seq ASC'
-        )
-        .all(txHash) as MessageRowRaw[];
-      return rows.map((r) => ({
-        sender: r.author as Address,
-        nonce: decodeNonce(r.nonce),
-        contents: new Uint8Array(r.contents),
-        signature: new Uint8Array(r.signature),
-        messageHash: r.message_hash as Bytes32,
-        messageId: (r.message_id ?? null) as Bytes32 | null,
-        originalIngestSeq: r.ingest_seq ?? 0,
-      }));
-    }
-
-    function mapBatchToSubmitted(b: BatchRow): StoreTxnSubmittedRow {
-      return {
-        txHash: b.txHash,
-        contentTag: b.contentTag,
-        blobVersionedHash: b.blobVersionedHash,
-        batchContentHash: b.batchContentHash,
-        blockNumber: b.blockNumber,
-        status: batchToOldStatus(b),
-        replacedByTxHash: b.replacedByTxHash,
-        submittedAt: b.submittedAt ?? 0,
-        invalidatedAt: b.invalidatedAt,
-        messages: collectMessagesForBatch(b.txHash),
-      };
-    }
-
     return {
       // ── old Poster-facing pending CRUD (bridged to `messages`) ────────
       insertPending(row: StoreTxnPendingRow): void {
@@ -393,23 +320,6 @@ export class SqliteBamStore implements BamStore {
         return rows.map(mapPending);
       },
 
-      deletePending(keys: PendingKey[]): void {
-        if (keys.length === 0) return;
-        const CHUNK = 500;
-        for (let i = 0; i < keys.length; i += CHUNK) {
-          const slice = keys.slice(i, i + CHUNK);
-          const placeholders = slice.map(() => '(?, ?)').join(', ');
-          const params: string[] = [];
-          for (const k of slice) {
-            params.push(k.sender.toLowerCase(), encodeNonce(k.nonce));
-          }
-          db.prepare(
-            `DELETE FROM messages
-             WHERE status = 'pending' AND (author, nonce) IN (VALUES ${placeholders})`
-          ).run(...params);
-        }
-      },
-
       countPendingByTag(tag: Bytes32): number {
         const row = db
           .prepare(
@@ -422,7 +332,7 @@ export class SqliteBamStore implements BamStore {
       nextIngestSeq(tag: Bytes32): number {
         const row = db
           .prepare(
-            `INSERT INTO poster_tag_seq (content_tag, last_seq) VALUES (?, 1)
+            `INSERT INTO tag_seq (content_tag, last_seq) VALUES (?, 1)
              ON CONFLICT(content_tag) DO UPDATE SET last_seq = last_seq + 1
              RETURNING last_seq`
           )
@@ -436,7 +346,7 @@ export class SqliteBamStore implements BamStore {
       // ── nonce tracker ────────────────────────────────────────────────
       getNonce(sender: Address): NonceTrackerRow | null {
         const raw = db
-          .prepare('SELECT * FROM poster_nonces WHERE sender = ?')
+          .prepare('SELECT * FROM nonces WHERE sender = ?')
           .get(sender.toLowerCase()) as NonceRowRaw | undefined;
         if (!raw) return null;
         return {
@@ -447,7 +357,7 @@ export class SqliteBamStore implements BamStore {
       },
       setNonce(row: NonceTrackerRow): void {
         db.prepare(
-          `INSERT INTO poster_nonces (sender, last_nonce, last_message_hash)
+          `INSERT INTO nonces (sender, last_nonce, last_message_hash)
            VALUES (?, ?, ?)
            ON CONFLICT(sender) DO UPDATE SET
              last_nonce = excluded.last_nonce,
@@ -455,122 +365,7 @@ export class SqliteBamStore implements BamStore {
         ).run(row.sender.toLowerCase(), encodeNonce(row.lastNonce), row.lastMessageHash);
       },
 
-      // ── old submitted CRUD (bridged to batches + messages) ───────────
-      insertSubmitted(row: StoreTxnSubmittedRow): void {
-        const existing = db
-          .prepare('SELECT tx_hash FROM batches WHERE tx_hash = ?')
-          .get(row.txHash);
-        if (existing) {
-          throw new Error('insertSubmitted: duplicate tx_hash');
-        }
-        const bs = oldStatusToBatch(row.status);
-        db.prepare(
-          `INSERT INTO batches
-            (tx_hash, chain_id, content_tag, blob_versioned_hash,
-             batch_content_hash, block_number, tx_index, status,
-             replaced_by_tx_hash, submitted_at, invalidated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-        ).run(
-          row.txHash,
-          BRIDGE_CHAIN_ID,
-          row.contentTag,
-          row.blobVersionedHash,
-          row.batchContentHash,
-          row.blockNumber,
-          null,
-          bs,
-          row.replacedByTxHash,
-          row.submittedAt,
-          row.invalidatedAt
-        );
-        for (let i = 0; i < row.messages.length; i++) {
-          const m = row.messages[i];
-          const ms = messageStatusForBatch(bs);
-          upsertMessage({
-            messageId: m.messageId,
-            author: m.sender,
-            nonce: m.nonce,
-            contentTag: row.contentTag,
-            contents: m.contents,
-            signature: m.signature,
-            messageHash: m.messageHash,
-            status: ms,
-            batchRef: row.txHash,
-            ingestedAt: null,
-            ingestSeq: m.originalIngestSeq,
-            blockNumber: bs === 'confirmed' ? row.blockNumber : null,
-            txIndex: null,
-            messageIndexWithinBatch: i,
-          });
-        }
-      },
-
-      getSubmittedByTx(txHash: Bytes32): StoreTxnSubmittedRow | null {
-        const raw = db
-          .prepare('SELECT * FROM batches WHERE tx_hash = ?')
-          .get(txHash) as BatchRowRaw | undefined;
-        if (!raw) return null;
-        return mapBatchToSubmitted(mapBatch(raw));
-      },
-
-      listSubmitted(query: SubmittedBatchesQuery): StoreTxnSubmittedRow[] {
-        const clauses: string[] = [];
-        const params: Array<string | number> = [];
-        if (query.contentTag !== undefined) {
-          clauses.push('content_tag = ?');
-          params.push(query.contentTag);
-        }
-        if (query.sinceBlock !== undefined) {
-          clauses.push('block_number IS NOT NULL AND block_number >= ?');
-          params.push(Number(query.sinceBlock));
-        }
-        let sql = `SELECT * FROM batches${
-          clauses.length ? ' WHERE ' + clauses.join(' AND ') : ''
-        } ORDER BY submitted_at DESC`;
-        if (typeof query.limit === 'number') {
-          sql += ' LIMIT ?';
-          params.push(query.limit);
-        }
-        const rows = db.prepare(sql).all(...params) as BatchRowRaw[];
-        return rows.map((r) => mapBatchToSubmitted(mapBatch(r)));
-      },
-
-      updateSubmittedStatus(
-        txHash: Bytes32,
-        status: SubmittedBatchStatus,
-        replacedByTxHash: Bytes32 | null,
-        blockNumber: number | null,
-        invalidatedAt?: number | null
-      ): void {
-        const bs = oldStatusToBatch(status);
-        const sets = ['status = ?', 'replaced_by_tx_hash = ?'];
-        const setParams: Array<string | number | null> = [bs, replacedByTxHash];
-        if (blockNumber !== null) {
-          sets.push('block_number = ?');
-          setParams.push(blockNumber);
-        }
-        if (invalidatedAt !== undefined) {
-          sets.push('invalidated_at = ?');
-          setParams.push(invalidatedAt);
-        }
-        const res = db
-          .prepare(`UPDATE batches SET ${sets.join(', ')} WHERE tx_hash = ?`)
-          .run(...setParams, txHash);
-        if (res.changes === 0) {
-          throw new Error('updateSubmittedStatus: no row for tx_hash');
-        }
-        // Cascade to live messages under this batch on terminal
-        // transitions, so the reorg-watcher's re-enqueue via
-        // insertPending isn't blocked by a confirmed/submitted row.
-        if (bs === 'reorged') {
-          db.prepare(
-            `UPDATE messages SET status = 'reorged'
-             WHERE batch_ref = ? AND status IN ('confirmed', 'submitted')`
-          ).run(txHash);
-        }
-      },
-
-      // ── unified-schema lifecycle transitions (T006) ──────────────────
+      // ── unified-schema lifecycle transitions ─────────────────────────
       markSubmitted(keys: PendingKey[], batchRef: Bytes32): void {
         if (keys.length === 0) return;
         const CHUNK = 500;

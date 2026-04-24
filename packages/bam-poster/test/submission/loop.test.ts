@@ -119,14 +119,17 @@ describe('SubmissionLoop', () => {
       Promise.resolve(txn.listPendingByTag(TAG))
     );
     expect(remaining.map((r) => Number(r.nonce))).toEqual([3]);
-    const submitted = await h.store.withTxn((txn) =>
-      Promise.resolve(txn.listSubmitted({ contentTag: TAG }))
+    const batches = await h.store.withTxn((txn) =>
+      Promise.resolve(txn.listBatches({ contentTag: TAG }))
     );
-    expect(submitted.length).toBe(1);
-    expect(submitted[0].batchContentHash).toBe('0x' + 'bb'.repeat(32));
-    expect(submitted[0].messages.length).toBe(2);
+    expect(batches.length).toBe(1);
+    expect(batches[0].batchContentHash).toBe('0x' + 'bb'.repeat(32));
+    const attached = await h.store.withTxn((txn) =>
+      Promise.resolve(txn.listMessages({ batchRef: batches[0].txHash }))
+    );
+    expect(attached.length).toBe(2);
     // Each message gets a batch-scoped messageId.
-    expect(submitted[0].messages[0].messageId).toMatch(/^0x[0-9a-f]{64}$/);
+    expect(attached[0].messageId).toMatch(/^0x[0-9a-f]{64}$/);
     expect(h.loop.attempts()).toBe(0);
     expect(h.loop.healthState()).toBe('ok');
   });

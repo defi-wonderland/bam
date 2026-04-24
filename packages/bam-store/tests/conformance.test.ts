@@ -36,8 +36,7 @@ describe.skipIf(!PG_URL)('bam-store conformance — postgres backend', () => {
         const bootstrap = new PostgresBamStore(PG_URL!);
         await bootstrap.close();
         await c.query(
-          `TRUNCATE messages, batches, reader_cursor, poster_tag_seq,
-                    poster_nonces, poster_pending, poster_submitted_batches
+          `TRUNCATE messages, batches, reader_cursor, tag_seq, nonces
            RESTART IDENTITY`
         );
       } finally {

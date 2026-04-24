@@ -9,19 +9,7 @@
 import type { Address, Bytes32 } from 'bam-sdk';
 
 // ═══════════════════════════════════════════════════════════════════════
-// Submitted-batch status + query shapes
-// ═══════════════════════════════════════════════════════════════════════
-
-export type SubmittedBatchStatus = 'pending' | 'included' | 'reorged' | 'resubmitted';
-
-export interface SubmittedBatchesQuery {
-  contentTag?: Bytes32;
-  sinceBlock?: bigint;
-  limit?: number;
-}
-
-// ═══════════════════════════════════════════════════════════════════════
-// BamStore — single durable substrate for pool + dedup + submitted
+// BamStore — single durable substrate for pool + dedup + confirmed
 // ═══════════════════════════════════════════════════════════════════════
 
 export interface StoreTxnPendingRow {
@@ -33,35 +21,6 @@ export interface StoreTxnPendingRow {
   messageHash: Bytes32;
   ingestedAt: number;
   ingestSeq: number;
-}
-
-/**
- * Per-message snapshot retained in `poster_submitted_batches` so the
- * reorg watcher can re-enqueue messages into the pending pool after
- * inclusion-time pruning.
- */
-export interface MessageSnapshot {
-  sender: Address;
-  nonce: bigint;
-  contents: Uint8Array;
-  signature: Uint8Array;
-  messageHash: Bytes32;
-  /** `messageId` is batch-scoped and only meaningful when the parent row's status is `'included'`. */
-  messageId: Bytes32 | null;
-  originalIngestSeq: number;
-}
-
-export interface StoreTxnSubmittedRow {
-  txHash: Bytes32;
-  contentTag: Bytes32;
-  blobVersionedHash: Bytes32;
-  batchContentHash: Bytes32;
-  blockNumber: number | null;
-  status: SubmittedBatchStatus;
-  replacedByTxHash: Bytes32 | null;
-  submittedAt: number;
-  invalidatedAt: number | null;
-  messages: MessageSnapshot[];
 }
 
 export interface NonceTrackerRow {
@@ -90,7 +49,6 @@ export interface StoreTxn {
     limit?: number,
     sinceSeq?: number
   ): StoreTxnPendingRow[] | Promise<StoreTxnPendingRow[]>;
-  deletePending(keys: PendingKey[]): void | Promise<void>;
   countPendingByTag(tag: Bytes32): number | Promise<number>;
   nextIngestSeq(tag: Bytes32): number | Promise<number>;
 
@@ -98,23 +56,7 @@ export interface StoreTxn {
   getNonce(sender: Address): NonceTrackerRow | null | Promise<NonceTrackerRow | null>;
   setNonce(row: NonceTrackerRow): void | Promise<void>;
 
-  // ── submitted-batches CRUD ───────────────────────────────────────────
-  insertSubmitted(row: StoreTxnSubmittedRow): void | Promise<void>;
-  getSubmittedByTx(
-    txHash: Bytes32
-  ): StoreTxnSubmittedRow | null | Promise<StoreTxnSubmittedRow | null>;
-  listSubmitted(
-    query: SubmittedBatchesQuery
-  ): StoreTxnSubmittedRow[] | Promise<StoreTxnSubmittedRow[]>;
-  updateSubmittedStatus(
-    txHash: Bytes32,
-    status: SubmittedBatchStatus,
-    replacedByTxHash: Bytes32 | null,
-    blockNumber: number | null,
-    invalidatedAt?: number | null
-  ): void | Promise<void>;
-
-  // ── unified-schema lifecycle transitions (T004 — impls land T005–T007) ─
+  // ── unified-schema lifecycle transitions ────────────────────────────
   /** Poster-side: move rows from `pending` to `submitted` and attach a batch ref. */
   markSubmitted(keys: PendingKey[], batchRef: Bytes32): void | Promise<void>;
   /** Reader-side: idempotent upsert of an observed message keyed by (author, nonce). */
