@@ -123,8 +123,8 @@ export function runConformance(make: StoreFactory): void {
       const store = await newStore();
       const confirmedHash = ('0x' + '11'.repeat(32)) as Bytes32;
       await store.withTxn(async (txn) => {
-        txn.upsertBatch(batchRow({ status: 'confirmed', blockNumber: 10 }));
-        txn.upsertObserved(
+        await txn.upsertBatch(batchRow({ status: 'confirmed', blockNumber: 10 }));
+        await txn.upsertObserved(
           messageRow({
             status: 'confirmed',
             messageHash: confirmedHash,
@@ -140,7 +140,7 @@ export function runConformance(make: StoreFactory): void {
       // distinct messageHash — gets marked as a duplicate.
       const dupHash = ('0x' + '22'.repeat(32)) as Bytes32;
       await store.withTxn(async (txn) =>
-        txn.upsertObserved(
+        await txn.upsertObserved(
           messageRow({
             // The same author+nonce key would collide; in the real
             // flow, the later row is inserted under a different key path
@@ -171,8 +171,8 @@ export function runConformance(make: StoreFactory): void {
     it('batch flips to reorged and every confirmed row under it cascades to reorged', async () => {
       const store = await newStore();
       await store.withTxn(async (txn) => {
-        txn.upsertBatch(batchRow({ status: 'confirmed', blockNumber: 10 }));
-        txn.upsertObserved(
+        await txn.upsertBatch(batchRow({ status: 'confirmed', blockNumber: 10 }));
+        await txn.upsertObserved(
           messageRow({
             status: 'confirmed',
             batchRef: TX_A,
@@ -183,7 +183,7 @@ export function runConformance(make: StoreFactory): void {
             nonce: 1n,
           })
         );
-        txn.upsertObserved(
+        await txn.upsertObserved(
           messageRow({
             status: 'confirmed',
             batchRef: TX_A,
@@ -216,15 +216,15 @@ export function runConformance(make: StoreFactory): void {
     it('observed rows sort by (blockNumber, txIndex, messageIndexWithinBatch)', async () => {
       const store = await newStore();
       await store.withTxn(async (txn) => {
-        txn.upsertBatch(batchRow({ txHash: TX_A, blockNumber: 10 }));
-        txn.upsertBatch(batchRow({ txHash: TX_B, blockNumber: 20 }));
-        txn.upsertObserved(
+        await txn.upsertBatch(batchRow({ txHash: TX_A, blockNumber: 10 }));
+        await txn.upsertBatch(batchRow({ txHash: TX_B, blockNumber: 20 }));
+        await txn.upsertObserved(
           messageRow({ author: ADDR_1, nonce: 1n, batchRef: TX_B, blockNumber: 20, txIndex: 0, messageIndexWithinBatch: 0 })
         );
-        txn.upsertObserved(
+        await txn.upsertObserved(
           messageRow({ author: ADDR_2, nonce: 1n, batchRef: TX_A, blockNumber: 10, txIndex: 3, messageIndexWithinBatch: 1 })
         );
-        txn.upsertObserved(
+        await txn.upsertObserved(
           messageRow({ author: ADDR_1, nonce: 2n, batchRef: TX_A, blockNumber: 10, txIndex: 3, messageIndexWithinBatch: 0 })
         );
       });
@@ -242,13 +242,13 @@ export function runConformance(make: StoreFactory): void {
     it('cursor pagination resumes strictly after the given coord', async () => {
       const store = await newStore();
       await store.withTxn(async (txn) => {
-        txn.upsertObserved(
+        await txn.upsertObserved(
           messageRow({ author: ADDR_1, nonce: 1n, blockNumber: 10, txIndex: 0, messageIndexWithinBatch: 0 })
         );
-        txn.upsertObserved(
+        await txn.upsertObserved(
           messageRow({ author: ADDR_1, nonce: 2n, blockNumber: 10, txIndex: 0, messageIndexWithinBatch: 1 })
         );
-        txn.upsertObserved(
+        await txn.upsertObserved(
           messageRow({ author: ADDR_1, nonce: 3n, blockNumber: 11, txIndex: 0, messageIndexWithinBatch: 0 })
         );
       });
@@ -270,7 +270,7 @@ export function runConformance(make: StoreFactory): void {
       const store = await newStore();
       await store.withTxn(async (txn) => txn.upsertBatch(batchRow({ status: 'pending_tx' })));
       await store.withTxn(async (txn) =>
-        txn.updateBatchStatus(TX_A, 'confirmed', { blockNumber: 42, txIndex: 3 })
+        await txn.updateBatchStatus(TX_A, 'confirmed', { blockNumber: 42, txIndex: 3 })
       );
       const [b] = await store.withTxn((txn) => Promise.resolve(txn.listBatches({})));
       expect(b.status).toBe('confirmed');
@@ -281,10 +281,10 @@ export function runConformance(make: StoreFactory): void {
     it('confirmed → reorged via updateBatchStatus with invalidatedAt', async () => {
       const store = await newStore();
       await store.withTxn(async (txn) =>
-        txn.upsertBatch(batchRow({ status: 'confirmed', blockNumber: 10 }))
+        await txn.upsertBatch(batchRow({ status: 'confirmed', blockNumber: 10 }))
       );
       await store.withTxn(async (txn) =>
-        txn.updateBatchStatus(TX_A, 'reorged', { invalidatedAt: 9_000 })
+        await txn.updateBatchStatus(TX_A, 'reorged', { invalidatedAt: 9_000 })
       );
       const [b] = await store.withTxn((txn) => Promise.resolve(txn.listBatches({})));
       expect(b.status).toBe('reorged');
@@ -298,12 +298,12 @@ export function runConformance(make: StoreFactory): void {
       const miss = await store.withTxn((txn) => Promise.resolve(txn.getCursor(1)));
       expect(miss).toBeNull();
       await store.withTxn(async (txn) =>
-        txn.setCursor({ chainId: 1, lastBlockNumber: 100, lastTxIndex: 5, updatedAt: 1_000 })
+        await txn.setCursor({ chainId: 1, lastBlockNumber: 100, lastTxIndex: 5, updatedAt: 1_000 })
       );
       const hit = await store.withTxn((txn) => Promise.resolve(txn.getCursor(1)));
       expect(hit).toEqual({ chainId: 1, lastBlockNumber: 100, lastTxIndex: 5, updatedAt: 1_000 });
       await store.withTxn(async (txn) =>
-        txn.setCursor({ chainId: 1, lastBlockNumber: 200, lastTxIndex: 0, updatedAt: 2_000 })
+        await txn.setCursor({ chainId: 1, lastBlockNumber: 200, lastTxIndex: 0, updatedAt: 2_000 })
       );
       const updated = await store.withTxn((txn) => Promise.resolve(txn.getCursor(1)));
       expect(updated!.lastBlockNumber).toBe(200);
@@ -314,7 +314,7 @@ export function runConformance(make: StoreFactory): void {
     it('Poster marks submitted while Reader upserts observed; both persist without loss', async () => {
       const store = await newStore();
       await store.withTxn(async (txn) => {
-        txn.insertPending({
+        await txn.insertPending({
           contentTag: TAG_A,
           sender: ADDR_1,
           nonce: 1n,
@@ -324,9 +324,9 @@ export function runConformance(make: StoreFactory): void {
           ingestedAt: 1_000,
           ingestSeq: 1,
         });
-        txn.upsertBatch(batchRow({ txHash: TX_A, status: 'pending_tx' }));
-        txn.markSubmitted([{ sender: ADDR_1, nonce: 1n }], TX_A);
-        txn.upsertObserved(
+        await txn.upsertBatch(batchRow({ txHash: TX_A, status: 'pending_tx' }));
+        await txn.markSubmitted([{ sender: ADDR_1, nonce: 1n }], TX_A);
+        await txn.upsertObserved(
           messageRow({
             author: ADDR_2,
             nonce: 5n,
@@ -354,9 +354,9 @@ export function runConformance(make: StoreFactory): void {
       const store = await newStore();
       const N = 50;
       await store.withTxn(async (txn) => {
-        txn.upsertBatch(batchRow({ status: 'confirmed', blockNumber: 100 }));
+        await txn.upsertBatch(batchRow({ status: 'confirmed', blockNumber: 100 }));
         for (let i = 0; i < N; i++) {
-          txn.upsertObserved(
+          await txn.upsertObserved(
             messageRow({
               author: ADDR_1,
               nonce: BigInt(i + 1),
@@ -377,8 +377,8 @@ export function runConformance(make: StoreFactory): void {
       const store = await newStore();
       await expect(
         store.withTxn(async (txn) => {
-          txn.upsertBatch(batchRow({ status: 'confirmed', blockNumber: 100 }));
-          txn.upsertObserved(
+          await txn.upsertBatch(batchRow({ status: 'confirmed', blockNumber: 100 }));
+          await txn.upsertObserved(
             messageRow({
               author: ADDR_1,
               nonce: 1n,

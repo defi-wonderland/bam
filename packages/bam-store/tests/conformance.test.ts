@@ -1,15 +1,16 @@
 /**
  * Backend parameterizations for the shared conformance suite.
  *
- * T004 ships every backend here as `describe.skip` — tests count as
- * pending until the adapter actually implements the unified-schema
- * methods. T005 un-skips memory; T006 un-skips SQLite; T007 un-skips
- * Postgres.
+ * The Postgres parameterization runs when `BAMSTORE_PG_URL` is set
+ * (e.g. pointing at a local `docker run postgres` or the CI test
+ * container); otherwise it skips with `describe.skipIf`, so dev
+ * machines without Docker still pass the suite.
  */
 
 import { describe } from 'vitest';
+import pg from 'pg';
 
-import { createMemoryStore, SqliteBamStore } from '../src/index.js';
+import { createMemoryStore, PostgresBamStore, SqliteBamStore } from '../src/index.js';
 import { runConformance } from './conformance.js';
 
 describe('bam-store conformance — memory backend', () => {
@@ -20,10 +21,29 @@ describe('bam-store conformance — sqlite backend', () => {
   runConformance(() => new SqliteBamStore(':memory:'));
 });
 
-describe.skip('bam-store conformance — postgres backend', () => {
-  // Concrete factory wired up in T007 once the test container is hooked
-  // in. Keeping the placeholder keeps the backend list visible.
-  runConformance(() => {
-    throw new Error('postgres backend factory not wired (T007)');
+const PG_URL = process.env.BAMSTORE_PG_URL;
+
+describe.skipIf(!PG_URL)('bam-store conformance — postgres backend', () => {
+  // Truncate all tables before each store is handed out so tests are
+  // isolated against the shared database. Tables are guaranteed to
+  // exist after the first PostgresBamStore constructor runs.
+  const resetPool = PG_URL ? new pg.Pool({ connectionString: PG_URL }) : null;
+  runConformance(async () => {
+    if (resetPool) {
+      const c = await resetPool.connect();
+      try {
+        // First connection initialises schema if needed via a throwaway store.
+        const bootstrap = new PostgresBamStore(PG_URL!);
+        await bootstrap.close();
+        await c.query(
+          `TRUNCATE messages, batches, reader_cursor, poster_tag_seq,
+                    poster_nonces, poster_pending, poster_submitted_batches
+           RESTART IDENTITY`
+        );
+      } finally {
+        c.release();
+      }
+    }
+    return new PostgresBamStore(PG_URL!);
   });
 });

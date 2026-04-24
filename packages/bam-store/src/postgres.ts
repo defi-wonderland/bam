@@ -1,10 +1,18 @@
-import { createPool, type VercelPool, type VercelPoolClient } from '@vercel/postgres';
+import pg from 'pg';
 import type { Address, Bytes32 } from 'bam-sdk';
+
+type PgPool = pg.Pool;
+type PgPoolClient = pg.PoolClient;
 
 import type {
   BamStore,
   BatchRow,
+  BatchStatus,
+  BatchesQuery,
   MessageRow,
+  MessageSnapshot,
+  MessageStatus,
+  MessagesQuery,
   NonceTrackerRow,
   PendingKey,
   ReaderCursorRow,
@@ -16,7 +24,8 @@ import type {
 } from './types.js';
 import { decodeNonce, encodeNonce } from './nonce-codec.js';
 import { SCHEMA_VERSION, SQL_CREATE_POSTGRES } from './schema.js';
-import { decodeSnapshots, encodeSnapshots } from './snapshot-codec.js';
+
+const BRIDGE_CHAIN_ID = 0;
 
 function isSerializationFailure(err: unknown): boolean {
   return (
@@ -27,28 +36,42 @@ function isSerializationFailure(err: unknown): boolean {
   );
 }
 
-interface PendingRowRaw {
-  content_tag: string;
-  sender: string;
+interface MessageRowRaw {
+  author: string;
   nonce: string;
+  content_tag: string;
   contents: Buffer;
   signature: Buffer;
   message_hash: string;
-  ingested_at: string | number;
-  ingest_seq: string | number;
+  message_id: string | null;
+  status: string;
+  batch_ref: string | null;
+  ingested_at: string | number | null;
+  ingest_seq: string | number | null;
+  block_number: string | number | null;
+  tx_index: string | number | null;
+  message_index_within_batch: string | number | null;
 }
 
-interface SubmittedRowRaw {
+interface BatchRowRaw {
   tx_hash: string;
+  chain_id: string | number;
   content_tag: string;
   blob_versioned_hash: string;
   batch_content_hash: string;
   block_number: string | number | null;
+  tx_index: string | number | null;
   status: string;
   replaced_by_tx_hash: string | null;
-  submitted_at: string | number;
+  submitted_at: string | number | null;
   invalidated_at: string | number | null;
-  messages_json: string;
+}
+
+interface CursorRowRaw {
+  chain_id: string | number;
+  last_block_number: string | number;
+  last_tx_index: string | number;
+  updated_at: string | number;
 }
 
 interface NonceRowRaw {
@@ -61,40 +84,99 @@ function toInt(value: string | number): number {
   return typeof value === 'number' ? value : Number(value);
 }
 
-function mapPending(raw: PendingRowRaw): StoreTxnPendingRow {
+function toIntOrNull(value: string | number | null): number | null {
+  return value === null || value === undefined ? null : toInt(value);
+}
+
+function mapMessage(raw: MessageRowRaw): MessageRow {
+  return {
+    messageId: (raw.message_id ?? null) as Bytes32 | null,
+    author: raw.author as Address,
+    nonce: decodeNonce(raw.nonce),
+    contentTag: raw.content_tag as Bytes32,
+    contents: new Uint8Array(raw.contents),
+    signature: new Uint8Array(raw.signature),
+    messageHash: raw.message_hash as Bytes32,
+    status: raw.status as MessageStatus,
+    batchRef: (raw.batch_ref ?? null) as Bytes32 | null,
+    ingestedAt: toIntOrNull(raw.ingested_at),
+    ingestSeq: toIntOrNull(raw.ingest_seq),
+    blockNumber: toIntOrNull(raw.block_number),
+    txIndex: toIntOrNull(raw.tx_index),
+    messageIndexWithinBatch: toIntOrNull(raw.message_index_within_batch),
+  };
+}
+
+function mapBatch(raw: BatchRowRaw): BatchRow {
+  return {
+    txHash: raw.tx_hash as Bytes32,
+    chainId: toInt(raw.chain_id),
+    contentTag: raw.content_tag as Bytes32,
+    blobVersionedHash: raw.blob_versioned_hash as Bytes32,
+    batchContentHash: raw.batch_content_hash as Bytes32,
+    blockNumber: toIntOrNull(raw.block_number),
+    txIndex: toIntOrNull(raw.tx_index),
+    status: raw.status as BatchStatus,
+    replacedByTxHash: (raw.replaced_by_tx_hash ?? null) as Bytes32 | null,
+    submittedAt: toIntOrNull(raw.submitted_at),
+    invalidatedAt: toIntOrNull(raw.invalidated_at),
+  };
+}
+
+function mapPending(raw: MessageRowRaw): StoreTxnPendingRow {
   return {
     contentTag: raw.content_tag as Bytes32,
-    sender: raw.sender as Address,
+    sender: raw.author as Address,
     nonce: decodeNonce(raw.nonce),
     contents: new Uint8Array(raw.contents),
     signature: new Uint8Array(raw.signature),
     messageHash: raw.message_hash as Bytes32,
-    ingestedAt: toInt(raw.ingested_at),
-    ingestSeq: toInt(raw.ingest_seq),
+    ingestedAt: toIntOrNull(raw.ingested_at) ?? 0,
+    ingestSeq: toIntOrNull(raw.ingest_seq) ?? 0,
   };
 }
 
-function mapSubmitted(raw: SubmittedRowRaw): StoreTxnSubmittedRow {
-  return {
-    txHash: raw.tx_hash as Bytes32,
-    contentTag: raw.content_tag as Bytes32,
-    blobVersionedHash: raw.blob_versioned_hash as Bytes32,
-    batchContentHash: raw.batch_content_hash as Bytes32,
-    blockNumber: raw.block_number === null ? null : toInt(raw.block_number),
-    status: raw.status as SubmittedBatchStatus,
-    replacedByTxHash: (raw.replaced_by_tx_hash ?? null) as Bytes32 | null,
-    submittedAt: toInt(raw.submitted_at),
-    invalidatedAt: raw.invalidated_at === null || raw.invalidated_at === undefined ? null : toInt(raw.invalidated_at),
-    messages: decodeSnapshots(raw.messages_json),
-  };
+function oldStatusToBatch(s: SubmittedBatchStatus): BatchStatus {
+  switch (s) {
+    case 'pending':
+      return 'pending_tx';
+    case 'included':
+      return 'confirmed';
+    case 'reorged':
+      return 'reorged';
+    case 'resubmitted':
+      return 'reorged';
+  }
+}
+
+function batchToOldStatus(b: BatchRow): SubmittedBatchStatus {
+  switch (b.status) {
+    case 'pending_tx':
+      return 'pending';
+    case 'confirmed':
+      return 'included';
+    case 'reorged':
+      return b.replacedByTxHash !== null ? 'resubmitted' : 'reorged';
+  }
+}
+
+function messageStatusForBatch(bs: BatchStatus): MessageStatus {
+  switch (bs) {
+    case 'pending_tx':
+      return 'submitted';
+    case 'confirmed':
+      return 'confirmed';
+    case 'reorged':
+      return 'reorged';
+  }
 }
 
 export class PostgresBamStore implements BamStore {
-  private readonly pool: VercelPool;
+  private readonly pool: PgPool;
   private ready: Promise<void>;
 
   constructor(connectionString: string) {
-    this.pool = createPool({ connectionString });
+    this.pool = new pg.Pool({ connectionString });
     this.ready = this.initSchema();
   }
 
@@ -104,8 +186,6 @@ export class PostgresBamStore implements BamStore {
       for (const stmt of SQL_CREATE_POSTGRES) {
         await client.query(stmt);
       }
-      // Tag fresh DBs with the current schema version; leave existing
-      // rows alone for the startup reconciliation guard.
       const existing = await client.query<{ version: number }>(
         'SELECT version FROM poster_schema LIMIT 1'
       );
@@ -117,7 +197,6 @@ export class PostgresBamStore implements BamStore {
     }
   }
 
-  /** Returns the persisted schema version — used by `startup/reconcile.ts`. */
   async readSchemaVersion(): Promise<number> {
     await this.ready;
     const client = await this.pool.connect();
@@ -168,17 +247,105 @@ export class PostgresBamStore implements BamStore {
   }
 }
 
-function makePgTxn(client: VercelPoolClient): StoreTxn {
+function makePgTxn(client: PgPoolClient): StoreTxn {
+  async function upsertMessage(row: MessageRow): Promise<void> {
+    await client.query(
+      `INSERT INTO messages
+        (author, nonce, content_tag, contents, signature, message_hash,
+         message_id, status, batch_ref, ingested_at, ingest_seq,
+         block_number, tx_index, message_index_within_batch)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+       ON CONFLICT (author, nonce) DO UPDATE SET
+         content_tag                = EXCLUDED.content_tag,
+         contents                   = EXCLUDED.contents,
+         signature                  = EXCLUDED.signature,
+         message_hash               = EXCLUDED.message_hash,
+         message_id                 = EXCLUDED.message_id,
+         status                     = EXCLUDED.status,
+         batch_ref                  = EXCLUDED.batch_ref,
+         ingested_at                = EXCLUDED.ingested_at,
+         ingest_seq                 = EXCLUDED.ingest_seq,
+         block_number               = EXCLUDED.block_number,
+         tx_index                   = EXCLUDED.tx_index,
+         message_index_within_batch = EXCLUDED.message_index_within_batch`,
+      [
+        row.author.toLowerCase(),
+        encodeNonce(row.nonce),
+        row.contentTag,
+        Buffer.from(row.contents),
+        Buffer.from(row.signature),
+        row.messageHash,
+        row.messageId,
+        row.status,
+        row.batchRef,
+        row.ingestedAt,
+        row.ingestSeq,
+        row.blockNumber,
+        row.txIndex,
+        row.messageIndexWithinBatch,
+      ]
+    );
+  }
+
+  async function collectMessagesForBatch(txHash: Bytes32): Promise<MessageSnapshot[]> {
+    const res = await client.query<MessageRowRaw>(
+      'SELECT * FROM messages WHERE batch_ref = $1 ORDER BY ingest_seq ASC',
+      [txHash]
+    );
+    return res.rows.map((r) => ({
+      sender: r.author as Address,
+      nonce: decodeNonce(r.nonce),
+      contents: new Uint8Array(r.contents),
+      signature: new Uint8Array(r.signature),
+      messageHash: r.message_hash as Bytes32,
+      messageId: (r.message_id ?? null) as Bytes32 | null,
+      originalIngestSeq: toIntOrNull(r.ingest_seq) ?? 0,
+    }));
+  }
+
+  async function mapBatchToSubmitted(b: BatchRow): Promise<StoreTxnSubmittedRow> {
+    const msgs = await collectMessagesForBatch(b.txHash);
+    return {
+      txHash: b.txHash,
+      contentTag: b.contentTag,
+      blobVersionedHash: b.blobVersionedHash,
+      batchContentHash: b.batchContentHash,
+      blockNumber: b.blockNumber,
+      status: batchToOldStatus(b),
+      replacedByTxHash: b.replacedByTxHash,
+      submittedAt: b.submittedAt ?? 0,
+      invalidatedAt: b.invalidatedAt,
+      messages: msgs,
+    };
+  }
+
   return {
+    // ── old Poster-facing pending CRUD (bridged) ────────────────────
     async insertPending(row: StoreTxnPendingRow): Promise<void> {
+      const existing = await client.query<MessageRowRaw>(
+        'SELECT status FROM messages WHERE author = $1 AND nonce = $2',
+        [row.sender.toLowerCase(), encodeNonce(row.nonce)]
+      );
+      if (existing.rows[0]) {
+        const s = existing.rows[0].status;
+        if (s !== 'reorged' && s !== 'duplicate') {
+          throw new Error('insertPending: duplicate (sender, nonce)');
+        }
+        await client.query(
+          'DELETE FROM messages WHERE author = $1 AND nonce = $2',
+          [row.sender.toLowerCase(), encodeNonce(row.nonce)]
+        );
+      }
       await client.query(
-        `INSERT INTO poster_pending
-          (content_tag, sender, nonce, contents, signature, message_hash, ingested_at, ingest_seq)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        `INSERT INTO messages
+          (author, nonce, content_tag, contents, signature, message_hash,
+           message_id, status, batch_ref, ingested_at, ingest_seq,
+           block_number, tx_index, message_index_within_batch)
+         VALUES ($1,$2,$3,$4,$5,$6,NULL,'pending',NULL,$7,$8,NULL,NULL,NULL)`,
         [
-          row.contentTag,
           row.sender.toLowerCase(),
           encodeNonce(row.nonce),
+          row.contentTag,
           Buffer.from(row.contents),
           Buffer.from(row.signature),
           row.messageHash,
@@ -187,68 +354,82 @@ function makePgTxn(client: VercelPoolClient): StoreTxn {
         ]
       );
     },
+
     async getPendingByKey(key: PendingKey): Promise<StoreTxnPendingRow | null> {
-      const res = await client.query<PendingRowRaw>(
-        'SELECT * FROM poster_pending WHERE sender = $1 AND nonce = $2',
+      const res = await client.query<MessageRowRaw>(
+        "SELECT * FROM messages WHERE author = $1 AND nonce = $2 AND status = 'pending'",
         [key.sender.toLowerCase(), encodeNonce(key.nonce)]
       );
       return res.rows[0] ? mapPending(res.rows[0]) : null;
     },
+
     async listPendingByTag(
       tag: Bytes32,
       limit?: number,
       sinceSeq?: number
     ): Promise<StoreTxnPendingRow[]> {
-      const clauses = ['content_tag = $1'];
+      const clauses = ["content_tag = $1", "status = 'pending'"];
       const params: Array<string | number> = [tag];
       if (sinceSeq !== undefined) {
         clauses.push(`ingest_seq > $${params.length + 1}`);
         params.push(sinceSeq);
       }
-      let sql = `SELECT * FROM poster_pending WHERE ${clauses.join(' AND ')} ORDER BY ingest_seq ASC`;
+      let sql = `SELECT * FROM messages WHERE ${clauses.join(
+        ' AND '
+      )} ORDER BY ingest_seq ASC`;
       if (typeof limit === 'number') {
         sql += ` LIMIT $${params.length + 1}`;
         params.push(limit);
       }
-      const res = await client.query<PendingRowRaw>(sql, params);
+      const res = await client.query<MessageRowRaw>(sql, params);
       return res.rows.map(mapPending);
     },
+
     async listPendingAll(limit?: number, sinceSeq?: number): Promise<StoreTxnPendingRow[]> {
+      const clauses = ["status = 'pending'"];
       const params: Array<string | number> = [];
-      let sql = 'SELECT * FROM poster_pending';
       if (sinceSeq !== undefined) {
-        sql += ` WHERE ingest_seq > $${params.length + 1}`;
+        clauses.push(`ingest_seq > $${params.length + 1}`);
         params.push(sinceSeq);
       }
-      sql += ' ORDER BY ingested_at ASC, ingest_seq ASC';
+      let sql = `SELECT * FROM messages WHERE ${clauses.join(
+        ' AND '
+      )} ORDER BY ingested_at ASC, ingest_seq ASC`;
       if (typeof limit === 'number') {
         sql += ` LIMIT $${params.length + 1}`;
         params.push(limit);
       }
-      const res = await client.query<PendingRowRaw>(sql, params);
+      const res = await client.query<MessageRowRaw>(sql, params);
       return res.rows.map(mapPending);
     },
+
     async deletePending(keys: PendingKey[]): Promise<void> {
       if (keys.length === 0) return;
-      // Build a VALUES list with lowercased senders + encoded nonces.
-      const valueRows: string[] = [];
-      const params: string[] = [];
-      keys.forEach((k, i) => {
-        valueRows.push(`($${i * 2 + 1}, $${i * 2 + 2})`);
-        params.push(k.sender.toLowerCase(), encodeNonce(k.nonce));
-      });
-      await client.query(
-        `DELETE FROM poster_pending WHERE (sender, nonce) IN (VALUES ${valueRows.join(', ')})`,
-        params
-      );
+      const CHUNK = 500;
+      for (let i = 0; i < keys.length; i += CHUNK) {
+        const slice = keys.slice(i, i + CHUNK);
+        const tuples: string[] = [];
+        const params: string[] = [];
+        for (const k of slice) {
+          tuples.push(`($${params.length + 1}, $${params.length + 2})`);
+          params.push(k.sender.toLowerCase(), encodeNonce(k.nonce));
+        }
+        await client.query(
+          `DELETE FROM messages
+           WHERE status = 'pending' AND (author, nonce) IN (${tuples.join(', ')})`,
+          params
+        );
+      }
     },
+
     async countPendingByTag(tag: Bytes32): Promise<number> {
       const res = await client.query<{ c: string }>(
-        'SELECT COUNT(*)::text AS c FROM poster_pending WHERE content_tag = $1',
+        "SELECT COUNT(*) AS c FROM messages WHERE content_tag = $1 AND status = 'pending'",
         [tag]
       );
-      return Number(res.rows[0]?.c ?? 0);
+      return toInt(res.rows[0]?.c ?? 0);
     },
+
     async nextIngestSeq(tag: Bytes32): Promise<number> {
       const res = await client.query<{ last_seq: string | number }>(
         `INSERT INTO poster_tag_seq (content_tag, last_seq) VALUES ($1, 1)
@@ -256,22 +437,22 @@ function makePgTxn(client: VercelPoolClient): StoreTxn {
          RETURNING last_seq`,
         [tag]
       );
-      const row = res.rows[0];
-      if (!row) throw new Error('nextIngestSeq: INSERT ... RETURNING produced no row');
-      return Number(row.last_seq);
+      if (!res.rows[0]) throw new Error('nextIngestSeq: no row returned');
+      return toInt(res.rows[0].last_seq);
     },
 
+    // ── nonce tracker ────────────────────────────────────────────────
     async getNonce(sender: Address): Promise<NonceTrackerRow | null> {
       const res = await client.query<NonceRowRaw>(
         'SELECT * FROM poster_nonces WHERE sender = $1',
         [sender.toLowerCase()]
       );
-      const raw = res.rows[0];
-      if (!raw) return null;
+      const r = res.rows[0];
+      if (!r) return null;
       return {
-        sender: raw.sender as Address,
-        lastNonce: decodeNonce(raw.last_nonce),
-        lastMessageHash: raw.last_message_hash as Bytes32,
+        sender: r.sender as Address,
+        lastNonce: decodeNonce(r.last_nonce),
+        lastMessageHash: r.last_message_hash as Bytes32,
       };
     },
     async setNonce(row: NonceTrackerRow): Promise<void> {
@@ -285,34 +466,66 @@ function makePgTxn(client: VercelPoolClient): StoreTxn {
       );
     },
 
+    // ── old submitted CRUD (bridged to batches + messages) ───────────
     async insertSubmitted(row: StoreTxnSubmittedRow): Promise<void> {
+      const existing = await client.query(
+        'SELECT tx_hash FROM batches WHERE tx_hash = $1',
+        [row.txHash]
+      );
+      if (existing.rowCount !== null && existing.rowCount > 0) {
+        throw new Error('insertSubmitted: duplicate tx_hash');
+      }
+      const bs = oldStatusToBatch(row.status);
       await client.query(
-        `INSERT INTO poster_submitted_batches
-          (tx_hash, content_tag, blob_versioned_hash, batch_content_hash,
-           block_number, status, replaced_by_tx_hash, submitted_at,
-           invalidated_at, messages_json)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+        `INSERT INTO batches
+          (tx_hash, chain_id, content_tag, blob_versioned_hash,
+           batch_content_hash, block_number, tx_index, status,
+           replaced_by_tx_hash, submitted_at, invalidated_at)
+         VALUES ($1,$2,$3,$4,$5,$6,NULL,$7,$8,$9,$10)`,
         [
           row.txHash,
+          BRIDGE_CHAIN_ID,
           row.contentTag,
           row.blobVersionedHash,
           row.batchContentHash,
           row.blockNumber,
-          row.status,
+          bs,
           row.replacedByTxHash,
           row.submittedAt,
           row.invalidatedAt,
-          encodeSnapshots(row.messages),
         ]
       );
+      for (let i = 0; i < row.messages.length; i++) {
+        const m = row.messages[i];
+        const ms = messageStatusForBatch(bs);
+        await upsertMessage({
+          messageId: m.messageId,
+          author: m.sender,
+          nonce: m.nonce,
+          contentTag: row.contentTag,
+          contents: m.contents,
+          signature: m.signature,
+          messageHash: m.messageHash,
+          status: ms,
+          batchRef: row.txHash,
+          ingestedAt: null,
+          ingestSeq: m.originalIngestSeq,
+          blockNumber: bs === 'confirmed' ? row.blockNumber : null,
+          txIndex: null,
+          messageIndexWithinBatch: i,
+        });
+      }
     },
+
     async getSubmittedByTx(txHash: Bytes32): Promise<StoreTxnSubmittedRow | null> {
-      const res = await client.query<SubmittedRowRaw>(
-        'SELECT * FROM poster_submitted_batches WHERE tx_hash = $1',
+      const res = await client.query<BatchRowRaw>(
+        'SELECT * FROM batches WHERE tx_hash = $1',
         [txHash]
       );
-      return res.rows[0] ? mapSubmitted(res.rows[0]) : null;
+      if (!res.rows[0]) return null;
+      return mapBatchToSubmitted(mapBatch(res.rows[0]));
     },
+
     async listSubmitted(query: SubmittedBatchesQuery): Promise<StoreTxnSubmittedRow[]> {
       const clauses: string[] = [];
       const params: Array<string | number> = [];
@@ -324,16 +537,21 @@ function makePgTxn(client: VercelPoolClient): StoreTxn {
         clauses.push(`block_number IS NOT NULL AND block_number >= $${params.length + 1}`);
         params.push(Number(query.sinceBlock));
       }
-      let sql = 'SELECT * FROM poster_submitted_batches';
+      let sql = 'SELECT * FROM batches';
       if (clauses.length) sql += ' WHERE ' + clauses.join(' AND ');
       sql += ' ORDER BY submitted_at DESC';
       if (typeof query.limit === 'number') {
         sql += ` LIMIT $${params.length + 1}`;
         params.push(query.limit);
       }
-      const res = await client.query<SubmittedRowRaw>(sql, params);
-      return res.rows.map(mapSubmitted);
+      const res = await client.query<BatchRowRaw>(sql, params);
+      const out: StoreTxnSubmittedRow[] = [];
+      for (const r of res.rows) {
+        out.push(await mapBatchToSubmitted(mapBatch(r)));
+      }
+      return out;
     },
+
     async updateSubmittedStatus(
       txHash: Bytes32,
       status: SubmittedBatchStatus,
@@ -341,8 +559,9 @@ function makePgTxn(client: VercelPoolClient): StoreTxn {
       blockNumber: number | null,
       invalidatedAt?: number | null
     ): Promise<void> {
+      const bs = oldStatusToBatch(status);
       const sets: string[] = ['status = $1', 'replaced_by_tx_hash = $2'];
-      const params: Array<string | number | null> = [status, replacedByTxHash];
+      const params: Array<string | number | null> = [bs, replacedByTxHash];
       if (blockNumber !== null) {
         sets.push(`block_number = $${params.length + 1}`);
         params.push(blockNumber);
@@ -352,48 +571,286 @@ function makePgTxn(client: VercelPoolClient): StoreTxn {
         params.push(invalidatedAt);
       }
       params.push(txHash);
-      await client.query(
-        `UPDATE poster_submitted_batches SET ${sets.join(', ')} WHERE tx_hash = $${params.length}`,
+      const res = await client.query(
+        `UPDATE batches SET ${sets.join(', ')} WHERE tx_hash = $${params.length}`,
         params
+      );
+      if (res.rowCount === 0) {
+        throw new Error('updateSubmittedStatus: no row for tx_hash');
+      }
+      if (bs === 'reorged') {
+        await client.query(
+          `UPDATE messages SET status = 'reorged'
+           WHERE batch_ref = $1 AND status IN ('confirmed', 'submitted')`,
+          [txHash]
+        );
+      }
+    },
+
+    // ── unified-schema lifecycle transitions ─────────────────────────
+    async markSubmitted(keys: PendingKey[], batchRef: Bytes32): Promise<void> {
+      if (keys.length === 0) return;
+      const CHUNK = 500;
+      for (let i = 0; i < keys.length; i += CHUNK) {
+        const slice = keys.slice(i, i + CHUNK);
+        const tuples: string[] = [];
+        const params: Array<string> = [batchRef];
+        for (const k of slice) {
+          tuples.push(`($${params.length + 1}, $${params.length + 2})`);
+          params.push(k.sender.toLowerCase(), encodeNonce(k.nonce));
+        }
+        const res = await client.query(
+          `UPDATE messages SET status = 'submitted', batch_ref = $1
+           WHERE status = 'pending'
+             AND (author, nonce) IN (${tuples.join(', ')})`,
+          params
+        );
+        if (res.rowCount !== slice.length) {
+          throw new Error(
+            `markSubmitted: expected ${slice.length} rows updated, got ${res.rowCount}`
+          );
+        }
+      }
+    },
+
+    async upsertObserved(row: MessageRow): Promise<void> {
+      const existing = await client.query<{ status: string; message_hash: string }>(
+        'SELECT status, message_hash FROM messages WHERE author = $1 AND nonce = $2',
+        [row.author.toLowerCase(), encodeNonce(row.nonce)]
+      );
+      const e = existing.rows[0];
+      if (e) {
+        if (e.status === 'confirmed' && e.message_hash !== row.messageHash) {
+          throw new Error(
+            'upsertObserved: existing confirmed row has a different messageHash — caller must call markDuplicate'
+          );
+        }
+        if (e.status === 'confirmed' && e.message_hash === row.messageHash) {
+          return;
+        }
+      }
+      await upsertMessage(row);
+    },
+
+    async markDuplicate(messageHash: Bytes32): Promise<void> {
+      const res = await client.query<{ author: string; nonce: string }>(
+        "SELECT author, nonce FROM messages WHERE message_hash = $1 AND status != 'confirmed' LIMIT 1",
+        [messageHash]
+      );
+      const r = res.rows[0];
+      if (!r) {
+        throw new Error(
+          `markDuplicate: no non-confirmed row with messageHash=${messageHash}`
+        );
+      }
+      await client.query(
+        `UPDATE messages SET status = 'duplicate' WHERE author = $1 AND nonce = $2`,
+        [r.author, r.nonce]
       );
     },
 
-    // ── unified-schema methods: stubbed until T007 ────────────────────
-    async markSubmitted(): Promise<void> {
-      throw new Error('markSubmitted not implemented (T007)');
+    async markReorged(txHash: Bytes32, invalidatedAt: number): Promise<void> {
+      const res = await client.query(
+        `UPDATE batches SET status = 'reorged', invalidated_at = $1 WHERE tx_hash = $2`,
+        [invalidatedAt, txHash]
+      );
+      if (res.rowCount === 0) {
+        throw new Error(`markReorged: no batch for tx_hash=${txHash}`);
+      }
+      await client.query(
+        `UPDATE messages SET status = 'reorged' WHERE batch_ref = $1 AND status = 'confirmed'`,
+        [txHash]
+      );
     },
-    async upsertObserved(): Promise<void> {
-      throw new Error('upsertObserved not implemented (T007)');
+
+    // ── unified-schema reads ─────────────────────────────────────────
+    async listMessages(query: MessagesQuery): Promise<MessageRow[]> {
+      const clauses: string[] = [];
+      const params: Array<string | number> = [];
+      if (query.contentTag !== undefined) {
+        clauses.push(`content_tag = $${params.length + 1}`);
+        params.push(query.contentTag);
+      }
+      if (query.author !== undefined) {
+        clauses.push(`author = $${params.length + 1}`);
+        params.push(query.author.toLowerCase());
+      }
+      if (query.status !== undefined) {
+        clauses.push(`status = $${params.length + 1}`);
+        params.push(query.status);
+      }
+      if (query.sinceBlock !== undefined) {
+        clauses.push(`block_number IS NOT NULL AND block_number >= $${params.length + 1}`);
+        params.push(Number(query.sinceBlock));
+      }
+      if (query.cursor !== undefined) {
+        clauses.push(
+          `(block_number, tx_index, message_index_within_batch) > ($${params.length + 1}, $${
+            params.length + 2
+          }, $${params.length + 3})`
+        );
+        params.push(
+          query.cursor.blockNumber,
+          query.cursor.txIndex,
+          query.cursor.messageIndexWithinBatch
+        );
+      }
+      let sql = 'SELECT * FROM messages';
+      if (clauses.length) sql += ' WHERE ' + clauses.join(' AND ');
+      sql +=
+        ' ORDER BY (block_number IS NULL) ASC, block_number ASC NULLS LAST, tx_index ASC NULLS LAST, message_index_within_batch ASC NULLS LAST, ingest_seq ASC NULLS LAST';
+      if (typeof query.limit === 'number') {
+        sql += ` LIMIT $${params.length + 1}`;
+        params.push(query.limit);
+      }
+      const res = await client.query<MessageRowRaw>(sql, params);
+      return res.rows.map(mapMessage);
     },
-    async markDuplicate(): Promise<void> {
-      throw new Error('markDuplicate not implemented (T007)');
+
+    async getByMessageId(messageId: Bytes32): Promise<MessageRow | null> {
+      const res = await client.query<MessageRowRaw>(
+        'SELECT * FROM messages WHERE message_id = $1',
+        [messageId]
+      );
+      return res.rows[0] ? mapMessage(res.rows[0]) : null;
     },
-    async markReorged(): Promise<void> {
-      throw new Error('markReorged not implemented (T007)');
+
+    async getByAuthorNonce(author: Address, nonce: bigint): Promise<MessageRow | null> {
+      const res = await client.query<MessageRowRaw>(
+        'SELECT * FROM messages WHERE author = $1 AND nonce = $2',
+        [author.toLowerCase(), encodeNonce(nonce)]
+      );
+      return res.rows[0] ? mapMessage(res.rows[0]) : null;
     },
-    async listMessages(): Promise<MessageRow[]> {
-      throw new Error('listMessages not implemented (T007)');
+
+    // ── unified-schema batch CRUD ────────────────────────────────────
+    async upsertBatch(row: BatchRow): Promise<void> {
+      await client.query(
+        `INSERT INTO batches
+          (tx_hash, chain_id, content_tag, blob_versioned_hash,
+           batch_content_hash, block_number, tx_index, status,
+           replaced_by_tx_hash, submitted_at, invalidated_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+         ON CONFLICT (tx_hash) DO UPDATE SET
+           chain_id            = EXCLUDED.chain_id,
+           content_tag         = EXCLUDED.content_tag,
+           blob_versioned_hash = EXCLUDED.blob_versioned_hash,
+           batch_content_hash  = EXCLUDED.batch_content_hash,
+           block_number        = EXCLUDED.block_number,
+           tx_index            = EXCLUDED.tx_index,
+           status              = EXCLUDED.status,
+           replaced_by_tx_hash = EXCLUDED.replaced_by_tx_hash,
+           submitted_at        = EXCLUDED.submitted_at,
+           invalidated_at      = EXCLUDED.invalidated_at`,
+        [
+          row.txHash,
+          row.chainId,
+          row.contentTag,
+          row.blobVersionedHash,
+          row.batchContentHash,
+          row.blockNumber,
+          row.txIndex,
+          row.status,
+          row.replacedByTxHash,
+          row.submittedAt,
+          row.invalidatedAt,
+        ]
+      );
     },
-    async getByMessageId(): Promise<MessageRow | null> {
-      throw new Error('getByMessageId not implemented (T007)');
+
+    async updateBatchStatus(
+      txHash: Bytes32,
+      status: BatchStatus,
+      opts?: {
+        blockNumber?: number | null;
+        txIndex?: number | null;
+        replacedByTxHash?: Bytes32 | null;
+        invalidatedAt?: number | null;
+      }
+    ): Promise<void> {
+      const sets = ['status = $1'];
+      const params: Array<string | number | null> = [status];
+      if (opts?.blockNumber !== undefined) {
+        sets.push(`block_number = $${params.length + 1}`);
+        params.push(opts.blockNumber);
+      }
+      if (opts?.txIndex !== undefined) {
+        sets.push(`tx_index = $${params.length + 1}`);
+        params.push(opts.txIndex);
+      }
+      if (opts?.replacedByTxHash !== undefined) {
+        sets.push(`replaced_by_tx_hash = $${params.length + 1}`);
+        params.push(opts.replacedByTxHash);
+      }
+      if (opts?.invalidatedAt !== undefined) {
+        sets.push(`invalidated_at = $${params.length + 1}`);
+        params.push(opts.invalidatedAt);
+      }
+      params.push(txHash);
+      const res = await client.query(
+        `UPDATE batches SET ${sets.join(', ')} WHERE tx_hash = $${params.length}`,
+        params
+      );
+      if (res.rowCount === 0) {
+        throw new Error(`updateBatchStatus: no batch for tx_hash=${txHash}`);
+      }
     },
-    async getByAuthorNonce(): Promise<MessageRow | null> {
-      throw new Error('getByAuthorNonce not implemented (T007)');
+
+    async listBatches(query: BatchesQuery): Promise<BatchRow[]> {
+      const clauses: string[] = [];
+      const params: Array<string | number> = [];
+      if (query.contentTag !== undefined) {
+        clauses.push(`content_tag = $${params.length + 1}`);
+        params.push(query.contentTag);
+      }
+      if (query.chainId !== undefined) {
+        clauses.push(`chain_id = $${params.length + 1}`);
+        params.push(query.chainId);
+      }
+      if (query.status !== undefined) {
+        clauses.push(`status = $${params.length + 1}`);
+        params.push(query.status);
+      }
+      if (query.sinceBlock !== undefined) {
+        clauses.push(`block_number IS NOT NULL AND block_number >= $${params.length + 1}`);
+        params.push(Number(query.sinceBlock));
+      }
+      let sql = 'SELECT * FROM batches';
+      if (clauses.length) sql += ' WHERE ' + clauses.join(' AND ');
+      sql += ' ORDER BY submitted_at DESC';
+      if (typeof query.limit === 'number') {
+        sql += ` LIMIT $${params.length + 1}`;
+        params.push(query.limit);
+      }
+      const res = await client.query<BatchRowRaw>(sql, params);
+      return res.rows.map(mapBatch);
     },
-    async upsertBatch(): Promise<void> {
-      throw new Error('upsertBatch not implemented (T007)');
+
+    // ── reader cursor ────────────────────────────────────────────────
+    async getCursor(chainId: number): Promise<ReaderCursorRow | null> {
+      const res = await client.query<CursorRowRaw>(
+        'SELECT * FROM reader_cursor WHERE chain_id = $1',
+        [chainId]
+      );
+      const r = res.rows[0];
+      if (!r) return null;
+      return {
+        chainId: toInt(r.chain_id),
+        lastBlockNumber: toInt(r.last_block_number),
+        lastTxIndex: toInt(r.last_tx_index),
+        updatedAt: toInt(r.updated_at),
+      };
     },
-    async updateBatchStatus(): Promise<void> {
-      throw new Error('updateBatchStatus not implemented (T007)');
-    },
-    async listBatches(): Promise<BatchRow[]> {
-      throw new Error('listBatches not implemented (T007)');
-    },
-    async getCursor(): Promise<ReaderCursorRow | null> {
-      throw new Error('getCursor not implemented (T007)');
-    },
-    async setCursor(): Promise<void> {
-      throw new Error('setCursor not implemented (T007)');
+    async setCursor(row: ReaderCursorRow): Promise<void> {
+      await client.query(
+        `INSERT INTO reader_cursor (chain_id, last_block_number, last_tx_index, updated_at)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (chain_id) DO UPDATE SET
+           last_block_number = EXCLUDED.last_block_number,
+           last_tx_index     = EXCLUDED.last_tx_index,
+           updated_at        = EXCLUDED.updated_at`,
+        [row.chainId, row.lastBlockNumber, row.lastTxIndex, row.updatedAt]
+      );
     },
   };
 }
