@@ -408,12 +408,12 @@ function makePgTxn(client: PgPoolClient): StoreTxn {
       );
       const e = existing.rows[0];
       if (e) {
-        if (e.status === 'confirmed' && e.message_hash !== row.messageHash) {
+        if (e.message_hash !== row.messageHash) {
           throw new Error(
-            'upsertObserved: existing confirmed row has a different messageHash — caller must call markDuplicate'
+            'upsertObserved: existing row has a different messageHash — caller must call markDuplicate (or markReorged) before replacing'
           );
         }
-        if (e.status === 'confirmed' && e.message_hash === row.messageHash) {
+        if (e.status === 'confirmed') {
           return;
         }
       }

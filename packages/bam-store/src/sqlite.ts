@@ -397,13 +397,13 @@ export class SqliteBamStore implements BamStore {
           encodeNonce(row.nonce)
         ) as MessageRowRaw | undefined;
         if (existing) {
-          if (existing.status === 'confirmed' && existing.message_hash !== row.messageHash) {
+          if (existing.message_hash !== row.messageHash) {
             throw new Error(
-              'upsertObserved: existing confirmed row has a different messageHash — caller must call markDuplicate'
+              'upsertObserved: existing row has a different messageHash — caller must call markDuplicate (or markReorged) before replacing'
             );
           }
-          if (existing.status === 'confirmed' && existing.message_hash === row.messageHash) {
-            return; // idempotent no-op
+          if (existing.status === 'confirmed') {
+            return;
           }
         }
         upsertMessage(row);

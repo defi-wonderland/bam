@@ -196,19 +196,20 @@ export class MemoryBamStore implements BamStore {
       upsertObserved(row: MessageRow): void {
         const k = pendingKey(row.author, row.nonce);
         const existing = messages.get(k);
-        // Idempotency: a second observation of the same (author, nonce)
-        // with matching messageHash is a no-op merge. A mismatching
-        // messageHash is the "duplicate" case the Reader surfaces via
-        // markDuplicate; upsertObserved itself doesn't invent that
-        // transition — it refuses to overwrite a confirmed row.
+        // Bytes must match for any upsert onto an existing row — the
+        // "different bytes at the same (author, nonce)" case is the
+        // Reader's duplicate case and must go through markDuplicate /
+        // markReorged first. A confirmed row with matching bytes is a
+        // no-op re-observation; anything else with matching bytes is a
+        // metadata update (pending → confirmed, reorged → pending, …).
         if (existing) {
-          if (existing.status === 'confirmed' && existing.messageHash !== row.messageHash) {
+          if (existing.messageHash !== row.messageHash) {
             throw new Error(
-              'upsertObserved: existing confirmed row has a different messageHash — caller must call markDuplicate'
+              'upsertObserved: existing row has a different messageHash — caller must call markDuplicate (or markReorged) before replacing'
             );
           }
-          if (existing.status === 'confirmed' && existing.messageHash === row.messageHash) {
-            return; // idempotent no-op
+          if (existing.status === 'confirmed') {
+            return;
           }
         }
         messages.set(k, cloneMessage(row));

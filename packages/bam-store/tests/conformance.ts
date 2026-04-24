@@ -116,6 +116,71 @@ export function runConformance(make: StoreFactory): void {
         store.withTxn(async (txn) => txn.upsertObserved(second))
       ).rejects.toThrow();
     });
+
+    it('matching-bytes guard also applies to pending/submitted/reorged/duplicate rows', async () => {
+      const store = await newStore();
+      const mhash = ('0x' + '11'.repeat(32)) as Bytes32;
+      // Pending row with one messageHash.
+      await store.withTxn(async (txn) =>
+        txn.insertPending({
+          contentTag: TAG_A,
+          sender: ADDR_1,
+          nonce: 1n,
+          contents: new Uint8Array(40),
+          signature: new Uint8Array(65),
+          messageHash: mhash,
+          ingestedAt: 1_000,
+          ingestSeq: 1,
+        })
+      );
+      // Upsert at same (author, nonce) but with different bytes must reject
+      // even though the existing row is NOT confirmed.
+      const mismatching = messageRow({
+        status: 'confirmed',
+        messageHash: ('0x' + '22'.repeat(32)) as Bytes32,
+      });
+      await expect(
+        store.withTxn(async (txn) => txn.upsertObserved(mismatching))
+      ).rejects.toThrow();
+    });
+
+    it('matching-bytes upsert on a pending row transitions it to confirmed', async () => {
+      const store = await newStore();
+      const mhash = ('0x' + '11'.repeat(32)) as Bytes32;
+      await store.withTxn(async (txn) =>
+        txn.insertPending({
+          contentTag: TAG_A,
+          sender: ADDR_1,
+          nonce: 1n,
+          contents: new Uint8Array(40),
+          signature: new Uint8Array(65),
+          messageHash: mhash,
+          ingestedAt: 1_000,
+          ingestSeq: 1,
+        })
+      );
+      await store.withTxn(async (txn) =>
+        txn.upsertBatch(batchRow({ status: 'confirmed', blockNumber: 10 }))
+      );
+      await store.withTxn(async (txn) =>
+        txn.upsertObserved(
+          messageRow({
+            messageHash: mhash,
+            status: 'confirmed',
+            batchRef: TX_A,
+            blockNumber: 10,
+            txIndex: 0,
+            messageIndexWithinBatch: 0,
+            messageId: ('0x' + '99'.repeat(32)) as Bytes32,
+          })
+        )
+      );
+      const back = await store.withTxn((txn) =>
+        Promise.resolve(txn.getByAuthorNonce(ADDR_1, 1n))
+      );
+      expect(back!.status).toBe('confirmed');
+      expect(back!.messageId).toBe('0x' + '99'.repeat(32));
+    });
   });
 
   describe('markDuplicate — first-confirmed wins, original not mutated', () => {
