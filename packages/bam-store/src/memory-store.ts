@@ -354,6 +354,7 @@ export class MemoryBamStore implements BamStore {
           if (query.contentTag !== undefined && r.contentTag !== query.contentTag) continue;
           if (query.author !== undefined && r.author.toLowerCase() !== query.author.toLowerCase()) continue;
           if (query.status !== undefined && r.status !== query.status) continue;
+          if (query.batchRef !== undefined && r.batchRef !== query.batchRef) continue;
           if (query.sinceBlock !== undefined) {
             if (r.blockNumber === null) continue;
             if (BigInt(r.blockNumber) < query.sinceBlock) continue;

@@ -169,6 +169,7 @@ export async function createPoster(
         tag,
         new SubmissionLoop({
           tag,
+          chainId: config.chainId,
           store,
           policy: batchPolicy,
           blobCapacityBytes: blobCapacity,

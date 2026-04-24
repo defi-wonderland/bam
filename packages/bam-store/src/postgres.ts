@@ -679,6 +679,10 @@ function makePgTxn(client: PgPoolClient): StoreTxn {
         clauses.push(`status = $${params.length + 1}`);
         params.push(query.status);
       }
+      if (query.batchRef !== undefined) {
+        clauses.push(`batch_ref = $${params.length + 1}`);
+        params.push(query.batchRef);
+      }
       if (query.sinceBlock !== undefined) {
         clauses.push(`block_number IS NOT NULL AND block_number >= $${params.length + 1}`);
         params.push(Number(query.sinceBlock));

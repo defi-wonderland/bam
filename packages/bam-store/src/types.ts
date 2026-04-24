@@ -251,6 +251,8 @@ export interface MessagesQuery {
   contentTag?: Bytes32;
   author?: Address;
   status?: MessageStatus;
+  /** Restrict to messages attached to a specific batch. */
+  batchRef?: Bytes32;
   sinceBlock?: bigint;
   cursor?: ChainCoord;
   limit?: number;

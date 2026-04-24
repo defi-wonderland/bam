@@ -7,10 +7,18 @@
  */
 
 export type {
+  BamStore,
+  BatchRow,
+  BatchStatus,
+  BatchesQuery,
+  ChainCoord,
+  MessageRow,
   MessageSnapshot,
+  MessageStatus,
+  MessagesQuery,
   NonceTrackerRow,
   PendingKey,
-  BamStore,
+  ReaderCursorRow,
   StoreTxn,
   StoreTxnPendingRow,
   StoreTxnSubmittedRow,

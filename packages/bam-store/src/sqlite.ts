@@ -660,6 +660,10 @@ export class SqliteBamStore implements BamStore {
           clauses.push('status = ?');
           params.push(query.status);
         }
+        if (query.batchRef !== undefined) {
+          clauses.push('batch_ref = ?');
+          params.push(query.batchRef);
+        }
         if (query.sinceBlock !== undefined) {
           clauses.push('block_number IS NOT NULL AND block_number >= ?');
           params.push(Number(query.sinceBlock));

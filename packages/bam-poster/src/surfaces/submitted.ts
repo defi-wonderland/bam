@@ -1,7 +1,9 @@
 import type {
   BamStore,
-  StoreTxnSubmittedRow,
+  BatchRow,
+  MessageRow,
   SubmittedBatch,
+  SubmittedBatchStatus,
   SubmittedBatchesQuery,
 } from '../types.js';
 
@@ -18,24 +20,47 @@ export async function listSubmittedBatches(
   store: BamStore,
   query: SubmittedBatchesQuery
 ): Promise<SubmittedBatch[]> {
-  const rows = await store.withTxn(async (txn) => txn.listSubmitted(query));
-  return rows.map(mapRow);
+  return store.withTxn(async (txn) => {
+    const batches = await txn.listBatches({
+      contentTag: query.contentTag,
+      sinceBlock: query.sinceBlock,
+      limit: query.limit,
+    });
+    const out: SubmittedBatch[] = [];
+    for (const b of batches) {
+      const msgs = await txn.listMessages({ batchRef: b.txHash });
+      out.push(mapBatch(b, msgs));
+    }
+    return out;
+  });
 }
 
-function mapRow(row: StoreTxnSubmittedRow): SubmittedBatch {
-  const reorged = row.status === 'reorged';
+function batchToOldStatus(b: BatchRow): SubmittedBatchStatus {
+  if (b.status === 'pending_tx') return 'pending';
+  if (b.status === 'confirmed') return 'included';
+  return b.replacedByTxHash !== null ? 'resubmitted' : 'reorged';
+}
+
+function mapBatch(b: BatchRow, msgs: MessageRow[]): SubmittedBatch {
+  const status = batchToOldStatus(b);
+  const reorged = status === 'reorged' || status === 'resubmitted';
+  // Sort messages by the message_index_within_batch so the response is
+  // deterministic and matches the ingest order preserved on write.
+  const ordered = [...msgs].sort(
+    (a, b) => (a.messageIndexWithinBatch ?? 0) - (b.messageIndexWithinBatch ?? 0)
+  );
   return {
-    txHash: row.txHash,
-    contentTag: row.contentTag,
-    blobVersionedHash: row.blobVersionedHash,
-    batchContentHash: row.batchContentHash,
-    blockNumber: row.blockNumber,
-    status: row.status,
-    replacedByTxHash: row.replacedByTxHash,
-    submittedAt: row.submittedAt,
-    invalidatedAt: row.invalidatedAt,
-    messages: row.messages.map((m) => ({
-      sender: m.sender,
+    txHash: b.txHash,
+    contentTag: b.contentTag,
+    blobVersionedHash: b.blobVersionedHash,
+    batchContentHash: b.batchContentHash,
+    blockNumber: b.blockNumber,
+    status,
+    replacedByTxHash: b.replacedByTxHash,
+    submittedAt: b.submittedAt ?? 0,
+    invalidatedAt: b.invalidatedAt,
+    messages: ordered.map((m) => ({
+      sender: m.author,
       nonce: m.nonce,
       contents: new Uint8Array(m.contents),
       signature: new Uint8Array(m.signature),

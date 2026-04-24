@@ -8,10 +8,12 @@
 
 import type { Address, Bytes32 } from 'bam-sdk';
 import type {
+  BamStore,
+  BatchRow,
+  MessageRow,
   MessageSnapshot,
   NonceTrackerRow,
   PendingKey,
-  BamStore,
   StoreTxn,
   StoreTxnPendingRow,
   StoreTxnSubmittedRow,
@@ -25,10 +27,12 @@ import type { PosterRejection } from './errors.js';
 // Persistence types live in `bam-store`; re-exported here so external
 // consumers of `bam-poster`'s public types are unaffected by the move.
 export type {
+  BamStore,
+  BatchRow,
+  MessageRow,
   MessageSnapshot,
   NonceTrackerRow,
   PendingKey,
-  BamStore,
   StoreTxn,
   StoreTxnPendingRow,
   StoreTxnSubmittedRow,

@@ -29,15 +29,15 @@ export async function readStatus(opts: StatusOptions): Promise<Status> {
     for (const tag of opts.configuredTags) {
       const count = await txn.countPendingByTag(tag);
       pendingByTag.push({ contentTag: tag, count });
-      const submitted = await txn.listSubmitted({ contentTag: tag, limit: 1 });
-      const last = submitted[0];
+      const recent = await txn.listBatches({ contentTag: tag, limit: 1 });
+      const last = recent[0];
       if (last !== undefined) {
         lastSubmittedByTag.push({
           contentTag: tag,
           txHash: last.txHash,
           blobVersionedHash: last.blobVersionedHash,
           blockNumber: last.blockNumber,
-          submittedAt: last.submittedAt,
+          submittedAt: last.submittedAt ?? 0,
         });
       }
     }
