@@ -23,7 +23,7 @@ import {
   DEFAULT_MAX_CONTENTS_SIZE_BYTES,
   DEFAULT_MAX_MESSAGE_SIZE_BYTES,
 } from './ingest/size-bound.js';
-import { createMemoryStore } from './pool/memory-store.js';
+import { createMemoryStore } from 'bam-store';
 import { defaultBatchPolicy, DEFAULT_BLOB_CAPACITY_BYTES } from './policy/default.js';
 import { SubmissionLoop } from './submission/loop.js';
 import type { BuildAndSubmit } from './submission/types.js';

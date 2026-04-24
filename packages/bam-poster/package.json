@@ -29,6 +29,7 @@
   "dependencies": {
     "@vercel/postgres": "^0.10.0",
     "bam-sdk": "workspace:*",
+    "bam-store": "workspace:*",
     "better-sqlite3": "^11.5.0",
     "c-kzg": "^4.1.0",
     "dotenv": "^16.4.5",

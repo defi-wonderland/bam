@@ -5,7 +5,7 @@ import { listPending } from '../src/surfaces/pending.js';
 import { listSubmittedBatches } from '../src/surfaces/submitted.js';
 import { readStatus } from '../src/surfaces/status.js';
 import { readHealth } from '../src/surfaces/health.js';
-import { MemoryPosterStore } from '../src/pool/memory-store.js';
+import { MemoryPosterStore } from 'bam-store';
 import type {
   MessageSnapshot,
   Signer,

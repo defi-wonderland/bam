@@ -3,7 +3,7 @@ import type { Address, Bytes32 } from 'bam-sdk';
 
 import { SubmissionLoop } from '../../src/submission/loop.js';
 import { DEFAULT_BACKOFF } from '../../src/submission/backoff.js';
-import { MemoryPosterStore } from '../../src/pool/memory-store.js';
+import { MemoryPosterStore } from 'bam-store';
 import type { BuildAndSubmit, SubmitOutcome } from '../../src/submission/types.js';
 import type { BatchPolicy, DecodedMessage, PoolView } from '../../src/types.js';
 

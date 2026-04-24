@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import type { Address, Bytes32 } from 'bam-sdk';
 
-import { SqlitePosterStore } from '../../src/pool/sqlite.js';
-import type { PosterStore } from '../../src/types.js';
+import { SqlitePosterStore } from '../src/sqlite.js';
+import type { PosterStore } from '../src/types.js';
 
 const TAG_A = ('0x' + 'aa'.repeat(32)) as Bytes32;
 const TAG_B = ('0x' + 'bb'.repeat(32)) as Bytes32;

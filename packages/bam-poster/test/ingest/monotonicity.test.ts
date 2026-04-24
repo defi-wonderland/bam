@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { Address, Bytes32 } from 'bam-sdk';
 
 import { checkMonotonicity } from '../../src/ingest/monotonicity.js';
-import { createMemoryStore } from '../../src/pool/memory-store.js';
+import { createMemoryStore } from 'bam-store';
 
 const ADDR = ('0x' + '11'.repeat(20)) as Address;
 const H1 = ('0x' + '11'.repeat(32)) as Bytes32;

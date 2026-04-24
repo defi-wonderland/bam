@@ -1,6 +1,6 @@
 import type { Address, Bytes32 } from 'bam-sdk';
 
-import type { MessageSnapshot } from '../types.js';
+import type { MessageSnapshot } from './types.js';
 
 function bytesToHex(b: Uint8Array): string {
   return '0x' + Buffer.from(b).toString('hex');

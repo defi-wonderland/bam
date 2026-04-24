@@ -9,7 +9,7 @@ import {
 
 import { IngestPipeline } from '../../src/ingest/pipeline.js';
 import { RateLimiter } from '../../src/ingest/rate-limit.js';
-import { MemoryPosterStore } from '../../src/pool/memory-store.js';
+import { MemoryPosterStore } from 'bam-store';
 import type { MessageValidator } from '../../src/types.js';
 
 const CHAIN_ID = 31337;

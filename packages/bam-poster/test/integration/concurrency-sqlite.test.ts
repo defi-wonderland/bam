@@ -9,7 +9,7 @@ import {
 
 import { IngestPipeline } from '../../src/ingest/pipeline.js';
 import { RateLimiter } from '../../src/ingest/rate-limit.js';
-import { SqlitePosterStore } from '../../src/pool/sqlite.js';
+import { SqlitePosterStore } from 'bam-store';
 import type { MessageValidator, PosterStore } from '../../src/types.js';
 
 /**

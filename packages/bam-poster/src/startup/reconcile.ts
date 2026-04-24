@@ -1,8 +1,6 @@
 import type { Address } from 'bam-sdk';
 
-import { SCHEMA_VERSION } from '../pool/schema.js';
-import { SqlitePosterStore } from '../pool/sqlite.js';
-import { PostgresPosterStore } from '../pool/postgres.js';
+import { SCHEMA_VERSION, SqlitePosterStore, PostgresPosterStore } from 'bam-store';
 import type { PosterStore } from '../types.js';
 
 /**

@@ -19,7 +19,7 @@ import { EnvConfigError, parseEnv } from './env.js';
 import { HttpServer } from '../http/server.js';
 import { createPoster } from '../factory.js';
 import { LocalEcdsaSigner } from '../signer/local.js';
-import { createDbStore } from '../pool/db-store.js';
+import { createDbStore } from 'bam-store';
 import { StartupReconciliationError } from '../startup/reconcile.js';
 import { DEFAULT_MAX_MESSAGE_SIZE_BYTES } from '../ingest/size-bound.js';
 

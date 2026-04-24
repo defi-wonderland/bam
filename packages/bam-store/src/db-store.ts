@@ -1,4 +1,4 @@
-import type { PosterStore } from '../types.js';
+import type { PosterStore } from './types.js';
 import { PostgresPosterStore } from './postgres.js';
 import { SqlitePosterStore } from './sqlite.js';
 

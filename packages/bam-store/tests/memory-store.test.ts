@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { Address, Bytes32 } from 'bam-sdk';
 
-import { createMemoryStore, MemoryPosterStore } from '../../src/pool/memory-store.js';
+import { createMemoryStore, MemoryPosterStore } from '../src/memory-store.js';
 import type {
   MessageSnapshot,
   StoreTxnPendingRow,
   StoreTxnSubmittedRow,
-} from '../../src/types.js';
+} from '../src/types.js';
 
 const TAG_A = ('0x' + 'aa'.repeat(32)) as Bytes32;
 const TAG_B = ('0x' + 'bb'.repeat(32)) as Bytes32;

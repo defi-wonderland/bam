@@ -45,10 +45,10 @@ export type { PosterRejection } from './errors.js';
 export { POSTER_REJECTIONS } from './errors.js';
 
 export { LocalEcdsaSigner } from './signer/local.js';
-export { createMemoryStore, MemoryPosterStore } from './pool/memory-store.js';
-export { createDbStore, type DbStoreOptions } from './pool/db-store.js';
-export { SqlitePosterStore } from './pool/sqlite.js';
-export { PostgresPosterStore } from './pool/postgres.js';
+export { createMemoryStore, MemoryPosterStore } from 'bam-store';
+export { createDbStore, type DbStoreOptions } from 'bam-store';
+export { SqlitePosterStore } from 'bam-store';
+export { PostgresPosterStore } from 'bam-store';
 
 export { defaultEcdsaValidator } from './validator/default-ecdsa.js';
 export {

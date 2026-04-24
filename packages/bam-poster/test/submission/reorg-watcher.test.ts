@@ -9,7 +9,7 @@ import {
   DEFAULT_REORG_WINDOW,
   type BlockSource,
 } from '../../src/submission/reorg-watcher.js';
-import { MemoryPosterStore } from '../../src/pool/memory-store.js';
+import { MemoryPosterStore } from 'bam-store';
 import type { MessageSnapshot } from '../../src/types.js';
 
 const TAG = ('0x' + 'aa'.repeat(32)) as Bytes32;

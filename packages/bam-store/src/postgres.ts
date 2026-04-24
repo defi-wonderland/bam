@@ -10,7 +10,7 @@ import type {
   StoreTxnSubmittedRow,
   SubmittedBatchStatus,
   SubmittedBatchesQuery,
-} from '../types.js';
+} from './types.js';
 import { decodeNonce, encodeNonce } from './nonce-codec.js';
 import { SCHEMA_VERSION, SQL_CREATE_POSTGRES } from './schema.js';
 import { decodeSnapshots, encodeSnapshots } from './snapshot-codec.js';

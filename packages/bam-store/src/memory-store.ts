@@ -9,7 +9,7 @@ import type {
   StoreTxnSubmittedRow,
   SubmittedBatchStatus,
   SubmittedBatchesQuery,
-} from '../types.js';
+} from './types.js';
 
 class AsyncLock {
   private chain: Promise<unknown> = Promise.resolve();

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Address } from 'bam-sdk';
 
-import { SqlitePosterStore } from '../../src/pool/sqlite.js';
+import { SqlitePosterStore } from 'bam-store';
 import {
   StartupReconciliationError,
   reconcileSchemaVersion,
@@ -34,7 +34,7 @@ describe('reconcileSchemaVersion', () => {
   });
 
   it('accepts a memory store (no persisted schema to check)', async () => {
-    const { createMemoryStore } = await import('../../src/pool/memory-store.js');
+    const { createMemoryStore } = await import('bam-store');
     const store = createMemoryStore();
     await expect(reconcileSchemaVersion(store)).resolves.toBeUndefined();
     await store.close();
