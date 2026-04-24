@@ -77,4 +77,13 @@ describe('encodeBatch', () => {
     };
     expect(() => encodeBatch([bad], [new Uint8Array(65)])).toThrow(RangeError);
   });
+
+  it('rejects { codec: "zstd" } while compress() is a placeholder', () => {
+    // The encoder must not emit a header that advertises ZSTD while
+    // the payload is actually uncompressed — that would guarantee
+    // decode-time failure. Real ZSTD compression is a future wire-up.
+    const msgs = [makeMessage(1, 40)];
+    const sigs = [new Uint8Array(65)];
+    expect(() => encodeBatch(msgs, sigs, { codec: 'zstd' })).toThrow(/zstd/);
+  });
 });

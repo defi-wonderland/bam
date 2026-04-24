@@ -253,3 +253,20 @@ describe('IngestPipeline — nonce monotonicity end-to-end', () => {
     expect(rows.length).toBe(1);
   });
 });
+
+describe('IngestPipeline — contentTag canonicalization', () => {
+  it('mixed-case contentTag is canonicalized (lowercase) at ingest so queries match', async () => {
+    // Allowlist canonical; envelope ships the same tag in mixed case.
+    // Downstream store queries run against the lowercase form, so the
+    // row must be inserted under lowercase to be discoverable.
+    const mixedCase = ('0x' + 'Aa'.repeat(32)) as Bytes32;
+    const h = mkHarness();
+    const raw = signedEnvelope({ tag: mixedCase });
+    const res = await h.pipeline.ingest(raw);
+    expect(res.accepted).toBe(true);
+
+    // Canonical (lowercase) query must return the row.
+    const rowsLower = await h.store.withTxn(async (txn) => txn.listPendingByTag(TAG));
+    expect(rowsLower.length).toBe(1);
+  });
+});

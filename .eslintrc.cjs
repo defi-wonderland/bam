@@ -10,6 +10,10 @@ module.exports = {
     ecmaVersion: 2022,
     sourceType: 'module',
     project: ['./packages/*/tsconfig.json'],
+    // Anchor the relative `project` paths to this config's directory
+    // so per-package `pnpm -F <pkg> lint` (which runs eslint from the
+    // package cwd) resolves them correctly.
+    tsconfigRootDir: __dirname,
   },
   plugins: ['@typescript-eslint'],
   extends: [

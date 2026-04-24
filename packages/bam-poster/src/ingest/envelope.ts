@@ -1,6 +1,8 @@
 import type { Address, Bytes32 } from 'bam-sdk';
 import type { Hex } from 'viem';
 
+import { canonicalTag } from '../util/canonical.js';
+
 // Hoisted so every ingest call doesn't allocate a fresh decoder.
 const TEXT_DECODER = new TextDecoder();
 
@@ -51,14 +53,14 @@ export function parseEnvelope(raw: Uint8Array): ParseResult {
   if (!isObject(decoded)) {
     return { ok: false, result: { ok: false, reason: 'malformed' } };
   }
-  const { contentTag, message } = decoded as Record<string, unknown>;
+  const { contentTag, message } = decoded;
   if (!isBytes32(contentTag)) {
     return { ok: false, result: { ok: false, reason: 'malformed' } };
   }
   if (!isObject(message)) {
     return { ok: false, result: { ok: false, reason: 'malformed' } };
   }
-  const { sender, nonce, contents, signature } = message as Record<string, unknown>;
+  const { sender, nonce, contents, signature } = message;
   if (!isAddress(sender)) return { ok: false, result: { ok: false, reason: 'malformed' } };
 
   const parsedNonce = parseNonce(nonce);
@@ -77,7 +79,10 @@ export function parseEnvelope(raw: Uint8Array): ParseResult {
   return {
     ok: true,
     envelope: {
-      contentTag,
+      // Canonicalize here so downstream store queries (case-sensitive
+      // TEXT equality) always see one representation and per-tag
+      // sequencing cannot fork on hex case.
+      contentTag: canonicalTag(contentTag),
       message: {
         sender,
         nonce: parsedNonce,

@@ -21,8 +21,22 @@ const CONTENT_TAG_PREFIX_BYTES = 32;
 
 // ── Hex helpers ──────────────────────────────────────────────────────────
 
+/**
+ * Parse a hex string (with or without `0x` prefix) into bytes.
+ *
+ * Throws `RangeError` on odd-length input or any non-hex character —
+ * malformed input must fail loudly rather than silently decoding to
+ * zero/NaN bytes (which would produce wrong hashes/signatures without
+ * any error at the callsite).
+ */
 export function hexToBytes(hex: string): Uint8Array {
   const cleanHex = hex.startsWith('0x') ? hex.slice(2) : hex;
+  if (cleanHex.length % 2 !== 0) {
+    throw new RangeError('hex string must have even length');
+  }
+  if (!/^[0-9a-fA-F]*$/.test(cleanHex)) {
+    throw new RangeError('hex string contains non-hex characters');
+  }
   const bytes = new Uint8Array(cleanHex.length / 2);
   for (let i = 0; i < bytes.length; i++) {
     bytes[i] = parseInt(cleanHex.slice(i * 2, i * 2 + 2), 16);
@@ -160,7 +174,7 @@ export function splitContents(contents: Uint8Array): {
   }
 
   const contentTag = bytesToHex(contents.slice(0, CONTENT_TAG_PREFIX_BYTES)) as Bytes32;
-  // Return a view with the same backing buffer; callers that mutate must copy.
+  // `.slice()` returns a copy, so callers may mutate `appBytes` freely.
   const appBytes = contents.slice(CONTENT_TAG_PREFIX_BYTES);
   return { contentTag, appBytes };
 }

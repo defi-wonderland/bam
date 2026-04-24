@@ -32,12 +32,19 @@ export function defaultEcdsaValidator(chainId: number): MessageValidator {
       return ok ? { ok: true } : { ok: false, reason: 'bad_signature' };
     },
     recoverSigner(msg: DecodedMessage): Address | null {
-      // The default ingest keys rate-limiting on the asserted sender,
-      // which is already the address against which we verify. For the
-      // ECDSA path, "the sender that will bind this message on chain"
-      // and "the sender recovered from the signature" are the same
-      // after verify — so we just return `msg.sender`.
-      return msg.sender;
+      // Rate-limit keying runs BEFORE `validate`, so we must
+      // authenticate the signature here. Without this check, an
+      // attacker with an invalid signature could rotate `msg.sender`
+      // to spread load across fresh rate-limit buckets; the pipeline
+      // routes `null` to a sentinel bucket that bounds that cost.
+      const sigHex = toHex(msg.signature);
+      const ok = verifyECDSA(
+        { sender: msg.sender, nonce: msg.nonce, contents: msg.contents },
+        sigHex,
+        msg.sender,
+        chainId
+      );
+      return ok ? msg.sender : null;
     },
   };
 }

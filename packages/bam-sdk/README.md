@@ -53,6 +53,7 @@ import {
   computeMessageHash,
   encodeBatch,
   encodeContents,
+  hexToBytes,
   signECDSAWithKey,
   verifyECDSA,
   generateECDSAPrivateKey,

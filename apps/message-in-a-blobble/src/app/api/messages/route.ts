@@ -37,10 +37,23 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     );
   }
   // If the client omitted the contentTag (older clients), default to
-  // this demo's tag. Keeps the thin-proxy contract stable.
+  // this demo's tag. Keeps the thin-proxy contract stable, and covers
+  // the case where `message` is supplied but `contentTag` isn't — the
+  // Poster rejects envelopes without a `contentTag` field, so always
+  // backfill it before forwarding.
+  const parsed =
+    body && typeof body === 'object' && !Array.isArray(body)
+      ? (body as Record<string, unknown>)
+      : null;
   const envelope =
-    body && typeof body === 'object' && 'message' in (body as Record<string, unknown>)
-      ? (body as object)
+    parsed && 'message' in parsed
+      ? {
+          contentTag:
+            typeof parsed.contentTag === 'string'
+              ? parsed.contentTag
+              : MESSAGE_IN_A_BLOBBLE_TAG,
+          message: parsed.message,
+        }
       : { contentTag: MESSAGE_IN_A_BLOBBLE_TAG, message: body };
   try {
     const poster = await submitMessage({

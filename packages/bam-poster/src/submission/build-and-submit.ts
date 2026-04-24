@@ -127,8 +127,8 @@ export function classifySubmissionError(err: unknown): SubmitOutcome {
 export async function buildAndSubmitWithViem(
   opts: BuildAndSubmitOptions
 ): Promise<BuildAndSubmitBundle> {
-  const decoder = (opts.decoderAddress ?? zeroAddress) as Address;
-  const sigRegistry = (opts.signatureRegistryAddress ?? zeroAddress) as Address;
+  const decoder = (opts.decoderAddress ?? zeroAddress);
+  const sigRegistry = (opts.signatureRegistryAddress ?? zeroAddress);
   const gwei = opts.maxFeePerBlobGasGwei ?? '30';
 
   const transport = opts.transport ?? viemTransport(opts);
@@ -189,7 +189,7 @@ export async function buildAndSubmitWithViem(
         blobs: [blob],
         maxFeePerBlobGas: parseGwei(gwei),
         kzg,
-      })) as Bytes32;
+      }));
       const receipt = await transport.waitForReceipt(txHash);
 
       return {
@@ -261,7 +261,7 @@ function viemTransport(opts: BuildAndSubmitOptions): BuildAndSubmitTransport {
     },
     async getBytecode(address) {
       const code = (await publicClient.getBytecode({ address })) ?? '0x';
-      return code as `0x${string}`;
+      return code;
     },
     async getBalance(address) {
       return publicClient.getBalance({ address });

@@ -469,5 +469,5 @@ export function computeEcdsaPopMessage(params: {
     ],
     [ECDSA_POP_DOMAIN, BigInt(params.chainId), params.registry, params.owner]
   );
-  return viemKeccak256(encoded) as HexBytes;
+  return viemKeccak256(encoded);
 }

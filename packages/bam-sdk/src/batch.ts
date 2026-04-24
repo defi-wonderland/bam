@@ -28,7 +28,7 @@
  */
 
 import type { Address, BAMMessage, BatchOptions } from './types.js';
-import { compress, decompress } from './compression.js';
+import { compress, decompress, isCompressed } from './compression.js';
 import { hexToBytes, bytesToHex } from './message.js';
 
 /**
@@ -71,12 +71,12 @@ export function encodeBatch(
     throw new RangeError('too many messages in one batch');
   }
 
-  // Default to CODEC_NONE. V1 effectively shipped uncompressed batches as
-  // well (the SDK's `compress` function is a no-op warning shim — see
-  // `compression.ts`). Real ZSTD compression is a future wire-up; the
-  // codec byte provisions for it without demanding it today.
+  // The codec byte provisions for ZSTD on the wire; the actual
+  // `compress()` path is a no-op shim today (see `compression.ts`).
+  // We refuse to advertise ZSTD in the header unless the payload is
+  // verifiably ZSTD-framed — otherwise `decodeBatch` would
+  // deterministically fail on roundtrip.
   const useZstd = options?.codec === 'zstd';
-  const codecId = useZstd ? CODEC_ZSTD : CODEC_NONE;
 
   // Assemble the uncompressed payload.
   const recordBuffers: Uint8Array[] = [];
@@ -121,6 +121,16 @@ export function encodeBatch(
   }
 
   const payload = useZstd ? compress(plain) : plain;
+  // Only stamp CODEC_ZSTD when `compress` actually produced a ZSTD
+  // frame — the in-repo `compress` is a placeholder that returns
+  // data unchanged, so advertising ZSTD here would lie to the decoder.
+  const zstdActuallyApplied = useZstd && isCompressed(payload);
+  const codecId = zstdActuallyApplied ? CODEC_ZSTD : CODEC_NONE;
+  if (useZstd && !zstdActuallyApplied) {
+    throw new Error(
+      'zstd codec requested but compress() did not produce a ZSTD frame; real compression is not yet wired up — call encodeBatch without { codec: "zstd" } until then'
+    );
+  }
 
   const data = new Uint8Array(HEADER_SIZE + payload.length);
   data[0] = BATCH_VERSION;
@@ -132,7 +142,7 @@ export function encodeBatch(
   return {
     data,
     messageCount: messages.length,
-    codec: useZstd ? 'zstd' : 'none',
+    codec: zstdActuallyApplied ? 'zstd' : 'none',
     size: data.length,
   };
 }

@@ -101,4 +101,27 @@ describe('defaultEcdsaValidator', () => {
     const recovered = validator.recoverSigner?.(decoded);
     expect(recovered?.toLowerCase()).toBe(SENDER.toLowerCase());
   });
+
+  it('recoverSigner returns null when the signature is invalid (rate-limit bypass guard)', () => {
+    // Tampered app bytes ⇒ the signature no longer matches `contents`;
+    // recoverSigner must reject so the ingest routes this envelope to
+    // the shared RECOVER_FAILED rate-limit bucket instead of giving
+    // the attacker a fresh per-sender budget.
+    const decoded = buildDecoded({ tamperAppBytes: true });
+    const recovered = validator.recoverSigner?.(decoded);
+    expect(recovered).toBeNull();
+  });
+
+  it('recoverSigner returns null for wrong chain id', () => {
+    const validatorWrong = defaultEcdsaValidator(1);
+    const decoded = buildDecoded({});
+    const recovered = validatorWrong.recoverSigner?.(decoded);
+    expect(recovered).toBeNull();
+  });
+
+  it('recoverSigner returns null when signature length is wrong (cross-scheme safety)', () => {
+    const decoded = buildDecoded({ signatureOverride: new Uint8Array(48) });
+    const recovered = validator.recoverSigner?.(decoded);
+    expect(recovered).toBeNull();
+  });
 });
