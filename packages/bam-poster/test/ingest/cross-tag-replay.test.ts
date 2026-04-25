@@ -9,7 +9,7 @@ import {
 
 import { IngestPipeline } from '../../src/ingest/pipeline.js';
 import { RateLimiter } from '../../src/ingest/rate-limit.js';
-import { MemoryPosterStore } from '../../src/pool/memory-store.js';
+import { MemoryBamStore } from 'bam-store';
 import type { MessageValidator } from '../../src/types.js';
 
 const CHAIN_ID = 31337;
@@ -65,7 +65,7 @@ describe('cross-tag attribution replay', () => {
         return { ok: true };
       },
     };
-    const store = new MemoryPosterStore();
+    const store = new MemoryBamStore();
     const limiter = new RateLimiter({ windowMs: 60_000, maxPerWindow: 100 });
     const pipeline = new IngestPipeline({
       store,
@@ -117,7 +117,7 @@ describe('cross-tag attribution replay', () => {
     // Use a validator that really runs ECDSA — so we observe the
     // signature-level rejection, not just a tag-prefix rejection.
     const { pipeline } = (() => {
-      const store = new MemoryPosterStore();
+      const store = new MemoryBamStore();
       const limiter = new RateLimiter({ windowMs: 60_000, maxPerWindow: 100 });
       const validator: MessageValidator = {
         // Reject any message whose sender/sig would verify — but this

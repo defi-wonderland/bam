@@ -1,10 +1,6 @@
 import type { Bytes32 } from 'bam-sdk';
 
-import type {
-  MessageSnapshot,
-  PosterStore,
-  StoreTxnSubmittedRow,
-} from '../types.js';
+import type { BamStore, BatchRow, MessageRow } from '../types.js';
 
 /**
  * Abstraction over the L1 block-header source the watcher needs.
@@ -22,8 +18,13 @@ export interface BlockSource {
 }
 
 export interface ReorgWatcherOptions {
-  store: PosterStore;
+  store: BamStore;
   blockSource: BlockSource;
+  /** Chain id this Poster is configured for. The watcher filters batch
+   * candidates to this chain so a shared DB containing batches from
+   * multiple chains never causes the wrong chain's batches to be
+   * reorged. */
+  chainId: number;
   /** Window within which reorgs are re-enqueued. Clamped [4, 128]. */
   reorgWindowBlocks: number;
   now: () => Date;
@@ -42,15 +43,21 @@ export function clampReorgWindow(n: number): number {
  * Reorg watcher.
  *
  * Each tick:
- *   - Walks entries in `poster_submitted_batches` with status
- *     `included` whose `blockNumber` is within the reorg window of the
+ *   - Walks confirmed batches within the reorg window of the
  *     current canonical head.
  *   - For each, asks `blockSource.getTransactionBlock(tx_hash)`.
- *   - If the tx is no longer on the canonical chain, mark the entry
- *     `reorged`, re-enqueue its messages into the pending pool in
- *     their original ingest order (bypassing monotonicity — they
- *     passed it on initial ingest and `poster_nonces.last_nonce` must
- *     not regress), and let the submission loop pick them up again.
+ *   - If the tx is no longer on the canonical chain, call
+ *     `markReorged(tx_hash, invalidatedAt)` — which cascades confirmed
+ *     messages under the batch to `reorged` — and re-enqueue those
+ *     messages to `pending` with fresh ingest seqs at the tail of the
+ *     queue. The submission loop will pick them up again.
+ *
+ * Nonce monotonicity is NOT re-validated on re-enqueue: the
+ * per-author `last_nonce` tracker is monotonic over time and doesn't
+ * regress on reorg. Re-enqueue identity is `(sender, nonce,
+ * contents)`; a fresh ingest with the same `(sender, nonce)` cannot
+ * exist here because it would have been rejected as `stale_nonce` at
+ * its own ingest time.
  *
  * Out-of-window entries are left alone.
  */
@@ -63,65 +70,62 @@ export class ReorgWatcher {
     const windowStart = head - BigInt(window);
 
     const candidates = await this.opts.store.withTxn(async (txn) => {
-      const recent = await txn.listSubmitted({ sinceBlock: windowStart });
-      return recent.filter((r) => r.status === 'included' && r.blockNumber !== null);
+      const recent = await txn.listBatches({
+        chainId: this.opts.chainId,
+        sinceBlock: windowStart,
+      });
+      return recent.filter((b) => b.status === 'confirmed' && b.blockNumber !== null);
     });
 
     let reorgedCount = 0;
     let keptCount = 0;
 
-    for (const entry of candidates) {
-      const current = await this.opts.blockSource.getTransactionBlock(entry.txHash);
+    for (const batch of candidates) {
+      const current = await this.opts.blockSource.getTransactionBlock(batch.txHash);
       if (current !== null) {
         keptCount++;
         continue;
       }
       reorgedCount++;
-      await this.reorgEntry(entry);
+      await this.reorgBatch(batch);
     }
 
     return { reorgedCount, keptCount };
   }
 
-  private async reorgEntry(entry: StoreTxnSubmittedRow): Promise<void> {
+  private async reorgBatch(batch: BatchRow): Promise<void> {
     await this.opts.store.withTxn(async (txn) => {
-      // Mark as reorged and record the invalidation timestamp so clients
-      // reading `listSubmittedBatches` see a distinct state transition.
-      // The per-message `messageId` values stay in the snapshot for
-      // operator forensics, but downstream surfaces return them as
-      // `null` when status === 'reorged' — a new batch will produce a
-      // fresh `batchContentHash` and therefore a fresh id.
       const invalidatedAt = this.opts.now().getTime();
-      await txn.updateSubmittedStatus(entry.txHash, 'reorged', null, null, invalidatedAt);
+      // Fetch the attached messages BEFORE markReorged so we have the
+      // payloads in a stable order for re-enqueue.
+      const attached = await txn.listMessages({ batchRef: batch.txHash });
+      await txn.markReorged(batch.txHash, invalidatedAt);
 
-      // Re-enqueue the messages in their original ingest order, with
-      // NEW ingest_seq values at the tail of the tag queue (the
-      // original seq belonged to a now-deleted pending row). Walk the
-      // snapshots sorted by `originalIngestSeq` so the replay order
-      // matches the original ingestion order.
-      //
-      // Nonce-monotonicity is NOT re-run: the last_nonce tracker is
-      // monotonic over time and doesn't regress on reorg. Re-enqueue
-      // identity is `(sender, nonce, contents)`; a fresh ingest with
-      // the same `(sender, nonce)` cannot exist here because it would
-      // have been rejected as `stale_nonce` at its own ingest time.
-      const ordered = [...entry.messages].sort(
-        (a: MessageSnapshot, b: MessageSnapshot) => a.originalIngestSeq - b.originalIngestSeq
+      // Re-enqueue in original-ingest order, with NEW ingest_seq
+      // values at the tail of the tag queue.
+      const ordered = [...attached].sort(
+        (a: MessageRow, b: MessageRow) => (a.ingestSeq ?? 0) - (b.ingestSeq ?? 0)
       );
       const ingestedAt = this.opts.now().getTime();
-      for (const snap of ordered) {
-        const existing = await txn.getPendingByKey({ sender: snap.sender, nonce: snap.nonce });
-        if (existing !== null) continue;
-        const seq = await txn.nextIngestSeq(entry.contentTag);
-        await txn.insertPending({
-          contentTag: entry.contentTag,
-          sender: snap.sender,
-          nonce: snap.nonce,
-          contents: new Uint8Array(snap.contents),
-          signature: new Uint8Array(snap.signature),
-          messageHash: snap.messageHash,
+      for (const m of ordered) {
+        const existing = await txn.getByAuthorNonce(m.author, m.nonce);
+        if (existing !== null && existing.status === 'pending') continue;
+        const seq = await txn.nextIngestSeq(batch.contentTag);
+        await txn.upsertObserved({
+          messageId: null,
+          author: m.author,
+          nonce: m.nonce,
+          contentTag: batch.contentTag,
+          contents: new Uint8Array(m.contents),
+          signature: new Uint8Array(m.signature),
+          messageHash: m.messageHash,
+          status: 'pending',
+          batchRef: null,
           ingestedAt,
           ingestSeq: seq,
+          blockNumber: null,
+          txIndex: null,
+          messageIndexWithinBatch: null,
         });
       }
     });

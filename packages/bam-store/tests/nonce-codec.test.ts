@@ -6,7 +6,7 @@ import {
   NonceCodecError,
   decodeNonce,
   encodeNonce,
-} from '../../src/pool/nonce-codec.js';
+} from '../src/nonce-codec.js';
 
 describe('nonce codec', () => {
   it('round-trips the boundary values (0, 1, 2^63, 2^64-1)', () => {

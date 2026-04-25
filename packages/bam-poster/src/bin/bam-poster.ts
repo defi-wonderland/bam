@@ -19,7 +19,7 @@ import { EnvConfigError, parseEnv } from './env.js';
 import { HttpServer } from '../http/server.js';
 import { createPoster } from '../factory.js';
 import { LocalEcdsaSigner } from '../signer/local.js';
-import { createDbStore } from '../pool/db-store.js';
+import { createDbStore } from 'bam-store';
 import { StartupReconciliationError } from '../startup/reconcile.js';
 import { DEFAULT_MAX_MESSAGE_SIZE_BYTES } from '../ingest/size-bound.js';
 
@@ -72,8 +72,10 @@ export async function runCli(): Promise<void> {
   }
 
   const signer = new LocalEcdsaSigner(env.signerPrivateKey);
+  // CLI default: SQLite at ./poster.db when nothing more specific is set.
+  // bam-store itself reads no environment variables; the CLI resolves them.
   const store = createDbStore({
-    sqlitePath: env.sqlitePath,
+    sqlitePath: env.sqlitePath ?? './poster.db',
     postgresUrl: env.postgresUrl,
   });
 
@@ -130,8 +132,8 @@ export async function runCli(): Promise<void> {
       await server.close();
       // poster.stop() closes the configured store on the way out, so
       // we don't also close `store` here — double-closing some
-      // adapters (e.g. better-sqlite3) throws and flips a graceful
-      // shutdown into an error exit (qodo review).
+      // backends throws and flips a graceful shutdown into an error
+      // exit (qodo review).
       await poster.stop();
       process.exit(0);
     } catch {

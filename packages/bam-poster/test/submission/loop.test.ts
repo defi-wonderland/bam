@@ -3,7 +3,7 @@ import type { Address, Bytes32 } from 'bam-sdk';
 
 import { SubmissionLoop } from '../../src/submission/loop.js';
 import { DEFAULT_BACKOFF } from '../../src/submission/backoff.js';
-import { MemoryPosterStore } from '../../src/pool/memory-store.js';
+import { MemoryBamStore } from 'bam-store';
 import type { BuildAndSubmit, SubmitOutcome } from '../../src/submission/types.js';
 import type { BatchPolicy, DecodedMessage, PoolView } from '../../src/types.js';
 
@@ -34,7 +34,7 @@ function mkPolicy(select: (pool: PoolView) => DecodedMessage[] | null): BatchPol
 }
 
 interface Harness {
-  store: MemoryPosterStore;
+  store: MemoryBamStore;
   loop: SubmissionLoop;
   outcomes: SubmitOutcome[];
   build: BuildAndSubmit;
@@ -45,7 +45,7 @@ function mkHarness(opts: {
   sequence?: SubmitOutcome[];
   policyPicks?: number;
 }): Harness {
-  const store = new MemoryPosterStore();
+  const store = new MemoryBamStore();
   const picks = opts.policyPicks ?? 2;
   const policy = mkPolicy((pool) => {
     const msgs = pool.list(TAG);
@@ -73,7 +73,7 @@ function mkHarness(opts: {
   return { store, loop, outcomes: calls, build };
 }
 
-async function seedPending(store: MemoryPosterStore, count: number): Promise<void> {
+async function seedPending(store: MemoryBamStore, count: number): Promise<void> {
   await store.withTxn(async (txn) => {
     for (let i = 1; i <= count; i++) {
       const contents = new Uint8Array(40);
@@ -95,7 +95,7 @@ async function seedPending(store: MemoryPosterStore, count: number): Promise<voi
 describe('SubmissionLoop', () => {
   it('empty pool → idle, no submission', async () => {
     const h = mkHarness({
-      outcome: { kind: 'included', txHash: '0x01' as Bytes32, blockNumber: 1, blobVersionedHash: '0x02' as Bytes32 },
+      outcome: { kind: 'included', txHash: '0x01' as Bytes32, blockNumber: 1, txIndex: 0, blobVersionedHash: '0x02' as Bytes32 },
     });
     const res = await h.loop.tick();
     expect(res).toBe('idle');
@@ -108,6 +108,7 @@ describe('SubmissionLoop', () => {
         kind: 'included',
         txHash: ('0x' + 'aa'.repeat(32)) as Bytes32,
         blockNumber: 100,
+        txIndex: 0,
         blobVersionedHash: ('0x' + 'bb'.repeat(32)) as Bytes32,
       },
       policyPicks: 2,
@@ -119,14 +120,17 @@ describe('SubmissionLoop', () => {
       Promise.resolve(txn.listPendingByTag(TAG))
     );
     expect(remaining.map((r) => Number(r.nonce))).toEqual([3]);
-    const submitted = await h.store.withTxn((txn) =>
-      Promise.resolve(txn.listSubmitted({ contentTag: TAG }))
+    const batches = await h.store.withTxn((txn) =>
+      Promise.resolve(txn.listBatches({ contentTag: TAG }))
     );
-    expect(submitted.length).toBe(1);
-    expect(submitted[0].batchContentHash).toBe('0x' + 'bb'.repeat(32));
-    expect(submitted[0].messages.length).toBe(2);
+    expect(batches.length).toBe(1);
+    expect(batches[0].batchContentHash).toBe('0x' + 'bb'.repeat(32));
+    const attached = await h.store.withTxn((txn) =>
+      Promise.resolve(txn.listMessages({ batchRef: batches[0].txHash }))
+    );
+    expect(attached.length).toBe(2);
     // Each message gets a batch-scoped messageId.
-    expect(submitted[0].messages[0].messageId).toMatch(/^0x[0-9a-f]{64}$/);
+    expect(attached[0].messageId).toMatch(/^0x[0-9a-f]{64}$/);
     expect(h.loop.attempts()).toBe(0);
     expect(h.loop.healthState()).toBe('ok');
   });
@@ -169,5 +173,91 @@ describe('SubmissionLoop', () => {
       await h.loop.tick();
     }
     expect(h.loop.healthState()).toBe('degraded');
+  });
+
+  it('messageSnapshot covers every picked message — never drops one whose pending row is gone', async () => {
+    // Regression: the snapshot used to be built from getPendingByKey(),
+    // which filters to status='pending'. If a row was transitioned out
+    // of pending by another writer in a shared-DB scenario, it'd be
+    // silently missing from the snapshot, and listSubmittedBatches
+    // would then surface a confirmed batch with fewer messages than
+    // were actually submitted. Build from `picked` instead.
+    const h = mkHarness({
+      outcome: {
+        kind: 'included',
+        txHash: ('0x' + 'aa'.repeat(32)) as Bytes32,
+        blockNumber: 100,
+        txIndex: 0,
+        blobVersionedHash: ('0x' + 'bb'.repeat(32)) as Bytes32,
+      },
+      policyPicks: 2,
+    });
+    await seedPending(h.store, 2);
+    // Simulate a concurrent writer transitioning one of the picked rows
+    // out of `pending` BEFORE the loop's withTxn runs. We do this via a
+    // build-and-submit hook that fires after the policy has selected
+    // both messages but before the loop's confirmation withTxn opens.
+    const originalBuild = h.build;
+    h.loop = new SubmissionLoop({
+      tag: TAG,
+      store: h.store,
+      policy: mkPolicy((pool) => {
+        const msgs = pool.list(TAG);
+        return msgs.length === 0 ? null : msgs.slice(0, 2);
+      }),
+      blobCapacityBytes: 100_000,
+      buildAndSubmit: async (args) => {
+        // Flip nonce=1 to confirmed under a side-batch so it is no
+        // longer 'pending' when the loop's confirmation block runs.
+        await h.store.withTxn(async (txn) => {
+          await txn.upsertBatch({
+            txHash: ('0x' + 'cc'.repeat(32)) as Bytes32,
+            chainId: 31337,
+            contentTag: TAG,
+            blobVersionedHash: ('0x' + 'dd'.repeat(32)) as Bytes32,
+            batchContentHash: ('0x' + 'ee'.repeat(32)) as Bytes32,
+            blockNumber: 50,
+            txIndex: 0,
+            status: 'confirmed',
+            replacedByTxHash: null,
+            submittedAt: 1_500,
+            invalidatedAt: null,
+            messageSnapshot: [],
+          });
+          await txn.upsertObserved({
+            messageId: ('0x' + 'ff'.repeat(32)) as Bytes32,
+            author: SENDER,
+            nonce: 1n,
+            contentTag: TAG,
+            contents: new Uint8Array(40),
+            signature: new Uint8Array(65),
+            messageHash: ('0x' + (1).toString(16).padStart(64, '0')) as Bytes32,
+            status: 'confirmed',
+            batchRef: ('0x' + 'cc'.repeat(32)) as Bytes32,
+            ingestedAt: 1_001,
+            ingestSeq: 1,
+            blockNumber: 50,
+            txIndex: 0,
+            messageIndexWithinBatch: 0,
+          });
+        });
+        return originalBuild(args);
+      },
+      backoff: DEFAULT_BACKOFF,
+      now: () => new Date(5_000),
+      reorgWindowBlocks: 32,
+    });
+    const res = await h.loop.tick();
+    expect(res).toBe('success');
+    const batches = await h.store.withTxn((txn) =>
+      txn.listBatches({ contentTag: TAG, status: 'confirmed' })
+    );
+    const ours = batches.find((b) => b.txHash === '0x' + 'aa'.repeat(32));
+    expect(ours).toBeDefined();
+    // Both picked messages must appear in the snapshot — even though
+    // nonce=1's pending row was already transitioned out before the
+    // confirmation block ran.
+    expect(ours!.messageSnapshot.length).toBe(2);
+    expect(ours!.messageSnapshot.map((e) => Number(e.nonce)).sort()).toEqual([1, 2]);
   });
 });

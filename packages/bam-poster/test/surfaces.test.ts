@@ -5,13 +5,9 @@ import { listPending } from '../src/surfaces/pending.js';
 import { listSubmittedBatches } from '../src/surfaces/submitted.js';
 import { readStatus } from '../src/surfaces/status.js';
 import { readHealth } from '../src/surfaces/health.js';
-import { MemoryPosterStore } from '../src/pool/memory-store.js';
-import type {
-  MessageSnapshot,
-  Signer,
-  StoreTxnPendingRow,
-  StoreTxnSubmittedRow,
-} from '../src/types.js';
+import { MemoryBamStore } from 'bam-store';
+import type { BamStore, BatchStatus } from 'bam-store';
+import type { Signer, StoreTxnPendingRow } from '../src/types.js';
 import type { StatusRpcReader } from '../src/surfaces/status.js';
 
 const TAG_A = ('0x' + 'aa'.repeat(32)) as Bytes32;
@@ -35,34 +31,77 @@ function pendingRow(overrides: Partial<StoreTxnPendingRow> = {}): StoreTxnPendin
   };
 }
 
-function msgSnapshot(nonce: number): MessageSnapshot {
-  const contents = new Uint8Array(40);
-  contents.fill(0xaa, 0, 32);
-  return {
-    sender: SENDER,
-    nonce: BigInt(nonce),
-    contents,
-    signature: new Uint8Array(65),
-    messageHash: (('0x' + nonce.toString(16).padStart(64, '0')) as Bytes32),
-    messageId: (('0x' + (nonce + 1000).toString(16).padStart(64, '0')) as Bytes32),
-    originalIngestSeq: nonce,
-  };
+interface SeedMsg {
+  nonce: number;
 }
 
-function submittedRow(overrides: Partial<StoreTxnSubmittedRow> = {}): StoreTxnSubmittedRow {
-  return {
-    txHash: ('0x' + '01'.repeat(32)) as Bytes32,
-    contentTag: TAG_A,
-    blobVersionedHash: ('0x' + '02'.repeat(32)) as Bytes32,
-    batchContentHash: ('0x' + '03'.repeat(32)) as Bytes32,
-    blockNumber: 100,
-    status: 'included',
-    replacedByTxHash: null,
-    submittedAt: 2_000,
-    invalidatedAt: null,
-    messages: [msgSnapshot(1)],
-    ...overrides,
-  };
+/**
+ * Test shim: seed a batch + its messages through the unified-schema
+ * ops, matching the expectation the old `submittedRow` helper set up.
+ * status defaults to 'confirmed'; callers pass 'reorged' for reorged
+ * fixtures.
+ */
+async function seedBatch(
+  store: BamStore,
+  opts: {
+    txHash?: Bytes32;
+    contentTag?: Bytes32;
+    batchStatus?: BatchStatus;
+    blockNumber?: number;
+    invalidatedAt?: number | null;
+    messages?: SeedMsg[];
+  } = {}
+): Promise<void> {
+  const txHash = opts.txHash ?? (('0x' + '01'.repeat(32)) as Bytes32);
+  const contentTag = opts.contentTag ?? TAG_A;
+  const blockNumber = opts.blockNumber ?? 100;
+  const batchStatus: BatchStatus = opts.batchStatus ?? 'confirmed';
+  const msgs = opts.messages ?? [{ nonce: 1 }];
+  const messageStatus =
+    batchStatus === 'confirmed' ? 'confirmed' : batchStatus === 'reorged' ? 'reorged' : 'submitted';
+  await store.withTxn(async (txn) => {
+    await txn.upsertBatch({
+      txHash,
+      chainId: 31337,
+      contentTag,
+      blobVersionedHash: ('0x' + '02'.repeat(32)) as Bytes32,
+      batchContentHash: ('0x' + '03'.repeat(32)) as Bytes32,
+      blockNumber,
+      txIndex: null,
+      status: batchStatus,
+      replacedByTxHash: null,
+      submittedAt: 2_000,
+      invalidatedAt: opts.invalidatedAt ?? null,
+      messageSnapshot: msgs.map((m, i) => ({
+        author: SENDER,
+        nonce: BigInt(m.nonce),
+        messageId: (('0x' + (m.nonce + 1000).toString(16).padStart(64, '0')) as Bytes32),
+        messageHash: (('0x' + m.nonce.toString(16).padStart(64, '0')) as Bytes32),
+        messageIndexWithinBatch: i,
+      })),
+    });
+    for (let i = 0; i < msgs.length; i++) {
+      const m = msgs[i];
+      const contents = new Uint8Array(40);
+      contents.fill(0xaa, 0, 32);
+      await txn.upsertObserved({
+        messageId: (('0x' + (m.nonce + 1000).toString(16).padStart(64, '0')) as Bytes32),
+        author: SENDER,
+        nonce: BigInt(m.nonce),
+        contentTag,
+        contents,
+        signature: new Uint8Array(65),
+        messageHash: (('0x' + m.nonce.toString(16).padStart(64, '0')) as Bytes32),
+        status: messageStatus,
+        batchRef: txHash,
+        ingestedAt: null,
+        ingestSeq: m.nonce,
+        blockNumber: batchStatus === 'confirmed' ? blockNumber : null,
+        txIndex: null,
+        messageIndexWithinBatch: i,
+      });
+    }
+  });
 }
 
 class StubSigner implements Signer {
@@ -73,7 +112,7 @@ class StubSigner implements Signer {
 
 describe('listPending', () => {
   it('returns BAMMessage-shaped rows with messageHash (no v1 content/timestamp)', async () => {
-    const store = new MemoryPosterStore();
+    const store = new MemoryBamStore();
     await store.withTxn(async (txn) => txn.insertPending(pendingRow()));
     const rows = await listPending(store, {});
     expect(rows.length).toBe(1);
@@ -84,7 +123,7 @@ describe('listPending', () => {
   });
 
   it('filters by contentTag', async () => {
-    const store = new MemoryPosterStore();
+    const store = new MemoryBamStore();
     await store.withTxn(async (txn) => {
       txn.insertPending(pendingRow({ nonce: 1n, ingestSeq: 1 }));
       txn.insertPending(pendingRow({ nonce: 2n, ingestSeq: 2, contentTag: TAG_B }));
@@ -98,9 +137,9 @@ describe('listPending', () => {
 
 describe('listSubmittedBatches', () => {
   it('status "included" → messageId is populated, invalidatedAt null', async () => {
-    const store = new MemoryPosterStore();
-    await store.withTxn(async (txn) => txn.insertSubmitted(submittedRow()));
-    const rows = await listSubmittedBatches(store, {});
+    const store = new MemoryBamStore();
+    await seedBatch(store);
+    const rows = await listSubmittedBatches(store, 31337, {});
     expect(rows.length).toBe(1);
     expect(rows[0].status).toBe('included');
     expect(rows[0].invalidatedAt).toBeNull();
@@ -108,44 +147,111 @@ describe('listSubmittedBatches', () => {
   });
 
   it('status "reorged" → messageId is surfaced as null on every message', async () => {
-    const store = new MemoryPosterStore();
-    await store.withTxn(async (txn) =>
-      txn.insertSubmitted(
-        submittedRow({ status: 'reorged', invalidatedAt: 3_000 })
-      )
-    );
-    const rows = await listSubmittedBatches(store, {});
+    const store = new MemoryBamStore();
+    await seedBatch(store, { batchStatus: 'reorged', invalidatedAt: 3_000 });
+    const rows = await listSubmittedBatches(store, 31337, {});
     expect(rows[0].status).toBe('reorged');
     expect(rows[0].invalidatedAt).toBe(3_000);
     for (const m of rows[0].messages) expect(m.messageId).toBeNull();
   });
 
   it('returns batchContentHash on every entry', async () => {
-    const store = new MemoryPosterStore();
-    await store.withTxn(async (txn) => txn.insertSubmitted(submittedRow()));
-    const rows = await listSubmittedBatches(store, {});
+    const store = new MemoryBamStore();
+    await seedBatch(store);
+    const rows = await listSubmittedBatches(store, 31337, {});
     expect(rows[0].batchContentHash).toBe('0x' + '03'.repeat(32));
   });
 
   it('filters by sinceBlock', async () => {
-    const store = new MemoryPosterStore();
-    await store.withTxn(async (txn) => {
-      txn.insertSubmitted(
-        submittedRow({ txHash: ('0x' + '01'.repeat(32)) as Bytes32, blockNumber: 10 })
-      );
-      txn.insertSubmitted(
-        submittedRow({ txHash: ('0x' + '02'.repeat(32)) as Bytes32, blockNumber: 20 })
-      );
-    });
-    const rows = await listSubmittedBatches(store, { sinceBlock: 15n });
+    const store = new MemoryBamStore();
+    await seedBatch(store, { txHash: ('0x' + '01'.repeat(32)) as Bytes32, blockNumber: 10 });
+    await seedBatch(store, { txHash: ('0x' + '02'.repeat(32)) as Bytes32, blockNumber: 20 });
+    const rows = await listSubmittedBatches(store, 31337, { sinceBlock: 15n });
     expect(rows.length).toBe(1);
     expect(rows[0].blockNumber).toBe(20);
+  });
+
+  it('filters out batches from a different chainId', async () => {
+    const store = new MemoryBamStore();
+    await seedBatch(store, { txHash: ('0x' + '01'.repeat(32)) as Bytes32, blockNumber: 10 });
+    // Write a batch on a different chain directly (bypassing seedBatch
+    // which hardcodes 31337) to simulate a shared DB.
+    await store.withTxn(async (txn) => {
+      await txn.upsertBatch({
+        txHash: ('0x' + '02'.repeat(32)) as Bytes32,
+        chainId: 999,
+        contentTag: TAG_A,
+        blobVersionedHash: ('0x' + '02'.repeat(32)) as Bytes32,
+        batchContentHash: ('0x' + '03'.repeat(32)) as Bytes32,
+        blockNumber: 11,
+        txIndex: null,
+        status: 'confirmed',
+        replacedByTxHash: null,
+        submittedAt: 2_000,
+        invalidatedAt: null,
+        messageSnapshot: [],
+      });
+    });
+    const rows = await listSubmittedBatches(store, 31337, {});
+    expect(rows.length).toBe(1);
+    expect(rows[0].txHash).toBe('0x' + '01'.repeat(32));
+  });
+
+  it('limit: 0 returns no batches', async () => {
+    const store = new MemoryBamStore();
+    await seedBatch(store, { txHash: ('0x' + '01'.repeat(32)) as Bytes32 });
+    await seedBatch(store, { txHash: ('0x' + '02'.repeat(32)) as Bytes32 });
+    const rows = await listSubmittedBatches(store, 31337, { limit: 0 });
+    expect(rows.length).toBe(0);
+  });
+
+  it('rejects non-finite or negative limit (programmatic-caller misuse)', async () => {
+    const store = new MemoryBamStore();
+    await seedBatch(store);
+    await expect(
+      listSubmittedBatches(store, 31337, { limit: Number.NaN })
+    ).rejects.toThrow(/non-negative integer/);
+    await expect(
+      listSubmittedBatches(store, 31337, { limit: Number.POSITIVE_INFINITY })
+    ).rejects.toThrow(/non-negative integer/);
+    await expect(
+      listSubmittedBatches(store, 31337, { limit: -1 })
+    ).rejects.toThrow(/non-negative integer/);
+    await expect(
+      listSubmittedBatches(store, 31337, { limit: 1.5 })
+    ).rejects.toThrow(/non-negative integer/);
+  });
+
+  it('filters out batches with null submittedAt (Reader-observed, never submitted by us)', async () => {
+    const store = new MemoryBamStore();
+    await seedBatch(store, { txHash: ('0x' + '01'.repeat(32)) as Bytes32 });
+    // A batch a Reader observed without us ever submitting it: same
+    // chain, but submittedAt is null because we didn't write it.
+    await store.withTxn(async (txn) => {
+      await txn.upsertBatch({
+        txHash: ('0x' + '02'.repeat(32)) as Bytes32,
+        chainId: 31337,
+        contentTag: TAG_A,
+        blobVersionedHash: ('0x' + '02'.repeat(32)) as Bytes32,
+        batchContentHash: ('0x' + '03'.repeat(32)) as Bytes32,
+        blockNumber: 200,
+        txIndex: 0,
+        status: 'confirmed',
+        replacedByTxHash: null,
+        submittedAt: null,
+        invalidatedAt: null,
+        messageSnapshot: [],
+      });
+    });
+    const rows = await listSubmittedBatches(store, 31337, {});
+    expect(rows.length).toBe(1);
+    expect(rows[0].txHash).toBe('0x' + '01'.repeat(32));
   });
 });
 
 describe('readStatus', () => {
   it('returns wallet address + balance + per-tag pending counts', async () => {
-    const store = new MemoryPosterStore();
+    const store = new MemoryBamStore();
     await store.withTxn(async (txn) => {
       txn.insertPending(pendingRow({ nonce: 1n, ingestSeq: 1 }));
       txn.insertPending(pendingRow({ nonce: 2n, ingestSeq: 2 }));
@@ -160,6 +266,7 @@ describe('readStatus', () => {
       rpc,
       signer: new StubSigner(),
       configuredTags: [TAG_A, TAG_B],
+      chainId: 31337,
     });
     expect(s.walletAddress).toBe(WALLET);
     expect(s.walletBalanceWei).toBe(10n ** 18n);
@@ -168,8 +275,8 @@ describe('readStatus', () => {
   });
 
   it('surfaces lastSubmittedByTag', async () => {
-    const store = new MemoryPosterStore();
-    await store.withTxn(async (txn) => txn.insertSubmitted(submittedRow()));
+    const store = new MemoryBamStore();
+    await seedBatch(store);
     const rpc: StatusRpcReader = {
       async getBalance() {
         return 0n;
@@ -180,6 +287,7 @@ describe('readStatus', () => {
       rpc,
       signer: new StubSigner(),
       configuredTags: [TAG_A],
+      chainId: 31337,
     });
     expect(s.lastSubmittedByTag.length).toBe(1);
     expect(s.lastSubmittedByTag[0].txHash).toBe('0x' + '01'.repeat(32));

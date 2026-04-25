@@ -3,7 +3,7 @@ import { computeMessageHash, type Address, type Bytes32 } from 'bam-sdk';
 import type {
   DecodedMessage,
   MessageValidator,
-  PosterStore,
+  BamStore,
   SubmitHint,
   SubmitResult,
 } from '../types.js';
@@ -14,7 +14,7 @@ import { checkContentTag } from './signed-tag.js';
 import { checkSizeBound } from './size-bound.js';
 
 export interface IngestPipelineOptions {
-  store: PosterStore;
+  store: BamStore;
   validator: MessageValidator;
   rateLimiter: RateLimiter;
   allowlistedTags: readonly Bytes32[];
@@ -36,7 +36,7 @@ const RECOVER_FAILED_KEY = '0x0000000000000000000000000000000000000000' as Addre
  *
  *     size → content-tag → recover → rate-limit → monotonicity → validator → insert
  *
- * The full sequence runs under a single `PosterStore.withTxn` so
+ * The full sequence runs under a single `BamStore.withTxn` so
  * concurrent ingests of the same `(sender, nonce)` race cleanly:
  * exactly one wins. Rate-limit state is separate — it doesn't need to
  * roll back on a later-stage reject.

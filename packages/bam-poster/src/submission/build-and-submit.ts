@@ -66,7 +66,7 @@ export interface BuildAndSubmitTransport {
     maxFeePerBlobGas: bigint;
     kzg: Kzg;
   }): Promise<`0x${string}`>;
-  waitForReceipt(hash: `0x${string}`): Promise<{ blockNumber: bigint }>;
+  waitForReceipt(hash: `0x${string}`): Promise<{ blockNumber: bigint; transactionIndex: number }>;
   getChainId(): Promise<number>;
   getBytecode(address: Address): Promise<`0x${string}`>;
   getBalance(address: Address): Promise<bigint>;
@@ -197,6 +197,7 @@ export async function buildAndSubmitWithViem(
         txHash,
         blobVersionedHash: versionedHash,
         blockNumber: Number(receipt.blockNumber),
+        txIndex: receipt.transactionIndex,
       };
     } catch (err) {
       // Log the underlying error before classification — the classifier
@@ -254,7 +255,8 @@ function viemTransport(opts: BuildAndSubmitOptions): BuildAndSubmitTransport {
       });
     },
     async waitForReceipt(hash) {
-      return publicClient.waitForTransactionReceipt({ hash });
+      const r = await publicClient.waitForTransactionReceipt({ hash });
+      return { blockNumber: r.blockNumber, transactionIndex: r.transactionIndex };
     },
     async getChainId() {
       return publicClient.getChainId();

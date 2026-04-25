@@ -10,7 +10,7 @@ import type {
   Poster,
   PosterConfig,
   PosterLogger,
-  PosterStore,
+  BamStore,
   Status,
   SubmitHint,
   SubmitResult,
@@ -23,7 +23,7 @@ import {
   DEFAULT_MAX_CONTENTS_SIZE_BYTES,
   DEFAULT_MAX_MESSAGE_SIZE_BYTES,
 } from './ingest/size-bound.js';
-import { createMemoryStore } from './pool/memory-store.js';
+import { createMemoryStore } from 'bam-store';
 import { defaultBatchPolicy, DEFAULT_BLOB_CAPACITY_BYTES } from './policy/default.js';
 import { SubmissionLoop } from './submission/loop.js';
 import type { BuildAndSubmit } from './submission/types.js';
@@ -128,7 +128,7 @@ export async function createPoster(
       bamCoreAddress: config.bamCoreAddress,
     });
 
-    const store: PosterStore = config.store ?? createMemoryStore();
+    const store: BamStore = config.store ?? createMemoryStore();
     await reconcileSchemaVersion(store);
     const validator: MessageValidator = config.validator ?? defaultEcdsaValidator(config.chainId);
     const batchPolicy: BatchPolicy = config.batchPolicy ?? defaultBatchPolicy();
@@ -169,6 +169,7 @@ export async function createPoster(
         tag,
         new SubmissionLoop({
           tag,
+          chainId: config.chainId,
           store,
           policy: batchPolicy,
           blobCapacityBytes: blobCapacity,
@@ -184,6 +185,7 @@ export async function createPoster(
     const reorgWatcher = new ReorgWatcher({
       store,
       blockSource: extras.rpc,
+      chainId: config.chainId,
       reorgWindowBlocks: reorgWindow,
       now,
     });
@@ -314,6 +316,7 @@ export async function createPoster(
         const q: SubmittedBatchesQuery = query ?? {};
         return listSubmittedBatches(
           store,
+          config.chainId,
           q.contentTag !== undefined
             ? { ...q, contentTag: canonicalTag(q.contentTag) }
             : q
@@ -325,6 +328,7 @@ export async function createPoster(
           rpc: extras.rpc,
           signer: config.signer,
           configuredTags: allowlistedTags,
+          chainId: config.chainId,
         });
       },
       async health(): Promise<Health> {

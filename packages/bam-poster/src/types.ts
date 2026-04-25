@@ -7,9 +7,45 @@
  */
 
 import type { Address, Bytes32 } from 'bam-sdk';
+import type {
+  BamStore,
+  BatchRow,
+  MessageRow,
+  NonceTrackerRow,
+  PendingKey,
+  StoreTxn,
+  StoreTxnPendingRow,
+} from 'bam-store';
 import type { Account } from 'viem';
 
 import type { PosterRejection } from './errors.js';
+
+// Persistence types live in `bam-store`; re-exported here so external
+// consumers of `bam-poster`'s public types are unaffected by the move.
+export type {
+  BamStore,
+  BatchRow,
+  MessageRow,
+  NonceTrackerRow,
+  PendingKey,
+  StoreTxn,
+  StoreTxnPendingRow,
+};
+
+/**
+ * Submitted-batch lifecycle states as exposed through the Poster's
+ * public HTTP read surface. Internally the store tracks three
+ * BatchStatus values (`pending_tx | confirmed | reorged`);
+ * surfaces/submitted.ts maps `reorged` with a non-null
+ * `replacedByTxHash` back to `resubmitted` for HTTP shape parity.
+ */
+export type SubmittedBatchStatus = 'pending' | 'included' | 'reorged' | 'resubmitted';
+
+export interface SubmittedBatchesQuery {
+  contentTag?: Bytes32;
+  sinceBlock?: bigint;
+  limit?: number;
+}
 
 // ═══════════════════════════════════════════════════════════════════════
 // Submit API
@@ -85,8 +121,6 @@ export interface PendingQuery {
 // Submitted-batch read surface
 // ═══════════════════════════════════════════════════════════════════════
 
-export type SubmittedBatchStatus = 'pending' | 'included' | 'reorged' | 'resubmitted';
-
 /**
  * Per-message entry on a submitted batch. `messageHash` is stable from
  * ingest onward; `messageId` is ERC-8180's batch-scoped id, computable
@@ -115,12 +149,6 @@ export interface SubmittedBatch {
   /** ms since epoch when `status` transitioned to `'reorged'`. */
   invalidatedAt: number | null;
   messages: SubmittedBatchMessage[];
-}
-
-export interface SubmittedBatchesQuery {
-  contentTag?: Bytes32;
-  sinceBlock?: bigint;
-  limit?: number;
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -189,106 +217,6 @@ export interface Signer {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// PosterStore — single durable substrate for pool + dedup + submitted
-// ═══════════════════════════════════════════════════════════════════════
-
-export interface StoreTxnPendingRow {
-  contentTag: Bytes32;
-  sender: Address;
-  nonce: bigint;
-  contents: Uint8Array;
-  signature: Uint8Array;
-  messageHash: Bytes32;
-  ingestedAt: number;
-  ingestSeq: number;
-}
-
-/**
- * Per-message snapshot retained in `poster_submitted_batches` so the
- * reorg watcher can re-enqueue messages into the pending pool after
- * inclusion-time pruning.
- */
-export interface MessageSnapshot {
-  sender: Address;
-  nonce: bigint;
-  contents: Uint8Array;
-  signature: Uint8Array;
-  messageHash: Bytes32;
-  /** `messageId` is batch-scoped and only meaningful when the parent row's status is `'included'`. */
-  messageId: Bytes32 | null;
-  originalIngestSeq: number;
-}
-
-export interface StoreTxnSubmittedRow {
-  txHash: Bytes32;
-  contentTag: Bytes32;
-  blobVersionedHash: Bytes32;
-  batchContentHash: Bytes32;
-  blockNumber: number | null;
-  status: SubmittedBatchStatus;
-  replacedByTxHash: Bytes32 | null;
-  submittedAt: number;
-  invalidatedAt: number | null;
-  messages: MessageSnapshot[];
-}
-
-export interface NonceTrackerRow {
-  sender: Address;
-  lastNonce: bigint;
-  lastMessageHash: Bytes32;
-}
-
-export interface PendingKey {
-  sender: Address;
-  nonce: bigint;
-}
-
-export interface StoreTxn {
-  // ── pending CRUD ─────────────────────────────────────────────────────
-  insertPending(row: StoreTxnPendingRow): void | Promise<void>;
-  getPendingByKey(
-    key: PendingKey
-  ): StoreTxnPendingRow | null | Promise<StoreTxnPendingRow | null>;
-  listPendingByTag(
-    tag: Bytes32,
-    limit?: number,
-    sinceSeq?: number
-  ): StoreTxnPendingRow[] | Promise<StoreTxnPendingRow[]>;
-  listPendingAll(
-    limit?: number,
-    sinceSeq?: number
-  ): StoreTxnPendingRow[] | Promise<StoreTxnPendingRow[]>;
-  deletePending(keys: PendingKey[]): void | Promise<void>;
-  countPendingByTag(tag: Bytes32): number | Promise<number>;
-  nextIngestSeq(tag: Bytes32): number | Promise<number>;
-
-  // ── nonce tracker CRUD ───────────────────────────────────────────────
-  getNonce(sender: Address): NonceTrackerRow | null | Promise<NonceTrackerRow | null>;
-  setNonce(row: NonceTrackerRow): void | Promise<void>;
-
-  // ── submitted-batches CRUD ───────────────────────────────────────────
-  insertSubmitted(row: StoreTxnSubmittedRow): void | Promise<void>;
-  getSubmittedByTx(
-    txHash: Bytes32
-  ): StoreTxnSubmittedRow | null | Promise<StoreTxnSubmittedRow | null>;
-  listSubmitted(
-    query: SubmittedBatchesQuery
-  ): StoreTxnSubmittedRow[] | Promise<StoreTxnSubmittedRow[]>;
-  updateSubmittedStatus(
-    txHash: Bytes32,
-    status: SubmittedBatchStatus,
-    replacedByTxHash: Bytes32 | null,
-    blockNumber: number | null,
-    invalidatedAt?: number | null
-  ): void | Promise<void>;
-}
-
-export interface PosterStore {
-  withTxn<T>(fn: (txn: StoreTxn) => Promise<T>): Promise<T>;
-  close(): Promise<void>;
-}
-
-// ═══════════════════════════════════════════════════════════════════════
 // PosterConfig
 // ═══════════════════════════════════════════════════════════════════════
 
@@ -321,7 +249,7 @@ export interface PosterConfig {
   reorgWindowBlocks?: number;
   rateLimit?: RateLimitConfig;
   backoff?: BackoffConfig;
-  store?: PosterStore;
+  store?: BamStore;
   now?: () => Date;
   idlePollMs?: number;
   reorgPollMs?: number;

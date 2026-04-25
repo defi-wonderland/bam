@@ -135,7 +135,7 @@ describe('createPoster — full ingest → submit cycle', () => {
   it('ingest → listPending → tick → submitted-batches reflects inclusion', async () => {
     const ctl: RpcCtl = { reorgedTxs: new Set(), head: 110n };
     const bas = mkBuildAndSubmit([
-      { kind: 'included', txHash: TX_A, blockNumber: 100, blobVersionedHash: BVH_A },
+      { kind: 'included', txHash: TX_A, blockNumber: 100, txIndex: 0, blobVersionedHash: BVH_A },
     ]);
     const poster = await makePoster(bas.fn, mkRpc(ctl));
 
@@ -156,10 +156,10 @@ describe('createPoster — full ingest → submit cycle', () => {
     expect(submitted[0].messages[0].messageId).toMatch(/^0x[0-9a-f]{64}$/);
   });
 
-  it('reorg within window → submitted row flips to reorged + invalidatedAt', async () => {
+  it('reorg within window → submitted row flips to reorged + invalidatedAt; messages survive', async () => {
     const ctl: RpcCtl = { reorgedTxs: new Set(), head: 100n };
     const bas = mkBuildAndSubmit([
-      { kind: 'included', txHash: TX_A, blockNumber: 100, blobVersionedHash: BVH_A },
+      { kind: 'included', txHash: TX_A, blockNumber: 100, txIndex: 0, blobVersionedHash: BVH_A },
     ]);
     const poster = await makePoster(bas.fn, mkRpc(ctl));
 
@@ -174,18 +174,61 @@ describe('createPoster — full ingest → submit cycle', () => {
     const submitted = await poster.listSubmittedBatches({ contentTag: TAG });
     expect(submitted[0].status).toBe('reorged');
     expect(submitted[0].invalidatedAt).not.toBeNull();
-    // After reorg, per-message messageId is surfaced as null.
-    for (const m of submitted[0].messages) expect(m.messageId).toBeNull();
+    // The reorged batch still surfaces its messages — the snapshot
+    // is the durable record. Each message's messageId is null since
+    // the batch-scoped id is no longer valid.
+    expect(submitted[0].messages.length).toBe(1);
+    expect(submitted[0].messages[0].messageId).toBeNull();
+    expect(submitted[0].messages[0].nonce).toBe(1n);
 
     // And the pending pool has the message back.
     const pending = await poster.listPending({ contentTag: TAG });
     expect(pending.length).toBe(1);
   });
 
+  it('reorg + resubmit → original batch flips to resubmitted with replacedByTxHash; both batches list their messages', async () => {
+    const ctl: RpcCtl = { reorgedTxs: new Set(), head: 100n };
+    const TX_B = ('0x' + '02'.repeat(32)) as Bytes32;
+    const BVH_B = ('0x' + '03'.repeat(32)) as Bytes32;
+    const bas = mkBuildAndSubmit([
+      { kind: 'included', txHash: TX_A, blockNumber: 100, txIndex: 0, blobVersionedHash: BVH_A },
+      { kind: 'included', txHash: TX_B, blockNumber: 101, txIndex: 1, blobVersionedHash: BVH_B },
+    ]);
+    const poster = await makePoster(bas.fn, mkRpc(ctl));
+
+    await poster.submit(signedEnvelope(1n));
+    await poster._tickTag(TAG);
+
+    // Reorg out tx A.
+    ctl.reorgedTxs.add(TX_A);
+    ctl.head = 103n;
+    await poster._tickReorgWatcher();
+
+    // Resubmit — picks up the re-enqueued message and lands it in TX_B.
+    await poster._tickTag(TAG);
+
+    const submitted = await poster.listSubmittedBatches({ contentTag: TAG });
+    expect(submitted.length).toBe(2);
+    const a = submitted.find((s) => s.txHash === TX_A);
+    const b = submitted.find((s) => s.txHash === TX_B);
+    // Original batch is now `resubmitted` and points at the replacement.
+    expect(a?.status).toBe('resubmitted');
+    expect(a?.replacedByTxHash).toBe(TX_B);
+    // Both batches list the message — same nonce, distinct messageIds.
+    expect(a?.messages.length).toBe(1);
+    expect(b?.messages.length).toBe(1);
+    expect(a?.messages[0].nonce).toBe(1n);
+    expect(b?.messages[0].nonce).toBe(1n);
+    expect(b?.status).toBe('included');
+    expect(b?.messages[0].messageId).toMatch(/^0x[0-9a-f]{64}$/);
+    // `a` is reorged-out, so its messageId is surfaced as null.
+    expect(a?.messages[0].messageId).toBeNull();
+  });
+
   it('health() is "ok" after a clean tick; status() reports zero pending', async () => {
     const ctl: RpcCtl = { reorgedTxs: new Set(), head: 110n };
     const bas = mkBuildAndSubmit([
-      { kind: 'included', txHash: TX_A, blockNumber: 100, blobVersionedHash: BVH_A },
+      { kind: 'included', txHash: TX_A, blockNumber: 100, txIndex: 0, blobVersionedHash: BVH_A },
     ]);
     const poster = await makePoster(bas.fn, mkRpc(ctl));
     await poster.submit(signedEnvelope(1n));

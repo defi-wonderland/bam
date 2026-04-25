@@ -9,8 +9,8 @@ import {
 
 import { IngestPipeline } from '../../src/ingest/pipeline.js';
 import { RateLimiter } from '../../src/ingest/rate-limit.js';
-import { SqlitePosterStore } from '../../src/pool/sqlite.js';
-import type { MessageValidator, PosterStore } from '../../src/types.js';
+import { SqliteBamStore } from 'bam-store';
+import type { MessageValidator, BamStore } from '../../src/types.js';
 
 /**
  * Integration test — concurrent ingest of the same `(sender, nonce)`
@@ -22,10 +22,10 @@ const PRIV = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
 const SENDER = '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266' as Address;
 const TAG = ('0x' + 'aa'.repeat(32)) as Bytes32;
 
-const stores: PosterStore[] = [];
+const stores: BamStore[] = [];
 
-function newStore(): SqlitePosterStore {
-  const s = new SqlitePosterStore(':memory:');
+function newStore(): SqliteBamStore {
+  const s = new SqliteBamStore(':memory:');
   stores.push(s);
   return s;
 }
@@ -57,7 +57,7 @@ function signedEnvelope(nonce: bigint): Uint8Array {
   return new TextEncoder().encode(JSON.stringify(env));
 }
 
-function mkPipeline(store: PosterStore): IngestPipeline {
+function mkPipeline(store: BamStore): IngestPipeline {
   const okValidator: MessageValidator = {
     validate() {
       return { ok: true };
