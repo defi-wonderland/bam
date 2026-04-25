@@ -205,6 +205,23 @@ describe('listSubmittedBatches', () => {
     expect(rows.length).toBe(0);
   });
 
+  it('rejects non-finite or negative limit (programmatic-caller misuse)', async () => {
+    const store = new MemoryBamStore();
+    await seedBatch(store);
+    await expect(
+      listSubmittedBatches(store, 31337, { limit: Number.NaN })
+    ).rejects.toThrow(/non-negative integer/);
+    await expect(
+      listSubmittedBatches(store, 31337, { limit: Number.POSITIVE_INFINITY })
+    ).rejects.toThrow(/non-negative integer/);
+    await expect(
+      listSubmittedBatches(store, 31337, { limit: -1 })
+    ).rejects.toThrow(/non-negative integer/);
+    await expect(
+      listSubmittedBatches(store, 31337, { limit: 1.5 })
+    ).rejects.toThrow(/non-negative integer/);
+  });
+
   it('filters out batches with null submittedAt (Reader-observed, never submitted by us)', async () => {
     const store = new MemoryBamStore();
     await seedBatch(store, { txHash: ('0x' + '01'.repeat(32)) as Bytes32 });

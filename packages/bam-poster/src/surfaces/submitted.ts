@@ -36,6 +36,18 @@ export async function listSubmittedBatches(
   chainId: number,
   query: SubmittedBatchesQuery
 ): Promise<SubmittedBatch[]> {
+  // HTTP routes validate `limit` via parseLimit, but programmatic
+  // callers reach this surface directly. Reject non-finite or
+  // negative values up-front so `NaN`/`Infinity` cannot silently
+  // disable the local limit guard below.
+  if (
+    query.limit !== undefined &&
+    (!Number.isInteger(query.limit) || query.limit < 0)
+  ) {
+    throw new Error(
+      `listSubmittedBatches: limit must be a non-negative integer, got ${query.limit}`
+    );
+  }
   return store.withTxn(async (txn) => {
     // Don't apply the caller's `limit` at the SQL layer. The
     // null-`submittedAt` filter (the "is this our row?" discriminator)
