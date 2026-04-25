@@ -87,8 +87,8 @@ Different processes, different owners. The Poster's vars (`POSTER_*`) only matte
 - **RainbowKit + wagmi** — wallet connection
 - **React Query** — data fetching
 - **bam-sdk** — encoding, signatures, KZG (browser entrypoint for client)
-- **viem** — EIP-4844 blob transactions
-- **better-sqlite3** / **Vercel Postgres** — storage
+- **viem** — on-chain reads (blob tx submission lives in `@bam/poster`)
+- **`@bam/poster`** — separately-deployed Node service that owns the pending pool, signer, and submission loop
 
 ## License
 

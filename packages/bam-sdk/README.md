@@ -154,14 +154,12 @@ This works in Next.js client components, Vite, and other browser bundlers withou
 |--------|---------|
 | **KZG** | `commitToBlob`, `generateProofsForByteRange`, `verifyProofBatch` |
 | **Exposure** | `parseBlobForMessages`, `buildExposureParams`, `buildCalldataExposureParams` |
-| **Client** | `BAMClient`, `createClient`, `BAM_CORE_ABI`, `BAM_DECODER_ABI` |
+| **Client** | `BAMClient`, `createClient`, `BAM_CORE_ABI`, `BAM_DECODER_ABI`, `ECDSA_REGISTRY_ABI`, `SIGNATURE_REGISTRY_DISPATCHER_ABI` |
 | **Deployments** | `getDeployment`, `getAllDeployments` |
 
-### Aggregator
+### Ingestion
 
-| Module | Exports |
-|--------|---------|
-| **AggregatorClient** | `AggregatorClient` — HTTP client for aggregator nodes (submit, status, health) |
+The Poster service ([`@bam/poster`](../bam-poster)) is the Node-side ingress for signed messages — it owns the pending pool, batching, and blob submission. Consumers talk to it over HTTP. The SDK's `AggregatorClient` remains exported as a generic aggregator transport for setups that don't use the Poster.
 
 ## Batch Encoding
 
@@ -258,10 +256,10 @@ Zstd library). See `ISSUE_COMPRESSION_CODEC.md` at the repo root for the plan.
 # Build
 pnpm build
 
-# Unit tests (122)
+# Unit tests
 pnpm test:run
 
-# Integration tests (37, requires Anvil)
+# Integration tests (requires Anvil)
 pnpm test:integration
 
 # Lint

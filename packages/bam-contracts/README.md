@@ -50,6 +50,8 @@ application layer.
 | `SocialBlobsCore` | Zero-storage registrar — emits `BlobRegistered` / `CalldataRegistered` events. Optional `IRegistrationHook` for atomic verifier registration |
 | `BlobAuthenticatedMessagingCore` | ERC-BAM compliant wrapper — blob segment declaration + batch registration |
 | `BLSRegistry` | BLS12-381 public key registry with Proof of Possession |
+| `ECDSARegistry` | ERC-8180 scheme-`0x01` ECDSA key registry — supports keyed and keyless verification paths |
+| `SignatureRegistryDispatcher` | ERC-8180 dispatcher — routes verification calls to the scheme-specific registry (BLS / ECDSA) |
 | `BlobSpaceSegments` | ERC-BSS implementation for field element sub-ranges |
 
 ### Application Layer
@@ -117,7 +119,7 @@ forge install
 # Build
 forge build
 
-# Test (234 tests, 1000 fuzz runs)
+# Test (1000 fuzz runs by default)
 forge test
 
 # Test with verbosity
@@ -143,6 +145,8 @@ forge fmt
 | BlobAuthenticatedMessagingCore | `0x9C4b230066a6808D83F5FBa0c040E0Df2Fcc7314` |
 | SocialBlobsCore (legacy) | `0x11a825a0774d0471292eab4706743bffcdd5d137` |
 | BLSRegistry | `0x15866bf5a8724f2aa9fe75e262d8f00ba2818e25` |
+| ECDSARegistry | `0xF4Ce909305a112C2CBEC6b339a42f34bA8bf3381` |
+| SignatureRegistryDispatcher | `0x3431A94c9132b8a1b0c4aE8a80E7Ef0F0EC630Cf` |
 | BLSExposer | `0x443029b4b96fbf2d8feba77d828a394d19615a48` |
 | SimpleBoolVerifier | `0xdec5faa3e32d6296e53bae7e359e059b58a482f4` |
 
