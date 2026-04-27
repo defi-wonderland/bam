@@ -245,11 +245,52 @@ describe('liveTailTick (integration)', () => {
         },
       });
       // Block 100 ran, 101 ran (and reported unreachable), 102 was skipped.
-      expect(result.processed).toBe(2);
+      // The parked block's counter mutations are rolled back, so only
+      // block 100 survives in `processed`.
+      expect(result.processed).toBe(1);
+      expect(counters.decoded).toBe(1);
       // Cursor advanced past 100, but NOT past 101 — so the next tick
       // can re-try 101 once the transient source recovers.
       const cursor = await store.withTxn((txn) => txn.getCursor(CHAIN_ID));
       expect(cursor?.lastBlockNumber).toBe(100);
+
+      // Re-tick: block 101 is still unreachable. Counter must NOT
+      // double-count block 100's decode just because we re-scanned
+      // (cursor stayed at 100, so 101 was retried, but 100 was not).
+      // Re-running the same scan also exercises the rollback path
+      // again — counters stay sane.
+      await liveTailTick({
+        store,
+        l1,
+        chainId: CHAIN_ID,
+        bamCoreAddress: BAM_CORE,
+        reorgWindowBlocks: 4,
+        startBlock: 1,
+        ethCallGasCap: 50_000_000n,
+        ethCallTimeoutMs: 5_000,
+        sources: {},
+        counters,
+        processBatchImpl: async (opts) => {
+          if (opts.event.blockNumber === 101) {
+            opts.counters.undecodable += 1;
+            return {
+              txIndex: opts.event.txIndex,
+              blockNumber: opts.event.blockNumber,
+              outcome: 'unreachable',
+              messagesWritten: 0,
+            };
+          }
+          opts.counters.decoded += 1;
+          return {
+            txIndex: opts.event.txIndex,
+            blockNumber: opts.event.blockNumber,
+            outcome: 'decoded',
+            messagesWritten: 1,
+          };
+        },
+      });
+      expect(counters.decoded).toBe(1);
+      expect(counters.undecodable).toBe(0);
     } finally {
       await store.close();
     }

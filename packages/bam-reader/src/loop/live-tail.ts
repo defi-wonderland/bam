@@ -128,6 +128,11 @@ export async function liveTailTick(opts: LiveTailOptions): Promise<TickResult> {
   // unreachable. The next tick will re-scan from there, giving the
   // beacon/Blobscan source a chance to come back. Without this, a
   // transient outage becomes a permanent gap (qodo finding).
+  //
+  // Counter delta: `processBatch` mutates `opts.counters` directly.
+  // For a block we end up parking on, we want those mutations rolled
+  // back so `/health` reports unique outcomes, not retry attempts
+  // (qodo). Snapshot per block; restore on park.
   let lastCommittedBlock: number | null = null;
   let blockedByTransient = false;
   for (const blockNumber of sortedBlocks) {
@@ -135,6 +140,8 @@ export async function liveTailTick(opts: LiveTailOptions): Promise<TickResult> {
     const blockEvents = byBlock.get(blockNumber)!;
     blockEvents.sort((a, b) => a.logIndex - b.logIndex);
     const parentBeaconBlockRoot = await opts.l1.getParentBeaconBlockRoot(blockNumber);
+    const countersBeforeBlock: ReaderCounters = { ...opts.counters };
+    const processedBeforeBlock = processed;
     let maxTxIndex = 0;
     let blockHasTransient = false;
     for (const event of blockEvents) {
@@ -147,6 +154,11 @@ export async function liveTailTick(opts: LiveTailOptions): Promise<TickResult> {
       if (result.outcome === 'unreachable') blockHasTransient = true;
     }
     if (blockHasTransient) {
+      // Roll back this block's counter mutations and processed count
+      // so a transient outage being re-tried each tick doesn't make
+      // the counters drift away from the durable row count.
+      Object.assign(opts.counters, countersBeforeBlock);
+      processed = processedBeforeBlock;
       blockedByTransient = true;
       break;
     }

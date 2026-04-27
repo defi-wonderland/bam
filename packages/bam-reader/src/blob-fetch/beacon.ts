@@ -56,6 +56,14 @@ function hexToBytes(hex: string): Uint8Array {
   if (cleaned.length % 2 !== 0) {
     throw new RangeError('invalid hex (odd length)');
   }
+  // Validate up-front: parseInt('zz', 16) returns NaN, which coerces
+  // to 0 when assigned to a Uint8Array element. A malformed sidecar
+  // would silently produce a wrong-but-valid blob, then trip the
+  // versioned-hash check downstream as a "source lied" event rather
+  // than the per-sidecar skip the caller actually wants. (qodo)
+  if (!/^[0-9a-fA-F]*$/.test(cleaned)) {
+    throw new RangeError('invalid hex (non-hex character)');
+  }
   const out = new Uint8Array(cleaned.length / 2);
   for (let i = 0; i < out.length; i++) {
     out[i] = parseInt(cleaned.slice(i * 2, i * 2 + 2), 16);
