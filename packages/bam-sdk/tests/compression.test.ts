@@ -48,8 +48,9 @@ describe('Dictionary Loading', () => {
 
 describe('Compression Detection', () => {
   it('should detect Zstd magic bytes', () => {
-    // Zstd frame magic: 0x28B52FFD (little-endian)
-    const compressed = new Uint8Array([0xfd, 0x2f, 0xb5, 0x28, 0x00]);
+    // ZSTD frame magic per RFC 8478 §3.1.1: bytes 0x28 0xB5 0x2F 0xFD
+    // on disk (little-endian uint32 = 0xFD2FB528).
+    const compressed = new Uint8Array([0x28, 0xb5, 0x2f, 0xfd, 0x00]);
     expect(isCompressed(compressed)).toBe(true);
   });
 

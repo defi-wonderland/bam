@@ -1,6 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  serverExternalPackages: ['bam-sdk', 'c-kzg', 'better-sqlite3'],
+  serverExternalPackages: ['bam-sdk', 'bam-reader', 'bam-store', 'c-kzg', 'better-sqlite3'],
   eslint: {
     ignoreDuringBuilds: true,
   },

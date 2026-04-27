@@ -7,6 +7,12 @@ import { sepolia } from 'viem/chains';
 // under `.next/server/.../build/Release/kzg.node`. This route never
 // touches KZG.
 import { decodeBatch } from 'bam-sdk/browser';
+// Field-element unpadding is single-sourced in `bam-reader/extract`
+// (a c-kzg-free subpath, deliberately so the Next.js build can pull
+// it without dragging the KZG native binding into the route's import
+// graph). The Reader uses the same helper from its own internal
+// import.
+export { extractUsableBytes } from 'bam-reader/extract';
 
 /**
  * Decode a batch blob. Any blob that isn't in the current wire format
@@ -19,6 +25,13 @@ export function decodeBlobBatch(usableBytes: Uint8Array) {
 /**
  * Fetch blob data for a transaction, trying Beacon API first, then Blobscan.
  * Returns the raw blob bytes or null if unavailable.
+ *
+ * This is the demo's best-effort on-demand fetch for the
+ * `/api/blobbles/[txHash]` route — it does NOT recompute the
+ * versioned hash. The Reader's verified multi-source fetch lives in
+ * `bam-reader`'s `fetchBlob` and is used wherever the source-of-truth
+ * `bam-store` rows are written; the demo's read path here is for
+ * one-off blob viewing only.
  */
 export async function fetchBlobForTx(txHash: string): Promise<Uint8Array | null> {
   const rpcUrl = process.env.NEXT_PUBLIC_RPC_URL || undefined;
@@ -60,24 +73,6 @@ export async function fetchBlobForTx(txHash: string): Promise<Uint8Array | null>
 
   console.warn(`[blob-fetch] No blob data found for tx ${txHash}`);
   return null;
-}
-
-/**
- * Extract usable bytes from a raw blob (skip byte 0 of each 32-byte field element)
- */
-export function extractUsableBytes(blob: Uint8Array): Uint8Array {
-  const FIELD_ELEMENTS = 4096;
-  const BYTES_PER_FE = 32;
-  const USABLE_PER_FE = 31;
-  const result = new Uint8Array(FIELD_ELEMENTS * USABLE_PER_FE);
-
-  for (let fe = 0; fe < FIELD_ELEMENTS; fe++) {
-    const src = fe * BYTES_PER_FE + 1;
-    const dst = fe * USABLE_PER_FE;
-    result.set(blob.slice(src, src + USABLE_PER_FE), dst);
-  }
-
-  return result;
 }
 
 async function findSlotFromParentBeaconRoot(
