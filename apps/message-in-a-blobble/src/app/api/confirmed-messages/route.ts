@@ -70,9 +70,12 @@ export async function GET(): Promise<NextResponse> {
 
     return NextResponse.json({ messages });
   } catch (err) {
-    const detail = err instanceof Error ? err.message : String(err);
+    // Log the underlying detail server-side; clients only get the
+    // generic code so we don't leak DSN strings, schema hints, or
+    // stack traces into the response body.
+    console.error('[confirmed-messages] bam_store_unreachable:', err);
     return NextResponse.json(
-      { error: 'bam_store_unreachable', detail },
+      { error: 'bam_store_unreachable' },
       { status: 502 }
     );
   }

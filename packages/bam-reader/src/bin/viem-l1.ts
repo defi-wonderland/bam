@@ -6,6 +6,8 @@
 
 import {
   createPublicClient,
+  decodeFunctionResult,
+  encodeFunctionData,
   http,
   parseAbi,
   type Hash,
@@ -18,7 +20,10 @@ import {
 } from '../discovery/log-scan.js';
 import type { LiveTailL1Client } from '../loop/live-tail.js';
 import type { ReadContractClient } from '../decode/on-chain-decoder.js';
-import type { VerifyReadContractClient } from '../verify/on-chain-registry.js';
+import {
+  VERIFY_WITH_REGISTERED_KEY_ABI,
+  type VerifyReadContractClient,
+} from '../verify/on-chain-registry.js';
 
 const PARENT_BEACON_FN = parseAbi([
   'function parentBeaconBlockRoot() view returns (bytes32)',
@@ -86,30 +91,56 @@ export function createViemL1(rpcUrl: string): ViemL1Adapter {
     },
   };
 
-  // viem's `readContract` does not accept a `gas` cap; properly
-  // bounding eth_call gas would require dropping to `publicClient.call`
-  // and decoding manually. For MVP we drop the gas argument and rely
-  // on the wallclock-timeout bound enforced by the dispatch layers.
-  // Tracked as a follow-up: tighten gas bound through `publicClient.call`.
+  // viem's `readContract` strips the `gas` parameter (its
+  // `ReadContractParameters` type only picks specific fields from
+  // `CallParameters`, and `gas` is not among them). To actually
+  // enforce `READER_ETH_CALL_GAS_CAP` (red-team C-10) we drop to
+  // `publicClient.call({ to, data, gas })` and ABI-encode/decode by
+  // hand. Without this, the gas argument the dispatch layer passes
+  // is silently ignored.
   const decodePublicClient: ReadContractClient = {
     async readContract(args) {
-      return publicClient.readContract({
-        address: args.address as Address,
+      const data = encodeFunctionData({
         abi: args.abi,
         functionName: args.functionName,
         args: args.args,
-      }) as ReturnType<ReadContractClient['readContract']>;
+      });
+      const { data: returnData } = await publicClient.call({
+        to: args.address as Address,
+        data,
+        gas: args.gas,
+      });
+      if (!returnData) {
+        throw new Error(`empty return data from ${args.address}`);
+      }
+      return decodeFunctionResult({
+        abi: args.abi,
+        functionName: args.functionName,
+        data: returnData,
+      }) as Awaited<ReturnType<ReadContractClient['readContract']>>;
     },
   };
 
   const verifyPublicClient: VerifyReadContractClient = {
     async readContract(args) {
-      return publicClient.readContract({
-        address: args.address as Address,
-        abi: args.abi,
+      const data = encodeFunctionData({
+        abi: VERIFY_WITH_REGISTERED_KEY_ABI,
         functionName: args.functionName,
         args: args.args,
       });
+      const { data: returnData } = await publicClient.call({
+        to: args.address as Address,
+        data,
+        gas: args.gas,
+      });
+      if (!returnData) {
+        throw new Error(`empty return data from ${args.address}`);
+      }
+      return decodeFunctionResult({
+        abi: VERIFY_WITH_REGISTERED_KEY_ABI,
+        functionName: args.functionName,
+        data: returnData,
+      }) as boolean;
     },
   };
 

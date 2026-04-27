@@ -17,7 +17,6 @@
  * the network or the filesystem.
  */
 
-import type { Bytes32 } from 'bam-sdk';
 import type { BamStore } from 'bam-store';
 import {
   createDbStore,
@@ -142,14 +141,9 @@ export async function createReader(
               reorgWatcher,
             });
           } catch (err) {
-            extras.logger?.({
-              kind: 'blob_unreachable',
-              txHash: ('0x' + '00'.repeat(32)) as Bytes32,
-              versionedHash: ('0x' + '00'.repeat(32)) as Bytes32,
-              classification: 'transient',
-            });
-            // Surface unhandled errors via stderr so operators see them.
             const detail = err instanceof Error ? err.message : String(err);
+            extras.logger?.({ kind: 'live_tail_tick_failed', error: detail });
+            // Surface unhandled errors via stderr so operators see them.
             process.stderr.write(`[bam-reader] live-tail tick failed: ${detail}\n`);
           }
           if (stopped) break;

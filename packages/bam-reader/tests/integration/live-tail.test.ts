@@ -202,6 +202,59 @@ describe('liveTailTick (integration)', () => {
     }
   });
 
+  it('parks the cursor at the last good block when a transient unreachable lands', async () => {
+    const store = createDbStore({ sqlitePath: dbPath });
+    try {
+      const events = [
+        fakeEvent({ block: 100, tx: 0, log: 0 }),
+        fakeEvent({ block: 101, tx: 0, log: 0, txHash: bytes32('aa', 101) }),
+        fakeEvent({ block: 102, tx: 0, log: 0, txHash: bytes32('aa', 102) }),
+      ];
+      const l1 = fakeL1({ head: 110, events });
+      const counters = emptyCounters();
+      const result = await liveTailTick({
+        store,
+        l1,
+        chainId: CHAIN_ID,
+        bamCoreAddress: BAM_CORE,
+        reorgWindowBlocks: 4,
+        startBlock: 1,
+        ethCallGasCap: 50_000_000n,
+        ethCallTimeoutMs: 5_000,
+        sources: {},
+        counters,
+        processBatchImpl: async (opts) => {
+          // Block 101 is unreachable; 100 decodes, 102 should never be
+          // reached because the loop bails once a transient hits.
+          if (opts.event.blockNumber === 101) {
+            opts.counters.undecodable += 1;
+            return {
+              txIndex: opts.event.txIndex,
+              blockNumber: opts.event.blockNumber,
+              outcome: 'unreachable',
+              messagesWritten: 0,
+            };
+          }
+          opts.counters.decoded += 1;
+          return {
+            txIndex: opts.event.txIndex,
+            blockNumber: opts.event.blockNumber,
+            outcome: 'decoded',
+            messagesWritten: 1,
+          };
+        },
+      });
+      // Block 100 ran, 101 ran (and reported unreachable), 102 was skipped.
+      expect(result.processed).toBe(2);
+      // Cursor advanced past 100, but NOT past 101 — so the next tick
+      // can re-try 101 once the transient source recovers.
+      const cursor = await store.withTxn((txn) => txn.getCursor(CHAIN_ID));
+      expect(cursor?.lastBlockNumber).toBe(100);
+    } finally {
+      await store.close();
+    }
+  });
+
   it('runs the reorg watcher tick once per call', async () => {
     const store = createDbStore({ sqlitePath: dbPath });
     try {

@@ -116,16 +116,28 @@ export async function fetchFromBeaconApi(
   for (const sc of sidecars) {
     const commitment = sc.kzg_commitment;
     if (!commitment || !commitment.startsWith('0x') || !sc.blob) continue;
-    const [vh] = commitmentsToVersionedHashes({
-      commitments: [commitment as `0x${string}`],
-    });
-    if (typeof vh !== 'string') continue;
-    if (vh.toLowerCase() !== target) continue;
-    const bytes = hexToBytes(sc.blob);
+    // Don't let a single malformed sidecar (bad hex, off-by-one
+    // commitment length, garbled blob) take the whole fetch down —
+    // skip it and keep looking. A versioned-hash mismatch is *not*
+    // skipped: it's an authoritative signal that the source is
+    // lying, and the orchestrator needs to see it. (cubic C-1)
+    let vh: string | undefined;
+    let bytes: Uint8Array | undefined;
+    try {
+      const [vhCandidate] = commitmentsToVersionedHashes({
+        commitments: [commitment as `0x${string}`],
+      });
+      if (typeof vhCandidate !== 'string') continue;
+      vh = vhCandidate;
+      if (vh.toLowerCase() !== target) continue;
+      bytes = hexToBytes(sc.blob);
+    } catch {
+      continue;
+    }
     // Authoritative recompute on every successful fetch — never trust
     // the source's keying, even when it appears self-consistent.
-    assertVersionedHashMatches(bytes, opts.versionedHash);
-    return bytes;
+    assertVersionedHashMatches(bytes!, opts.versionedHash);
+    return bytes!;
   }
   return null;
 }

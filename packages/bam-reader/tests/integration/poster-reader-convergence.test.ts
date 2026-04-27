@@ -218,6 +218,11 @@ describe('Poster + Reader convergence', () => {
         signatureRegistry: ZERO_ADDRESS,
       };
       const counters = emptyCounters();
+      // Reader sees the event but cannot reach the blob — writes a
+      // confirmed BatchRow with an *empty* snapshot and zero
+      // MessageRows. This is the path that needs to be exercised: a
+      // later Poster write should fill the snapshot in (rather than
+      // the Reader's empty snapshot sticking).
       await processBatch({
         event,
         parentBeaconBlockRoot: null,
@@ -227,10 +232,15 @@ describe('Poster + Reader convergence', () => {
         ethCallGasCap: 50_000_000n,
         ethCallTimeoutMs: 5_000,
         counters,
-        fetchBlob: async () => FAKE_BLOB,
-        decode: async () => ({ messages: [m1.message], signatures: [m1.signature] }),
-        verifyMessage: async () => true,
+        fetchBlob: async () => null,
       });
+
+      // Sanity: Reader's row is in place with an empty snapshot.
+      const afterReader = await store.withTxn(async (txn) =>
+        txn.listBatches({ chainId: CHAIN_ID })
+      );
+      expect(afterReader.length).toBe(1);
+      expect(afterReader[0].messageSnapshot.length).toBe(0);
 
       // Now the Poster writes the same batch with non-empty snapshot.
       const batchContentHash = VERSIONED_HASH;
@@ -264,9 +274,12 @@ describe('Poster + Reader convergence', () => {
         txn.listBatches({ chainId: CHAIN_ID })
       );
       expect(batches.length).toBe(1);
-      // The Poster's non-empty snapshot is the surviving snapshot.
+      // The Poster's non-empty snapshot replaces the Reader's empty
+      // one — the merge semantics are about preserving information,
+      // not about first-write-wins per se.
       expect(batches[0].messageSnapshot.length).toBe(1);
       expect(batches[0].messageSnapshot[0].nonce).toBe(1n);
+      expect(batches[0].submittedAt).toBe(999);
     } finally {
       await store.close();
     }

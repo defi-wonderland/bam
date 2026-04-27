@@ -35,8 +35,7 @@
     "viem": "^2.21.0"
   },
   "devDependencies": {
-    "@types/node": "^20.11.0",
-    "bam-reader": "workspace:*"
+    "@types/node": "^20.11.0"
   },
   "engines": {
     "node": ">=20.0.0"

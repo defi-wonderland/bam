@@ -34,7 +34,6 @@
     "viem": "^2.21.0"
   },
   "devDependencies": {
-    "@bam/poster": "workspace:*",
     "@types/node": "^20.11.0"
   },
   "engines": {

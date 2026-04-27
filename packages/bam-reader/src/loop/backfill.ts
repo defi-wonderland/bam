@@ -97,6 +97,19 @@ export async function backfill(opts: BackfillOptions): Promise<BackfillCounters>
   const retentionThreshold =
     opts.retentionThresholdBlocks ?? DEFAULT_RETENTION_THRESHOLD_BLOCKS;
   const head = Number(await opts.l1.getBlockNumber());
+  // Clamp `toBlock` against current head so the cursor never advances
+  // ahead of the chain — a future cursor would silently skip blocks
+  // mined later (cubic finding). Backfill is a one-shot historical
+  // pass; advancing into the future has no legitimate use.
+  const effectiveToBlock = Math.min(opts.toBlock, head);
+  if (opts.fromBlock > effectiveToBlock) {
+    return {
+      scanned: 0,
+      processed: 0,
+      permanentUnreachable: 0,
+      transientUnreachable: 0,
+    };
+  }
   const proc = opts.processBatchImpl ?? processBatch;
 
   let scanned = 0;
@@ -104,8 +117,8 @@ export async function backfill(opts: BackfillOptions): Promise<BackfillCounters>
   let permanentUnreachable = 0;
   let transientUnreachable = 0;
 
-  for (let chunkFrom = opts.fromBlock; chunkFrom <= opts.toBlock; chunkFrom += chunkSize) {
-    const chunkTo = Math.min(chunkFrom + chunkSize - 1, opts.toBlock);
+  for (let chunkFrom = opts.fromBlock; chunkFrom <= effectiveToBlock; chunkFrom += chunkSize) {
+    const chunkTo = Math.min(chunkFrom + chunkSize - 1, effectiveToBlock);
     const events = await scanLogs({
       publicClient: opts.l1,
       bamCoreAddress: opts.bamCoreAddress,

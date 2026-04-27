@@ -101,4 +101,5 @@ export type ReaderEvent =
       source: 'beacon' | 'blobscan';
     }
   | { kind: 'cursor_advanced'; chainId: number; blockNumber: number }
-  | { kind: 'reorg_detected'; txHash: Bytes32 };
+  | { kind: 'reorg_detected'; txHash: Bytes32 }
+  | { kind: 'live_tail_tick_failed'; error: string };

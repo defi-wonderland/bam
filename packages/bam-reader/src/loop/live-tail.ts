@@ -124,15 +124,31 @@ export async function liveTailTick(opts: LiveTailOptions): Promise<TickResult> {
   const proc = opts.processBatchImpl ?? processBatch;
 
   let processed = 0;
+  // Stop advancing the cursor at the first block that hit a transient
+  // unreachable. The next tick will re-scan from there, giving the
+  // beacon/Blobscan source a chance to come back. Without this, a
+  // transient outage becomes a permanent gap (qodo finding).
+  let lastCommittedBlock: number | null = null;
+  let blockedByTransient = false;
   for (const blockNumber of sortedBlocks) {
+    if (blockedByTransient) break;
     const blockEvents = byBlock.get(blockNumber)!;
     blockEvents.sort((a, b) => a.logIndex - b.logIndex);
     const parentBeaconBlockRoot = await opts.l1.getParentBeaconBlockRoot(blockNumber);
     let maxTxIndex = 0;
+    let blockHasTransient = false;
     for (const event of blockEvents) {
       const result: ProcessBatchResult = await proc(buildProcessOpts(opts, event, parentBeaconBlockRoot));
       if (result.txIndex > maxTxIndex) maxTxIndex = result.txIndex;
       processed += 1;
+      // Live-tail has no retention threshold to consult: every
+      // unreachable here is treated as transient. Backfill mode (which
+      // does have an age signal) classifies separately.
+      if (result.outcome === 'unreachable') blockHasTransient = true;
+    }
+    if (blockHasTransient) {
+      blockedByTransient = true;
+      break;
     }
     // Advance cursor inside its own txn after the per-batch writes have
     // landed. The processBatch implementation already runs each batch's
@@ -147,24 +163,27 @@ export async function liveTailTick(opts: LiveTailOptions): Promise<TickResult> {
       writes: async (_txn: StoreTxn) => {},
       now: opts.now,
     });
+    lastCommittedBlock = blockNumber;
     opts.logger?.({ kind: 'cursor_advanced', chainId: opts.chainId, blockNumber });
   }
 
   // Catch-up: if no events landed at the upper bound but the head has
   // advanced past the cursor, advance the cursor to `toBlock` so we
-  // don't re-scan empty ranges next tick.
-  if (sortedBlocks.length === 0 || sortedBlocks[sortedBlocks.length - 1] < toBlock) {
+  // don't re-scan empty ranges next tick. Skipped if a transient
+  // unreachable parked us before the upper bound — we want to re-try.
+  const allEventsCommitted =
+    !blockedByTransient &&
+    (sortedBlocks.length === 0 ||
+      lastCommittedBlock === sortedBlocks[sortedBlocks.length - 1]);
+  if (allEventsCommitted && (lastCommittedBlock ?? -1) < toBlock) {
+    // The catch-up advance lands at `toBlock`, which had no event.
+    // `lastTxIndex = 0` is the correct sentinel for an empty block —
+    // reusing the prior block's max would tag the cursor with a tx
+    // index that doesn't belong to `toBlock` (cubic finding).
     await commitBlock(opts.store, {
       chainId: opts.chainId,
       blockNumber: toBlock,
-      lastTxIndex:
-        sortedBlocks.length === 0
-          ? 0
-          : Math.max(
-              ...byBlock
-                .get(sortedBlocks[sortedBlocks.length - 1])!
-                .map((e) => e.txIndex)
-            ),
+      lastTxIndex: 0,
       writes: async () => {},
       now: opts.now,
     });
