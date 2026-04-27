@@ -1,0 +1,44 @@
+{
+  "name": "bam-reader",
+  "version": "0.1.0",
+  "description": "BAM Reader — Node-only service that scans L1 for BlobBatchRegistered events, fetches and verifies blob bytes, dispatches decode/verify, and persists confirmed messages into bam-store.",
+  "type": "module",
+  "main": "dist/esm/index.js",
+  "module": "dist/esm/index.js",
+  "types": "dist/types/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/esm/index.js",
+      "types": "./dist/types/index.d.ts"
+    },
+    "./extract": {
+      "import": "./dist/esm/blob-fetch/extract.js",
+      "types": "./dist/types/blob-fetch/extract.d.ts"
+    }
+  },
+  "bin": {
+    "bam-reader": "./dist/esm/bin/bam-reader.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.esm.json && tsc -p tsconfig.types.json",
+    "clean": "rm -rf dist",
+    "test": "vitest",
+    "test:run": "vitest --run",
+    "lint": "eslint src tests"
+  },
+  "dependencies": {
+    "bam-sdk": "workspace:*",
+    "bam-store": "workspace:*",
+    "viem": "^2.21.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "license": "MIT"
+}

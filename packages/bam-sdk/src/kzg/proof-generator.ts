@@ -11,7 +11,7 @@
 // `cKzg.loadTrustedSetup` undefined at runtime; `import cKzg from`
 // (under esModuleInterop) gives us the object directly.
 import cKzg from 'c-kzg';
-import { keccak_256 } from '@noble/hashes/sha3';
+import { sha256 } from '@noble/hashes/sha2';
 import type {
   Blob,
   BlobCommitment,
@@ -77,13 +77,15 @@ function ensureSetupLoaded(): void {
 }
 
 /**
- * Compute the versioned hash from a KZG commitment
- * @param commitment 48-byte KZG commitment
- * @returns 32-byte versioned hash
+ * Compute the EIP-4844 versioned hash from a KZG commitment.
+ *
+ * Per EIP-4844 §3.1: `versioned_hash = VERSIONED_HASH_VERSION_KZG ‖
+ * sha256(commitment)[1:]`. The first byte of `sha256(commitment)` is
+ * replaced with the 0x01 version prefix; the remaining 31 bytes are
+ * preserved as-is.
  */
 export function computeVersionedHash(commitment: G1Point): VersionedHash {
-  const hash = keccak_256(commitment);
-  // Replace first byte with version prefix
+  const hash = sha256(commitment);
   const versionedHash = new Uint8Array(32);
   versionedHash[0] = VERSIONED_HASH_PREFIX;
   versionedHash.set(hash.slice(1), 1);

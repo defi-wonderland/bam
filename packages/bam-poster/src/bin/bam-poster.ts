@@ -147,11 +147,20 @@ export async function runCli(): Promise<void> {
 // Allow both direct invocation (via the "bin" shim) and programmatic
 // reuse in tests. `import.meta.url === fileURL(argv[1])` is the
 // node-standard way to detect "main module."
+import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 const isMain = (() => {
   try {
-    return fileURLToPath(import.meta.url) === process.argv[1];
+    // pnpm's workspace bin shim invokes the script via a symlink under
+    // `<package>/node_modules/<package>/dist/...`. `import.meta.url`
+    // resolves to the canonical (un-symlinked) path; `process.argv[1]`
+    // is the symlinked path. Compare real paths so the entrypoint
+    // check fires under both direct and via-bin invocations.
+    return (
+      fileURLToPath(import.meta.url) ===
+      realpathSync(process.argv[1] ?? '')
+    );
   } catch {
     return false;
   }

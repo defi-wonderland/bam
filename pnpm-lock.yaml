@@ -53,9 +53,15 @@ importers:
       '@tanstack/react-query':
         specifier: ^5.62.16
         version: 5.90.21(react@19.2.4)
+      bam-reader:
+        specifier: workspace:*
+        version: link:../../packages/bam-reader
       bam-sdk:
         specifier: workspace:*
         version: link:../../packages/bam-sdk
+      bam-store:
+        specifier: workspace:*
+        version: link:../../packages/bam-store
       next:
         specifier: ^15.1.4
         version: 15.5.13(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
@@ -128,9 +134,31 @@ importers:
         specifier: ^2.21.0
         version: 2.47.4(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)(zod@4.3.6)
     devDependencies:
+      '@bam/poster':
+        specifier: workspace:*
+        version: 'link:'
       '@types/node':
         specifier: ^20.11.0
         version: 20.19.37
+
+  packages/bam-reader:
+    dependencies:
+      bam-sdk:
+        specifier: workspace:*
+        version: link:../bam-sdk
+      bam-store:
+        specifier: workspace:*
+        version: link:../bam-store
+      viem:
+        specifier: ^2.21.0
+        version: 2.47.4(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)(zod@4.3.6)
+    devDependencies:
+      '@types/node':
+        specifier: ^20.11.0
+        version: 20.19.37
+      bam-reader:
+        specifier: workspace:*
+        version: 'link:'
 
   packages/bam-sdk:
     dependencies:

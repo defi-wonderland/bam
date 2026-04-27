@@ -136,10 +136,14 @@ export function decompress(data: Uint8Array, dictionary?: ZstdDictionary): Uint8
 export function isCompressed(data: Uint8Array): boolean {
   if (data.length < 4) return false;
 
-  // Zstd frame magic: 0xFD2FB528 (little-endian)
-  const magic = data[0] | (data[1] << 8) | (data[2] << 16) | (data[3] << 24);
+  // Zstd frame magic per RFC 8478 §3.1.1: bytes 0x28 0xB5 0x2F 0xFD on
+  // disk. Read as a little-endian uint32 they form 0xFD2FB528.
+  // Use unsigned right shift to coerce the result into uint32 range so
+  // the comparison doesn't accidentally trip on signed-int interpretation.
+  const magic =
+    (data[0] | (data[1] << 8) | (data[2] << 16) | (data[3] << 24)) >>> 0;
 
-  return magic === 0x28b52ffd;
+  return magic === 0xfd2fb528;
 }
 
 /**
