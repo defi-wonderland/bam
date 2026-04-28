@@ -17,8 +17,25 @@ const nextConfig = {
   eslint: {
     ignoreDuringBuilds: true,
   },
-  webpack: (config) => {
+  webpack: (config, { isServer }) => {
     config.externals.push('pino-pretty', 'encoding');
+    if (isServer) {
+      // `serverExternalPackages` only externalises packages discovered
+      // as direct dependencies. `@electric-sql/pglite` reaches us
+      // transitively through workspace `bam-store`, so Next's webpack
+      // still bundles it into a vendor chunk and that bundling breaks
+      // PGLite's `new URL('postgres.wasm', import.meta.url)` WASM
+      // loader. Force-externalise it (and its sub-paths) so Node
+      // resolves it natively at runtime.
+      const externalsCallback = ({ request }, callback) => {
+        if (request === '@electric-sql/pglite' ||
+            request?.startsWith('@electric-sql/pglite/')) {
+          return callback(null, `commonjs ${request}`);
+        }
+        callback();
+      };
+      config.externals.push(externalsCallback);
+    }
     config.resolve.fallback = {
       ...config.resolve.fallback,
       '@react-native-async-storage/async-storage': false,
