@@ -51,7 +51,7 @@ describe('GET /api/confirmed-messages — bam-store source', () => {
     const { _clearBamStoreForTests } = await import(
       '@/lib/bam-store-client'
     );
-    _clearBamStoreForTests();
+    await _clearBamStoreForTests();
   });
 
   it('returns Reader-populated confirmed rows mapped to the legacy ConfirmedRow shape', async () => {

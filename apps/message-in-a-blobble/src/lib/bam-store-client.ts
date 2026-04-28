@@ -45,7 +45,21 @@ export function getBamStore(): Promise<BamStore> {
   return cached;
 }
 
-/** Test-only reset hook. */
-export function _clearBamStoreForTests(): void {
+/**
+ * Test-only reset hook. Closes the cached store before nulling the
+ * cache so the underlying PGLite handle (when the in-process fallback
+ * is in use) is released rather than leaked across the test suite.
+ */
+export async function _clearBamStoreForTests(): Promise<void> {
+  const pending = cached;
   cached = null;
+  if (pending === null) return;
+  try {
+    const store = await pending;
+    await store.close();
+  } catch {
+    // The cached promise may have rejected; in that case there's no
+    // store to close, and the original error has already surfaced
+    // through getBamStore() callers.
+  }
 }

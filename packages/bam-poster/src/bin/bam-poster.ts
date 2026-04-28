@@ -75,9 +75,24 @@ export async function runCli(): Promise<void> {
   // CLI default: in-process PGLite when `POSTGRES_URL` is not set; real
   // Postgres when it is. bam-store itself reads no environment
   // variables; the CLI resolves them.
-  const store = env.postgresUrl
-    ? await createDbStore({ postgresUrl: env.postgresUrl })
-    : await createMemoryStore();
+  let store;
+  if (env.postgresUrl) {
+    store = await createDbStore({ postgresUrl: env.postgresUrl });
+  } else {
+    // The pre-consolidation CLI used a persistent SQLite file as its
+    // default. PGLite-in-memory restores the "open and go" experience
+    // for local dev, but a misconfigured production deploy would boot
+    // fine and silently lose all pending/submitted state on restart.
+    // Surface the swap loudly so the operator notices before the
+    // first restart bites them.
+    process.stderr.write(
+      'bam-poster: WARNING — POSTGRES_URL is unset; using an in-process ' +
+        'PGLite store. State is NOT persistent and will be lost on ' +
+        'restart. Set POSTGRES_URL to a real Postgres for any deploy ' +
+        'that needs durability.\n'
+    );
+    store = await createMemoryStore();
+  }
 
   // Real on-chain submission via viem — the default `buildAndSubmit`
   // consults `config.rpcUrl`, builds a blob tx, waits for inclusion,
