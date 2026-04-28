@@ -476,5 +476,17 @@ describe('ReaderHttpServer', () => {
       expect(res.status).toBe(404);
       expect(await res.json()).toEqual({ error: 'not_found' });
     });
+
+    it('rejects a percent-encoded slash (%2F) in the :param segment', async () => {
+      // The raw tail `abc%2Fdef` contains no literal `/` so it
+      // passes the pre-decode check, but decoding yields `abc/def`
+      // — a multi-segment value that must not match a single-:param
+      // route. Without the post-decode re-check the request would
+      // reach the handler with a forged path param.
+      const { port } = await bootSeededServer();
+      const res = await fetch(`http://127.0.0.1:${port}/batches/abc%2Fdef`);
+      expect(res.status).toBe(404);
+      expect(await res.json()).toEqual({ error: 'not_found' });
+    });
   });
 });

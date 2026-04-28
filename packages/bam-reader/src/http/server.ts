@@ -84,6 +84,10 @@ function matchRoute(
     } catch {
       continue;
     }
+    // Re-check for `/` AFTER decoding: a percent-encoded slash (`%2F`)
+    // passes the raw-tail check above but decodes to `/`, which would
+    // smuggle a multi-segment value through the single-:param router.
+    if (decoded.includes('/')) continue;
     return { route: r, pathParam: decoded };
   }
   return null;
