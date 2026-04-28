@@ -10,15 +10,27 @@ import {
   text,
 } from 'drizzle-orm/pg-core';
 
-const bytea = customType<{ data: Uint8Array; driverData: Buffer }>({
+// `Buffer` only exists in Node. The browser entrypoint pulls this
+// module via `bam-store/browser`, so any unguarded `Buffer.from` here
+// would `ReferenceError` at module-eval time in a real browser.
+// node-postgres accepts `Uint8Array` directly for bytea params and
+// PGLite's browser build returns `Uint8Array` from reads — we keep
+// both ends of the wire as `Uint8Array` and only upgrade to `Buffer`
+// when the host environment provides it.
+const bytea = customType<{ data: Uint8Array; driverData: Uint8Array }>({
   dataType() {
     return 'bytea';
   },
-  toDriver(value: Uint8Array): Buffer {
-    return Buffer.from(value);
+  toDriver(value: Uint8Array): Uint8Array {
+    return typeof Buffer !== 'undefined' ? Buffer.from(value) : value;
   },
-  fromDriver(value: Buffer): Uint8Array {
-    return new Uint8Array(value);
+  fromDriver(value: Uint8Array): Uint8Array {
+    // node-postgres returns Buffer (a Uint8Array subclass); PGLite
+    // returns a plain Uint8Array. Normalise to a non-Buffer view so
+    // callers don't accidentally rely on Buffer-only methods.
+    return value instanceof Uint8Array && value.constructor === Uint8Array
+      ? value
+      : new Uint8Array(value);
   },
 });
 

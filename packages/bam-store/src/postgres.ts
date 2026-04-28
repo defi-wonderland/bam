@@ -60,18 +60,22 @@ function isSerializationFailure(err: unknown): boolean {
   return false;
 }
 
-function asUint8(value: Buffer | Uint8Array): Uint8Array {
-  return value instanceof Uint8Array && !(value instanceof Buffer)
-    ? value
-    : new Uint8Array(value);
+function asUint8(value: Uint8Array): Uint8Array {
+  // `Buffer` is a `Uint8Array` subclass; `value.constructor === Uint8Array`
+  // distinguishes a plain typed array from a Buffer without naming
+  // `Buffer` itself (which doesn't exist in browsers).
+  return value.constructor === Uint8Array ? value : new Uint8Array(value);
 }
 
 interface RawMessage {
   author: string;
   nonce: string;
   contentTag: string;
-  contents: Uint8Array | Buffer;
-  signature: Uint8Array | Buffer;
+  // node-postgres returns Buffer (a Uint8Array subclass) and PGLite
+  // returns plain Uint8Array — `Uint8Array` covers both without
+  // naming the Node-only `Buffer` global.
+  contents: Uint8Array;
+  signature: Uint8Array;
   messageHash: string;
   messageId: string | null;
   status: string;
@@ -182,13 +186,21 @@ export class PostgresBamStore implements BamStore {
    * bootstrap (DDL + singleton schema-version row) before returning.
    * Construction errors surface from this `await`, not from the first
    * subsequent operation.
+   *
+   * When passed a raw `PGlite` instance the caller owns its lifecycle
+   * by default — `close()` does not touch it. Pass
+   * `{ cleanup: () => db.close() }` (the shape `createMemoryStore` uses)
+   * to transfer ownership so `close()` releases the PGLite resources.
    */
-  static async open(connection: PGlite | PostgresBamStoreInit): Promise<PostgresBamStore> {
+  static async open(
+    connection: PGlite | PostgresBamStoreInit,
+    options?: { cleanup?: () => Promise<void> }
+  ): Promise<PostgresBamStore> {
     let db: DrizzleDb;
     let cleanup: (() => Promise<void>) | null;
     if (connection instanceof PGlite) {
       db = drizzlePglite(connection) as unknown as DrizzleDb;
-      cleanup = null;
+      cleanup = options?.cleanup ?? null;
     } else {
       db = connection.db;
       cleanup = connection.cleanup ?? null;
@@ -448,7 +460,7 @@ function makeTxn(tx: DrizzleDb): StoreTxn {
            message_id, status, batch_ref, ingested_at, ingest_seq,
            block_number, tx_index, message_index_within_batch)
         VALUES (${author}, ${nonce}, ${row.contentTag},
-                ${Buffer.from(row.contents)}, ${Buffer.from(row.signature)},
+                ${row.contents}, ${row.signature},
                 ${row.messageHash}, ${row.messageId}, ${row.status},
                 ${row.batchRef}, ${row.ingestedAt}, ${row.ingestSeq},
                 ${row.blockNumber}, ${row.txIndex},

@@ -45,5 +45,15 @@ export async function createPostgresStoreFromUrl(
     db: db as unknown as PostgresBamStoreInit['db'],
     cleanup: () => pool.end(),
   };
-  return PostgresBamStore.open(init);
+  try {
+    return await PostgresBamStore.open(init);
+  } catch (err) {
+    // open() runs DDL synchronously; if it throws (connection refused,
+    // permissions, schema-version-row insert) the pool's `end()` would
+    // otherwise be unreachable because cleanup is only attached on the
+    // returned store. End it here so failed bootstraps don't leak
+    // sockets.
+    await pool.end().catch(() => {});
+    throw err;
+  }
 }
