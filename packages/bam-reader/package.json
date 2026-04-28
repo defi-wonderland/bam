@@ -25,6 +25,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.esm.json && tsc -p tsconfig.types.json",
     "clean": "rm -rf dist",
+    "dev": "pnpm build && node dist/esm/bin/bam-reader.js serve",
     "test": "vitest",
     "test:run": "vitest --run",
     "lint": "eslint src tests"
@@ -32,6 +33,7 @@
   "dependencies": {
     "bam-sdk": "workspace:*",
     "bam-store": "workspace:*",
+    "dotenv": "^16.4.5",
     "viem": "^2.21.0"
   },
   "devDependencies": {

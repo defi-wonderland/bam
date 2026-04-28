@@ -11,6 +11,17 @@
 export { createReader } from './factory.js';
 export type { Reader, ReaderHealthSnapshot, ReaderFactoryExtras } from './factory.js';
 
+// Re-export read-query types so HTTP route handlers / consumers don't
+// need to reach into `bam-store` directly.
+export type {
+  BatchRow,
+  BatchStatus,
+  BatchesQuery,
+  MessageRow,
+  MessageStatus,
+  MessagesQuery,
+} from 'bam-store';
+
 // Configuration types.
 export type { ReaderConfig, ReaderCounters, ReaderEvent } from './types.js';
 

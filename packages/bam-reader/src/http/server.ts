@@ -1,9 +1,13 @@
 /**
  * Minimal HTTP server for the Reader.
  *
- * Single endpoint (`GET /health`). Defaults to `127.0.0.1` per
- * red-team C-1; operators override via `READER_HTTP_BIND`. No
- * built-in auth; the operator fronts it.
+ * Read-only by design — every entry in `ROUTES` is `GET`. The route
+ * table is the single point where handlers are registered, which makes
+ * a future write-surface regression visible at review time and asserted
+ * by `tests/unit/http.test.ts` (gate G-5 in feature 005's plan).
+ *
+ * Defaults to `127.0.0.1` per red-team C-1; operators override via
+ * `READER_HTTP_BIND`. No built-in auth; the operator fronts it.
  */
 
 import {
@@ -13,7 +17,14 @@ import {
   type ServerResponse,
 } from 'node:http';
 
-import { healthHandler, type Handler, type RouteContext } from './routes.js';
+import {
+  batchByTxHashHandler,
+  batchesHandler,
+  healthHandler,
+  messagesHandler,
+  type Handler,
+  type RouteContext,
+} from './routes.js';
 import type { Reader } from '../factory.js';
 
 export interface ReaderHttpServerOptions {
@@ -23,15 +34,64 @@ export interface ReaderHttpServerOptions {
   port?: number;
 }
 
-interface BoundRoute {
+/**
+ * A bound route. `path` is either a literal pathname (`/health`) or a
+ * pattern with a single trailing path-parameter segment encoded as
+ * `:name` (`/batches/:txHash`). Two patterns are not supported per
+ * route — three GET routes don't justify a router framework
+ * (constitution principle IX).
+ */
+export interface BoundRoute {
   method: 'GET';
   path: string;
   handler: Handler;
 }
 
-const ROUTES: BoundRoute[] = [
+export const ROUTES: BoundRoute[] = [
   { method: 'GET', path: '/health', handler: healthHandler },
+  { method: 'GET', path: '/messages', handler: messagesHandler },
+  { method: 'GET', path: '/batches', handler: batchesHandler },
+  { method: 'GET', path: '/batches/:txHash', handler: batchByTxHashHandler },
 ];
+
+interface MatchedRoute {
+  route: BoundRoute;
+  pathParam: string | null;
+}
+
+function matchRoute(
+  method: string | undefined,
+  pathname: string
+): MatchedRoute | null {
+  for (const r of ROUTES) {
+    if (r.method !== method) continue;
+    const colonIdx = r.path.indexOf('/:');
+    if (colonIdx < 0) {
+      if (r.path === pathname) return { route: r, pathParam: null };
+      continue;
+    }
+    const prefix = r.path.slice(0, colonIdx + 1); // include trailing `/`
+    if (!pathname.startsWith(prefix)) continue;
+    const tail = pathname.slice(prefix.length);
+    if (tail.length === 0 || tail.includes('/')) continue;
+    // Malformed percent-encoding (e.g. `%ZZ`) makes
+    // `decodeURIComponent` throw `URIError`; treat the request as a
+    // route mismatch (→ 404) rather than letting it bubble to the
+    // dispatcher and surface as a generic 500.
+    let decoded: string;
+    try {
+      decoded = decodeURIComponent(tail);
+    } catch {
+      continue;
+    }
+    // Re-check for `/` AFTER decoding: a percent-encoded slash (`%2F`)
+    // passes the raw-tail check above but decodes to `/`, which would
+    // smuggle a multi-segment value through the single-:param router.
+    if (decoded.includes('/')) continue;
+    return { route: r, pathParam: decoded };
+  }
+  return null;
+}
 
 export class ReaderHttpServer {
   private readonly server: Server;
@@ -81,16 +141,17 @@ export class ReaderHttpServer {
   private async dispatch(req: IncomingMessage, res: ServerResponse): Promise<void> {
     try {
       const url = new URL(req.url ?? '/', 'http://local');
-      const route = ROUTES.find(
-        (r) => r.method === req.method && r.path === url.pathname
-      );
-      if (!route) {
+      const matched = matchRoute(req.method, url.pathname);
+      if (!matched) {
         res.statusCode = 404;
         res.setHeader('Content-Type', 'application/json');
         res.end(JSON.stringify({ error: 'not_found' }));
         return;
       }
-      await route.handler(req, res, this.ctx);
+      await matched.route.handler(req, res, this.ctx, {
+        url,
+        pathParam: matched.pathParam,
+      });
     } catch {
       if (!res.headersSent) {
         res.statusCode = 500;

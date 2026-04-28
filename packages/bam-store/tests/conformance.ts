@@ -391,6 +391,96 @@ export function runConformance(make: StoreFactory): void {
     });
   });
 
+  describe('getBatchByTxHash', () => {
+    it('returns the same row that listBatches would, and null for an unknown hash', async () => {
+      const store = await newStore();
+      const snap: BatchMessageSnapshotEntry[] = [snapshotEntry()];
+      await store.withTxn((txn) =>
+        txn.upsertBatch(
+          batchRow({ txHash: TX_A, status: 'confirmed', blockNumber: 10, messageSnapshot: snap })
+        )
+      );
+      await store.withTxn((txn) =>
+        txn.upsertBatch(
+          batchRow({ txHash: TX_B, status: 'confirmed', blockNumber: 20 })
+        )
+      );
+
+      const fromList = await store.withTxn((txn) =>
+        txn.listBatches({ contentTag: TAG_A })
+      );
+      const targetA = fromList.find((b) => b.txHash === TX_A) ?? null;
+      expect(targetA).not.toBeNull();
+
+      const direct = await store.withTxn((txn) => txn.getBatchByTxHash(1, TX_A));
+      expect(direct).not.toBeNull();
+      expect(direct).toEqual(targetA);
+
+      const missing = await store.withTxn((txn) =>
+        txn.getBatchByTxHash(1, ('0x' + 'ee'.repeat(32)) as Bytes32)
+      );
+      expect(missing).toBeNull();
+
+      // Cross-chain isolation: same txHash on a different chainId
+      // must not return the row.
+      const wrongChain = await store.withTxn((txn) =>
+        txn.getBatchByTxHash(999, TX_A)
+      );
+      expect(wrongChain).toBeNull();
+    });
+  });
+
+  describe('listBatches — ordering with null submittedAt (Reader-only deploys)', () => {
+    it('orders by (blockNumber, txIndex) DESC when submittedAt is null', async () => {
+      // The Reader leaves `submittedAt` null when it confirms a
+      // batch (the Poster is the only writer that sets it). All
+      // rows in a Reader-only deploy share `submittedAt = null`,
+      // so ordering must fall back to L1 keys instead of being
+      // backend-defined.
+      const store = await newStore();
+      const TX_LO = ('0x' + 'a1'.repeat(32)) as Bytes32;
+      const TX_HI = ('0x' + 'a2'.repeat(32)) as Bytes32;
+      const TX_HI_LATER_TX = ('0x' + 'a3'.repeat(32)) as Bytes32;
+      await store.withTxn((txn) =>
+        txn.upsertBatch(
+          batchRow({
+            txHash: TX_LO,
+            status: 'confirmed',
+            blockNumber: 100,
+            txIndex: 0,
+            submittedAt: null,
+          })
+        )
+      );
+      await store.withTxn((txn) =>
+        txn.upsertBatch(
+          batchRow({
+            txHash: TX_HI,
+            status: 'confirmed',
+            blockNumber: 200,
+            txIndex: 0,
+            submittedAt: null,
+          })
+        )
+      );
+      await store.withTxn((txn) =>
+        txn.upsertBatch(
+          batchRow({
+            txHash: TX_HI_LATER_TX,
+            status: 'confirmed',
+            blockNumber: 200,
+            txIndex: 5,
+            submittedAt: null,
+          })
+        )
+      );
+      const rows = await store.withTxn((txn) =>
+        txn.listBatches({ contentTag: TAG_A })
+      );
+      expect(rows.map((r) => r.txHash)).toEqual([TX_HI_LATER_TX, TX_HI, TX_LO]);
+    });
+  });
+
   describe('cross-component write interleaving in one withTxn', () => {
     it('Poster marks submitted while Reader upserts observed; both persist without loss', async () => {
       const store = await newStore();

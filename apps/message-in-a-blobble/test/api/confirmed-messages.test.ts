@@ -1,180 +1,128 @@
-import {
-  computeMessageHashForMessage,
-  computeMessageId,
-  deriveAddress,
-  encodeContents,
-  generateECDSAPrivateKey,
-  hexToBytes,
-  signECDSAWithKey,
-} from 'bam-sdk';
-import type { Address, BAMMessage, Bytes32 } from 'bam-sdk';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { MESSAGE_IN_A_BLOBBLE_TAG } from '@/lib/constants';
 
-const CHAIN_ID = 11155111;
+const ORIGINAL_FETCH = global.fetch;
 
-interface SignedMessage {
-  message: BAMMessage;
-  signature: Uint8Array;
-  messageHash: Bytes32;
-}
+const TX_HASH = ('0x' + 'aa'.repeat(32)) as const;
 
-function makeSignedMessage(nonce: bigint, payload: Uint8Array): SignedMessage {
-  const priv = generateECDSAPrivateKey();
-  const sender = deriveAddress(priv);
-  const contents = encodeContents(MESSAGE_IN_A_BLOBBLE_TAG as Bytes32, payload);
-  const message: BAMMessage = { sender, nonce, contents };
-  const sigHex = signECDSAWithKey(priv, message, CHAIN_ID);
+function readerMessage(over: Record<string, unknown> = {}): Record<string, unknown> {
   return {
-    message,
-    signature: hexToBytes(sigHex),
-    messageHash: computeMessageHashForMessage(message),
+    messageId: '0x' + '99'.repeat(32),
+    author: '0x' + '11'.repeat(20),
+    nonce: '1',
+    contentTag: MESSAGE_IN_A_BLOBBLE_TAG,
+    contents: '0xdeadbeef',
+    signature: '0x' + '00'.repeat(65),
+    messageHash: '0x' + '77'.repeat(32),
+    status: 'confirmed',
+    batchRef: TX_HASH,
+    blockNumber: 100,
+    ...over,
   };
 }
 
-function bytesToHex(bytes: Uint8Array): string {
-  let out = '0x';
-  for (const b of bytes) out += b.toString(16).padStart(2, '0');
-  return out;
-}
+describe('GET /api/confirmed-messages — Reader proxy', () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
 
-describe('GET /api/confirmed-messages — bam-store source', () => {
   beforeEach(() => {
-    // Force the in-process PGLite path so each test gets an isolated
-    // store after `_clearBamStoreForTests()` resets the lazy singleton.
-    delete process.env.BAM_STORE_POSTGRES_URL;
-    delete process.env.POSTGRES_URL;
+    process.env.READER_URL = 'http://reader.test';
+    fetchMock = vi.fn();
+    global.fetch = fetchMock as unknown as typeof fetch;
+  });
+  afterEach(() => {
+    global.fetch = ORIGINAL_FETCH;
+    delete process.env.READER_URL;
+    vi.resetModules();
   });
 
-  afterEach(async () => {
-    const { _clearBamStoreForTests } = await import(
-      '@/lib/bam-store-client'
+  it('forwards to the Reader and reshapes the response', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          messages: [
+            readerMessage({ nonce: '1' }),
+            readerMessage({ nonce: '2', author: '0x' + '22'.repeat(20) }),
+          ],
+        }),
+        {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }
+      )
     );
-    await _clearBamStoreForTests();
-  });
-
-  it('returns Reader-populated confirmed rows mapped to the legacy ConfirmedRow shape', async () => {
-    const { getBamStore } = await import('@/lib/bam-store-client');
-    const store = await getBamStore();
-    const m1 = makeSignedMessage(1n, new TextEncoder().encode('hello world'));
-    const m2 = makeSignedMessage(
-      2n,
-      new TextEncoder().encode('second message')
-    );
-    const txHash = ('0x' + 'aa'.repeat(32)) as Bytes32;
-    const versionedHash = ('0x01' + 'bb'.repeat(31)) as Bytes32;
-
-    await store.withTxn(async (txn) => {
-      await txn.upsertBatch({
-        txHash,
-        chainId: CHAIN_ID,
-        contentTag: MESSAGE_IN_A_BLOBBLE_TAG as Bytes32,
-        blobVersionedHash: versionedHash,
-        batchContentHash: versionedHash,
-        blockNumber: 100,
-        txIndex: 0,
-        status: 'confirmed',
-        replacedByTxHash: null,
-        submittedAt: null,
-        invalidatedAt: null,
-        messageSnapshot: [],
-      });
-      for (const [i, sm] of [m1, m2].entries()) {
-        await txn.upsertObserved({
-          messageId: computeMessageId(
-            sm.message.sender,
-            sm.message.nonce,
-            versionedHash
-          ),
-          author: sm.message.sender,
-          nonce: sm.message.nonce,
-          contentTag: MESSAGE_IN_A_BLOBBLE_TAG as Bytes32,
-          contents: new Uint8Array(sm.message.contents),
-          signature: new Uint8Array(sm.signature),
-          messageHash: sm.messageHash,
-          status: 'confirmed',
-          batchRef: txHash,
-          ingestedAt: null,
-          ingestSeq: null,
-          blockNumber: 100,
-          txIndex: 0,
-          messageIndexWithinBatch: i,
-        });
-      }
-    });
-
-    const { GET } = await import(
-      '../../src/app/api/confirmed-messages/route'
-    );
+    const { GET } = await import('../../src/app/api/confirmed-messages/route');
     const res = await GET();
     expect(res.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const url = new URL(fetchMock.mock.calls[0][0] as string);
+    expect(url.origin + url.pathname).toBe('http://reader.test/messages');
+    expect(url.searchParams.get('contentTag')).toBe(MESSAGE_IN_A_BLOBBLE_TAG);
+    expect(url.searchParams.get('status')).toBe('confirmed');
     const body = (await res.json()) as { messages: Array<Record<string, unknown>> };
     expect(body.messages.length).toBe(2);
-    const rowFor1 = body.messages.find((m) => m.nonce === '1');
-    expect(rowFor1).toMatchObject({
-      sender: m1.message.sender,
+    const r1 = body.messages.find((m) => m.nonce === '1');
+    expect(r1).toMatchObject({
+      sender: '0x' + '11'.repeat(20),
       nonce: '1',
-      contents: bytesToHex(m1.message.contents),
-      signature: bytesToHex(m1.signature),
-      tx_hash: txHash,
+      contents: '0xdeadbeef',
+      tx_hash: TX_HASH,
       block_number: 100,
-      blobble_id: txHash.slice(0, 18),
+      blobble_id: TX_HASH.slice(0, 18),
       status: 'posted',
     });
   });
 
-  it('omits non-confirmed rows', async () => {
-    const { getBamStore } = await import('@/lib/bam-store-client');
-    const store = await getBamStore();
-    const m = makeSignedMessage(7n, new Uint8Array([0xff]));
-    await store.withTxn(async (txn) => {
-      await txn.upsertObserved({
-        messageId: null,
-        author: m.message.sender,
-        nonce: m.message.nonce,
-        contentTag: MESSAGE_IN_A_BLOBBLE_TAG as Bytes32,
-        contents: new Uint8Array(m.message.contents),
-        signature: new Uint8Array(m.signature),
-        messageHash: m.messageHash,
-        status: 'pending',
-        batchRef: null,
-        ingestedAt: 0,
-        ingestSeq: 1,
-        blockNumber: null,
-        txIndex: null,
-        messageIndexWithinBatch: null,
-      });
-    });
-
-    const { GET } = await import(
-      '../../src/app/api/confirmed-messages/route'
+  it('drops rows whose batchRef is null (substrate invariant)', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          messages: [
+            readerMessage({ nonce: '1', batchRef: null }),
+            readerMessage({ nonce: '2' }),
+          ],
+        }),
+        {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }
+      )
     );
+    const { GET } = await import('../../src/app/api/confirmed-messages/route');
     const res = await GET();
-    const body = (await res.json()) as { messages: unknown[] };
-    expect(body.messages).toEqual([]);
+    const body = (await res.json()) as { messages: Array<{ nonce: string }> };
+    expect(body.messages.map((m) => m.nonce)).toEqual(['2']);
   });
 
-  it('returns 502 when the store backend is unreachable', async () => {
-    // Point at an unreachable Postgres so `createDbStore` rejects when
-    // it tries to bootstrap. localhost:1 refuses TCP fast, so the
-    // failure surfaces immediately rather than after a multi-second
-    // connect timeout.
-    process.env.BAM_STORE_POSTGRES_URL = 'postgres://nobody@127.0.0.1:1/none';
-    const { _clearBamStoreForTests } = await import(
-      '@/lib/bam-store-client'
+  it('forwards an upstream non-200 status verbatim', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ error: 'bad_request', reason: 'contentTag' }), {
+        status: 400,
+        headers: { 'content-type': 'application/json' },
+      })
     );
-    await _clearBamStoreForTests();
-    try {
-      const { GET } = await import(
-        '../../src/app/api/confirmed-messages/route'
-      );
-      const res = await GET();
-      expect(res.status).toBe(502);
-      const body = (await res.json()) as { error: string };
-      expect(body.error).toBe('bam_store_unreachable');
-    } finally {
-      delete process.env.BAM_STORE_POSTGRES_URL;
-    }
+    const { GET } = await import('../../src/app/api/confirmed-messages/route');
+    const res = await GET();
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe('bad_request');
+  });
+
+  it('returns 502 reader_unreachable when fetch fails', async () => {
+    fetchMock.mockRejectedValueOnce(new TypeError('fetch failed'));
+    const { GET } = await import('../../src/app/api/confirmed-messages/route');
+    const res = await GET();
+    expect(res.status).toBe(502);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe('reader_unreachable');
+  });
+
+  it('returns 500 reader_url_not_configured when READER_URL is missing', async () => {
+    delete process.env.READER_URL;
+    const { GET } = await import('../../src/app/api/confirmed-messages/route');
+    const res = await GET();
+    expect(res.status).toBe(500);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe('reader_url_not_configured');
   });
 });
