@@ -164,7 +164,7 @@ describe('GET /api/confirmed-messages — bam-store source', () => {
     const { _clearBamStoreForTests } = await import(
       '@/lib/bam-store-client'
     );
-    _clearBamStoreForTests();
+    await _clearBamStoreForTests();
     try {
       const { GET } = await import(
         '../../src/app/api/confirmed-messages/route'
