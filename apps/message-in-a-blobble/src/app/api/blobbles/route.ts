@@ -5,7 +5,12 @@ import { listBatches, readerErrorToResponse } from '@/lib/reader-client';
 
 interface Blobble {
   versionedHash: string;
-  timestamp: number;
+  // Seconds-since-epoch from the batch's `submittedAt`, when the
+  // Poster (or a Poster+Reader co-deploy) writes one. In Reader-only
+  // deploys (the demo's case) the Reader doesn't set `submittedAt`,
+  // so the field is null and the UI renders the L1 block number
+  // instead of synthesising a misleading 1970-01-01 timestamp.
+  timestamp: number | null;
   txHash: string;
   blockNumber: number;
 }
@@ -41,7 +46,7 @@ export async function GET(): Promise<NextResponse> {
     const blobbles: Blobble[] = rows.map((r) => ({
       versionedHash: r.blobVersionedHash,
       timestamp:
-        r.submittedAt !== null ? Math.floor(r.submittedAt / 1000) : 0,
+        r.submittedAt !== null ? Math.floor(r.submittedAt / 1000) : null,
       txHash: r.txHash,
       blockNumber: r.blockNumber ?? 0,
     }));

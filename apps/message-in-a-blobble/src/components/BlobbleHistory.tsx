@@ -6,7 +6,7 @@ import { AddressLink } from '@/components/AddressLink';
 
 interface OnChainBlobble {
   versionedHash: string;
-  timestamp: number;
+  timestamp: number | null;
   txHash: string;
   blockNumber: number;
 }
@@ -102,7 +102,9 @@ function BlobbleCard({ blobble }: { blobble: OnChainBlobble }) {
               Block {blobble.blockNumber}
             </span>
             <span className="text-xs text-sand-500">
-              {new Date(blobble.timestamp * 1000).toLocaleString()}
+              {blobble.timestamp !== null
+                ? new Date(blobble.timestamp * 1000).toLocaleString()
+                : '—'}
             </span>
           </div>
           <a

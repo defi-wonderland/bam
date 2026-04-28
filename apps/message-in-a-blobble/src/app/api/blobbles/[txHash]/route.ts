@@ -82,15 +82,24 @@ export async function GET(
       getBatch(txHash),
       listConfirmedMessages({
         contentTag: MESSAGE_IN_A_BLOBBLE_TAG,
+        // Confirmed-only — never attach payload from a non-confirmed
+        // row to a confirmed batch's snapshot entry.
+        status: 'confirmed',
         batchRef: txHash,
       }),
     ]);
 
     // Forward upstream non-200 verbatim — same convention as the
     // confirmed-messages and blobbles list routes. The Reader's 404
-    // body is `{ error: 'not_found' }`.
+    // body is `{ error: 'not_found' }`. Both calls are checked: a
+    // 5xx on the messages call must not be hidden behind a successful
+    // batch fetch (it would render as `content: null` for every row,
+    // masking the upstream failure).
     if (batchRes.status !== 200) {
       return NextResponse.json(batchRes.body, { status: batchRes.status });
+    }
+    if (messagesRes.status !== 200) {
+      return NextResponse.json(messagesRes.body, { status: messagesRes.status });
     }
     const batch = (batchRes.body as { batch?: ReaderBatch }).batch;
     if (!batch) {
@@ -98,11 +107,11 @@ export async function GET(
     }
 
     // Build a (author,nonce) → MessageRow lookup so we can attach
-    // payload bytes to each snapshot entry. The Reader returns 200
-    // even with no rows; treat that as "snapshot has identity but
-    // payload bytes weren't observed" rather than an error.
+    // payload bytes to each snapshot entry. An empty 200 from
+    // `/messages` is "snapshot has identity but payload bytes weren't
+    // observed yet" — render with null content rather than 404.
     const byKey = new Map<string, ReaderMessage>();
-    if (messagesRes.status === 200) {
+    {
       const rows =
         (messagesRes.body as { messages?: ReaderMessage[] }).messages ?? [];
       for (const m of rows) {

@@ -155,6 +155,9 @@ describe('GET /api/blobbles/[txHash] — Reader proxy', () => {
     );
     expect(messagesUrl.searchParams.get('contentTag')).toBe(MESSAGE_IN_A_BLOBBLE_TAG);
     expect(messagesUrl.searchParams.get('batchRef')).toBe(TX);
+    // Confirmed-only — never attach payload from a non-confirmed
+    // row to a confirmed batch's snapshot entry.
+    expect(messagesUrl.searchParams.get('status')).toBe('confirmed');
 
     const body = (await res.json()) as {
       txHash: string;
@@ -205,6 +208,21 @@ describe('GET /api/blobbles/[txHash] — Reader proxy', () => {
     expect(res.status).toBe(400);
     const body = (await res.json()) as { error: string };
     expect(body.error).toBe('bad_request');
+  });
+
+  it('forwards a 5xx from the messages call instead of masking it as content: null', async () => {
+    // Regression guard: a 500 from `/messages` must not be silently
+    // swallowed into a 200-with-null-contents response that hides
+    // the upstream failure.
+    mockReaderResponses(
+      fetchMock,
+      { status: 200, body: { batch: readerBatch() } },
+      { status: 500, body: { error: 'internal_error' } }
+    );
+    const res = await callRoute(TX);
+    expect(res.status).toBe(500);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe('internal_error');
   });
 
   it('returns 502 reader_unreachable when fetch fails', async () => {

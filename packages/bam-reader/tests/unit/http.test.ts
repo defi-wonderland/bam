@@ -465,5 +465,16 @@ describe('ReaderHttpServer', () => {
       expect(res.status).toBe(404);
       expect(await res.json()).toEqual({ error: 'not_found' });
     });
+
+    it('returns 404 (not 500) on malformed percent-encoding in the path param', async () => {
+      // `decodeURIComponent('%ZZ')` throws `URIError`. The router
+      // must catch it and treat the request as a route mismatch
+      // rather than letting it bubble up to the dispatcher's
+      // generic 500 handler.
+      const { port } = await bootSeededServer();
+      const res = await fetch(`http://127.0.0.1:${port}/batches/%ZZ`);
+      expect(res.status).toBe(404);
+      expect(await res.json()).toEqual({ error: 'not_found' });
+    });
   });
 });

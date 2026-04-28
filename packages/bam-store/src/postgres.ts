@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gt, gte, isNotNull, sql } from 'drizzle-orm';
+import { and, asc, eq, gt, gte, isNotNull, sql } from 'drizzle-orm';
 import { drizzle as drizzlePglite } from 'drizzle-orm/pglite';
 import type { PgDatabase, PgQueryResultHKT } from 'drizzle-orm/pg-core';
 import { PGlite } from '@electric-sql/pglite';
@@ -624,8 +624,18 @@ function makeTxn(tx: DrizzleDb): StoreTxn {
       let q = tx
         .select()
         .from(batchesT)
+        // Stable order for confirmed rows (which may have a null
+        // `submitted_at` in Reader-only deploys, since the Poster is
+        // the only writer that sets it). Falls back to the L1
+        // ordering keys, then `submitted_at` so pending_tx rows
+        // (which DO have `submitted_at` but no `block_number` yet)
+        // still tail the list deterministically.
         .where(where)
-        .orderBy(desc(batchesT.submittedAt))
+        .orderBy(
+          sql`${batchesT.blockNumber} DESC NULLS LAST`,
+          sql`${batchesT.txIndex} DESC NULLS LAST`,
+          sql`${batchesT.submittedAt} DESC NULLS LAST`
+        )
         .$dynamic();
       if (typeof query.limit === 'number') q = q.limit(query.limit);
       const rows = await q;

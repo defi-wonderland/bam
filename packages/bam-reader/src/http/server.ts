@@ -74,7 +74,17 @@ function matchRoute(
     if (!pathname.startsWith(prefix)) continue;
     const tail = pathname.slice(prefix.length);
     if (tail.length === 0 || tail.includes('/')) continue;
-    return { route: r, pathParam: decodeURIComponent(tail) };
+    // Malformed percent-encoding (e.g. `%ZZ`) makes
+    // `decodeURIComponent` throw `URIError`; treat the request as a
+    // route mismatch (→ 404) rather than letting it bubble to the
+    // dispatcher and surface as a generic 500.
+    let decoded: string;
+    try {
+      decoded = decodeURIComponent(tail);
+    } catch {
+      continue;
+    }
+    return { route: r, pathParam: decoded };
   }
   return null;
 }

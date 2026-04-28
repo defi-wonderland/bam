@@ -74,6 +74,24 @@ describe('GET /api/blobbles — Reader proxy', () => {
     expect(first.timestamp).toBe(Math.floor(1_700_000_000_000 / 1000));
   });
 
+  it('renders timestamp as null when submittedAt is null (Reader-only deploy)', async () => {
+    // Pure-Reader deploys leave `submittedAt` null since the Poster
+    // is the only writer that sets it. The demo must surface the
+    // nullness instead of substituting `0` and rendering 1970-01-01.
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          batches: [readerBatch({ txHash: TX_A, blockNumber: 100, submittedAt: null })],
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } }
+      )
+    );
+    const { GET } = await import('../../src/app/api/blobbles/route');
+    const res = await GET();
+    const body = (await res.json()) as { blobbles: Array<{ timestamp: number | null }> };
+    expect(body.blobbles[0].timestamp).toBeNull();
+  });
+
   it('returns 502 reader_unreachable when fetch fails', async () => {
     fetchMock.mockRejectedValueOnce(new TypeError('fetch failed'));
     const { GET } = await import('../../src/app/api/blobbles/route');
