@@ -1,0 +1,38 @@
+# Local-dev Postgres for the BAM workspace.
+#
+# Spins up a single Postgres 16 container on 127.0.0.1:5432 with the
+# database `bam` and credentials `postgres`/`postgres`. Used by the
+# Poster, the demo's `/api/confirmed-messages` route, and (later) the
+# Reader so they all converge on shared state instead of each running
+# its own in-process PGLite.
+#
+# Quick start:
+#   pnpm db:up      # start the container in the background
+#   pnpm db:down    # stop the container (state preserved in volume)
+#   pnpm db:reset   # stop + drop the volume (wipes all data)
+#
+# Set `POSTGRES_URL=postgres://postgres:postgres@127.0.0.1:5432/bam`
+# in `.env.local` and `apps/message-in-a-blobble/.env.local` to point
+# the services at this database.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: bam-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: bam
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - '127.0.0.1:5432:5432'
+    volumes:
+      - bam_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d bam']
+      interval: 2s
+      timeout: 2s
+      retries: 10
+
+volumes:
+  bam_postgres_data:
