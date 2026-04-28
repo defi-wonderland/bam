@@ -46,8 +46,18 @@ function main() {
   // Sort by chain ID for deterministic output
   deployments.sort((a, b) => a.chainId - b.chainId);
 
-  // Collect all contract names across all deployments for the type
-  const allContractNames = new Set<string>();
+  // Collect all contract names across all deployments for the type.
+  //
+  // We also seed the union with well-known canonical contracts BAM
+  // consumers code against by name even when no chain has the address
+  // pinned yet — the type carries the *category* (ABIDecoder is the
+  // ERC-8180 reference decoder; ECDSARegistry is the canonical scheme
+  // 0x01 registry) so callers can write `deployment.contracts.ABIDecoder`
+  // without a compile error before the Sepolia deploy lands. The
+  // `Partial<Record<…>>` semantics already make every entry optional, so
+  // seeding does not assert presence.
+  const KNOWN_CANONICAL_NAMES = ['ABIDecoder'];
+  const allContractNames = new Set<string>(KNOWN_CANONICAL_NAMES);
   for (const d of deployments) {
     for (const name of Object.keys(d.contracts)) {
       allContractNames.add(name);

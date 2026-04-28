@@ -64,6 +64,25 @@ export {
   type BlockSource,
 } from './submission/reorg-watcher.js';
 export type { BuildAndSubmit, SubmitOutcome } from './submission/types.js';
+export type {
+  BatchEncoder,
+  BuildAndSubmitOptions,
+} from './submission/build-and-submit.js';
 export type { ReconcileRpcClient } from './startup/reconcile.js';
 export type { StatusRpcReader } from './surfaces/status.js';
 export { HttpServer } from './http/server.js';
+
+// Profile-selector surface (POSTER_BATCH_PROFILE).
+export {
+  BATCH_PROFILES,
+  EnvConfigError,
+  type BatchProfile,
+  type EnvWarn,
+  type ParsedEnv,
+  parseEnv,
+} from './bin/env.js';
+export {
+  resolveProfileAddresses,
+  type DeploymentsLookup,
+  type ResolvedProfileAddresses,
+} from './profile.js';

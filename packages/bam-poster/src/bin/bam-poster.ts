@@ -15,9 +15,13 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { config as dotenvConfig } from 'dotenv';
 
+import { encodeBatchABI } from 'bam-sdk';
+
 import { EnvConfigError, parseEnv } from './env.js';
 import { HttpServer } from '../http/server.js';
 import { createPoster } from '../factory.js';
+import { resolveProfileAddresses } from '../profile.js';
+import type { BatchEncoder } from '../submission/build-and-submit.js';
 import { LocalEcdsaSigner } from '../signer/local.js';
 import { createDbStore, createMemoryStore } from 'bam-store';
 import { StartupReconciliationError } from '../startup/reconcile.js';
@@ -94,6 +98,30 @@ export async function runCli(): Promise<void> {
     store = await createMemoryStore();
   }
 
+  // Resolve the canonical `(decoder, signatureRegistry)` pair for the
+  // configured chain id when a non-default profile is selected; falls
+  // back to the direct-override env vars otherwise. Profile + override
+  // combinations are rejected upstream in `parseEnv`.
+  let decoderAddress = env.decoderAddress;
+  let signatureRegistryAddress = env.signatureRegistryAddress;
+  let encoder: BatchEncoder | undefined;
+  if (env.batchProfile !== 'default') {
+    try {
+      const resolved = resolveProfileAddresses(env.batchProfile, env.chainId);
+      decoderAddress = resolved.decoderAddress;
+      signatureRegistryAddress = resolved.signatureRegistryAddress;
+    } catch (err) {
+      if (err instanceof EnvConfigError) {
+        process.stderr.write(`bam-poster: ${err.message}\n`);
+        process.exit(2);
+      }
+      throw err;
+    }
+    if (env.batchProfile === 'canonical-full') {
+      encoder = encodeBatchABI;
+    }
+  }
+
   // Real on-chain submission via viem — the default `buildAndSubmit`
   // consults `config.rpcUrl`, builds a blob tx, waits for inclusion,
   // and returns the receipt. Not wired by `createPoster` itself because
@@ -104,8 +132,9 @@ export async function runCli(): Promise<void> {
     chainId: env.chainId,
     bamCoreAddress: env.bamCoreAddress,
     signer,
-    decoderAddress: env.decoderAddress,
-    signatureRegistryAddress: env.signatureRegistryAddress,
+    decoderAddress,
+    signatureRegistryAddress,
+    encoder,
   });
 
   let poster;

@@ -23,6 +23,10 @@
     },
     "ECDSARegistry": {
       "address": "0xF4Ce909305a112C2CBEC6b339a42f34bA8bf3381"
+    },
+    "ABIDecoder": {
+      "address": "0x3a1bB111079cBaF4CAc320545Bfd1f6A92250425",
+      "deployTxHash": "0xf767bf99b4c73618d9acecf039d73db5f4a2d3e0c97c8432d5a163a401f89d03"
     }
   }
 }

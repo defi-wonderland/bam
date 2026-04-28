@@ -12,6 +12,21 @@ export class EnvConfigError extends Error {
   readonly code = 'env_config_error';
 }
 
+/**
+ * Coupled `(encoding, decoder, registry)` configuration selected by env at
+ * boot. The opt-in profiles route through the canonical addresses pinned
+ * in the SDK's deployment table for the configured chain id; the default
+ * profile preserves historical Poster behavior (`0x0` addresses, SDK
+ * binary encoding).
+ */
+export type BatchProfile = 'default' | 'canonical-registry' | 'canonical-full';
+
+export const BATCH_PROFILES: readonly BatchProfile[] = [
+  'default',
+  'canonical-registry',
+  'canonical-full',
+];
+
 export interface ParsedEnv {
   allowlistedTags: Bytes32[];
   chainId: number;
@@ -24,6 +39,7 @@ export interface ParsedEnv {
   postgresUrl?: string;
   decoderAddress?: Address;
   signatureRegistryAddress?: Address;
+  batchProfile: BatchProfile;
   /** Optional bearer-token auth for the HTTP surface. */
   authToken?: string;
 }
@@ -47,7 +63,21 @@ function optionalAddressEnv(env: NodeJS.ProcessEnv, key: string): Address | unde
   return v as Address;
 }
 
-export function parseEnv(env: NodeJS.ProcessEnv = process.env): ParsedEnv {
+/**
+ * Optional warning sink for soft conflicts that should not abort boot.
+ * Defaults to writing to stderr; tests inject a capture array to assert
+ * that the right warning(s) fired.
+ */
+export type EnvWarn = (message: string) => void;
+
+const defaultWarn: EnvWarn = (message) => {
+  process.stderr.write(`[bam-poster] ${message}\n`);
+};
+
+export function parseEnv(
+  env: NodeJS.ProcessEnv = process.env,
+  warn: EnvWarn = defaultWarn
+): ParsedEnv {
   const csvTags = requireEnv(env, 'POSTER_ALLOWED_TAGS');
   const tags = csvTags
     .split(',')
@@ -75,6 +105,38 @@ export function parseEnv(env: NodeJS.ProcessEnv = process.env): ParsedEnv {
 
   const decoderAddress = optionalAddressEnv(env, 'POSTER_DECODER_ADDRESS');
   const signatureRegistryAddress = optionalAddressEnv(env, 'POSTER_SIGNATURE_REGISTRY');
+
+  const profileRaw = env.POSTER_BATCH_PROFILE;
+  let batchProfile: BatchProfile;
+  if (profileRaw === undefined || profileRaw === '') {
+    batchProfile = 'default';
+  } else if ((BATCH_PROFILES as readonly string[]).includes(profileRaw)) {
+    batchProfile = profileRaw as BatchProfile;
+  } else {
+    throw new EnvConfigError(
+      `POSTER_BATCH_PROFILE must be one of ${BATCH_PROFILES.join(' | ')} (got ${JSON.stringify(profileRaw)})`
+    );
+  }
+
+  // Direct-override env vars are retained for diagnostic / experimental
+  // use but they break the encoding↔address coupling the canonical
+  // profiles enforce. Refuse to combine; warn under default so the
+  // operator sees that the overrides are taking effect.
+  const hasOverride = decoderAddress !== undefined || signatureRegistryAddress !== undefined;
+  if (batchProfile !== 'default' && hasOverride) {
+    const conflicting: string[] = [];
+    if (decoderAddress !== undefined) conflicting.push('POSTER_DECODER_ADDRESS');
+    if (signatureRegistryAddress !== undefined) conflicting.push('POSTER_SIGNATURE_REGISTRY');
+    throw new EnvConfigError(
+      `POSTER_BATCH_PROFILE=${batchProfile} conflicts with ${conflicting.join(' / ')}; ` +
+        `unset the override(s) or set POSTER_BATCH_PROFILE=default`
+    );
+  }
+  if (batchProfile === 'default' && hasOverride) {
+    warn(
+      'operating with explicit decoder/registry overrides — see POSTER_BATCH_PROFILE for canonical configurations'
+    );
+  }
 
   const rpcUrl = requireEnv(env, 'POSTER_RPC_URL');
 
@@ -108,6 +170,7 @@ export function parseEnv(env: NodeJS.ProcessEnv = process.env): ParsedEnv {
     postgresUrl: env.POSTGRES_URL,
     decoderAddress,
     signatureRegistryAddress,
+    batchProfile,
     authToken: env.POSTER_AUTH_TOKEN && env.POSTER_AUTH_TOKEN.length > 0
       ? env.POSTER_AUTH_TOKEN
       : undefined,

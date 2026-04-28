@@ -122,6 +122,10 @@ export {
 } from './batch.js';
 export type { EncodedBatch } from './batch.js';
 
+// ERC-8180 spec-reference ABI batch codec (parallel to the binary codec
+// above; emits/parses `abi.encode(Message[], bytes signatureData)`).
+export { decodeBatchABI, encodeBatchABI } from './codec/abi.js';
+
 // Compression functions
 export {
   compress,

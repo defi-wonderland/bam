@@ -21,6 +21,21 @@ import {
   type PublicClient,
 } from 'viem';
 
+/**
+ * Pluggable batch encoder. The default — `encodeBatch().data` from the
+ * SDK's binary codec — preserves historical Poster behavior. Canonical-full
+ * Posters substitute `encodeBatchABI` so the on-chain ABIDecoder can
+ * natively parse the blob payload. Consistency with `decoderAddress` is
+ * the caller's responsibility — the CLI enforces this via `BatchProfile`.
+ */
+export type BatchEncoder = (
+  messages: BAMMessage[],
+  signatures: Uint8Array[]
+) => Uint8Array;
+
+const DEFAULT_ENCODER: BatchEncoder = (messages, signatures) =>
+  encodeBatch(messages, signatures).data;
+
 // `c-kzg` ships CJS. ESM modules don't have `require` in scope; use
 // createRequire against this module's URL so the resolution happens
 // against our own dependency tree. Without this, the default kzgLoader
@@ -41,6 +56,12 @@ export interface BuildAndSubmitOptions {
   signer: Signer;
   decoderAddress?: Address;
   signatureRegistryAddress?: Address;
+  /**
+   * Optional batch encoder. Defaults to the SDK binary `encodeBatch`. The
+   * canonical-full Poster profile substitutes the ABI codec so on-chain
+   * decode dispatch produces the right shape.
+   */
+  encoder?: BatchEncoder;
   maxFeePerBlobGasGwei?: string;
   /** Test injection: override the transport adapter (default uses viem). */
   transport?: BuildAndSubmitTransport;
@@ -129,6 +150,7 @@ export async function buildAndSubmitWithViem(
 ): Promise<BuildAndSubmitBundle> {
   const decoder = (opts.decoderAddress ?? zeroAddress);
   const sigRegistry = (opts.signatureRegistryAddress ?? zeroAddress);
+  const encoder = opts.encoder ?? DEFAULT_ENCODER;
   const gwei = opts.maxFeePerBlobGasGwei ?? '30';
 
   const transport = opts.transport ?? viemTransport(opts);
@@ -168,8 +190,8 @@ export async function buildAndSubmitWithViem(
         contents: m.contents,
       }));
       const signatures = messages.map((m) => m.signature);
-      const batch = encodeBatch(bamMsgs, signatures);
-      const blob = createBlob(batch.data);
+      const batchData = encoder(bamMsgs, signatures);
+      const blob = createBlob(batchData);
       const { versionedHash } = commitToBlob(blob);
       const data = encodeFunctionData({
         abi: BAM_CORE_ABI,
