@@ -1,71 +1,33 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { SqliteBamStore } from '../src/sqlite.js';
-import type { BamStore } from '../src/types.js';
-
-/**
- * SQLite-specific DDL + schema-version guards. Behavioural coverage
- * of the store surface is handled by `conformance.test.ts` against
- * each backend; these tests assert structural invariants that matter
- * for SQLite in particular.
- */
+import { createDbStore } from '../src/index.js';
+import type { BamStore, DbStoreOptions } from '../src/index.js';
 
 const stores: BamStore[] = [];
-
-function newStore(): SqliteBamStore {
-  const s = new SqliteBamStore(':memory:');
-  stores.push(s);
-  return s;
-}
 
 afterEach(async () => {
   for (const s of stores.splice(0)) await s.close();
 });
 
-describe('SqliteBamStore — schema', () => {
-  it('fresh DB self-initialises to the current SCHEMA_VERSION', () => {
-    const store = newStore();
-    expect(store.readSchemaVersion()).toBe(4);
+describe('createDbStore', () => {
+  it('throws when no postgresUrl is supplied', async () => {
+    await expect(createDbStore({})).rejects.toThrow(/postgresUrl/);
   });
 
-  it('all unified tables exist on a fresh DB', () => {
-    const store = newStore();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const db = (store as unknown as { db: any }).db;
-    const names = db
-      .prepare(`SELECT name FROM sqlite_master WHERE type='table' ORDER BY name`)
-      .all()
-      .map((r: { name: string }) => r.name);
-    for (const t of [
-      'bam_store_schema',
-      'batches',
-      'messages',
-      'nonces',
-      'reader_cursor',
-      'tag_seq',
-    ]) {
-      expect(names).toContain(t);
-    }
+  it('throws on empty postgresUrl', async () => {
+    await expect(createDbStore({ postgresUrl: '' })).rejects.toThrow(/postgresUrl/);
   });
 
-  it('none of the legacy `poster_*` tables exist after the unified-schema cut', () => {
-    const store = newStore();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const db = (store as unknown as { db: any }).db;
-    const names = new Set(
-      db
-        .prepare(`SELECT name FROM sqlite_master WHERE type='table'`)
-        .all()
-        .map((r: { name: string }) => r.name)
-    );
-    for (const t of [
-      'poster_pending',
-      'poster_submitted_batches',
-      'poster_nonces',
-      'poster_tag_seq',
-      'poster_schema',
-    ]) {
-      expect(names.has(t)).toBe(false);
-    }
+  it('compile-time: `sqlitePath` is no longer assignable to DbStoreOptions', () => {
+    // The previous shape supported `{ sqlitePath: string }`; the type now
+    // rejects it. `@ts-expect-error` is the load-bearing assertion — if
+    // `sqlitePath` ever becomes a known key again, the directive itself
+    // fails the build because the next line stops being an error.
+    const opts: DbStoreOptions = {
+      postgresUrl: 'postgres://example/db',
+      // @ts-expect-error sqlitePath is not part of DbStoreOptions
+      sqlitePath: ':memory:',
+    };
+    expect(opts.postgresUrl).toBe('postgres://example/db');
   });
 });

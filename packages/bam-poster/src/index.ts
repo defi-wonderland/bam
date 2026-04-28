@@ -43,9 +43,8 @@ export type { PosterRejection } from './errors.js';
 export { POSTER_REJECTIONS } from './errors.js';
 
 export { LocalEcdsaSigner } from './signer/local.js';
-export { createMemoryStore, MemoryBamStore } from 'bam-store';
+export { createMemoryStore } from 'bam-store';
 export { createDbStore, type DbStoreOptions } from 'bam-store';
-export { SqliteBamStore } from 'bam-store';
 export { PostgresBamStore } from 'bam-store';
 
 export { defaultEcdsaValidator } from './validator/default-ecdsa.js';

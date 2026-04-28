@@ -128,7 +128,7 @@ export async function createPoster(
       bamCoreAddress: config.bamCoreAddress,
     });
 
-    const store: BamStore = config.store ?? createMemoryStore();
+    const store: BamStore = config.store ?? (await createMemoryStore());
     await reconcileSchemaVersion(store);
     const validator: MessageValidator = config.validator ?? defaultEcdsaValidator(config.chainId);
     const batchPolicy: BatchPolicy = config.batchPolicy ?? defaultBatchPolicy();

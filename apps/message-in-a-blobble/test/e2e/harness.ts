@@ -86,7 +86,7 @@ export async function startHarness(): Promise<Harness> {
       chainId: 1,
       bamCoreAddress: '0x9C4b230066a6808D83F5FBa0c040E0Df2Fcc7314' as Address,
       signer,
-      store: createMemoryStore(),
+      store: await createMemoryStore(),
       batchPolicy: defaultBatchPolicy({ forceFlush: true }),
     },
     { buildAndSubmit, rpc }

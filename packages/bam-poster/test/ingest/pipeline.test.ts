@@ -9,7 +9,8 @@ import {
 
 import { IngestPipeline } from '../../src/ingest/pipeline.js';
 import { RateLimiter } from '../../src/ingest/rate-limit.js';
-import { MemoryBamStore } from 'bam-store';
+import { createMemoryStore } from 'bam-store';
+import type { BamStore } from 'bam-store';
 import type { MessageValidator } from '../../src/types.js';
 
 const CHAIN_ID = 31337;
@@ -55,20 +56,20 @@ function signedEnvelope(opts: {
 
 interface Harness {
   pipeline: IngestPipeline;
-  store: MemoryBamStore;
+  store: BamStore;
   validator: MessageValidator;
   verifyCalls: { count: number };
 }
 
-function mkHarness(opts?: {
+async function mkHarness(opts?: {
   validator?: MessageValidator;
   verifyCallCounter?: { count: number };
   rate?: { windowMs: number; maxPerWindow: number };
   allowlist?: Bytes32[];
   maxMessageSizeBytes?: number;
   maxContentsSizeBytes?: number;
-}): Harness {
-  const store = new MemoryBamStore();
+}): Promise<Harness> {
+  const store = await createMemoryStore();
   const rate = opts?.rate ?? { windowMs: 60_000, maxPerWindow: 1_000 };
   const limiter = new RateLimiter(rate);
   const counter = opts?.verifyCallCounter ?? { count: 0 };
@@ -93,7 +94,7 @@ function mkHarness(opts?: {
 
 describe('IngestPipeline — happy path', () => {
   it('accepts a well-formed signed message and returns messageHash', async () => {
-    const h = mkHarness();
+    const h = await mkHarness();
     const raw = signedEnvelope({});
     const res = await h.pipeline.ingest(raw);
     expect(res.accepted).toBe(true);
@@ -102,7 +103,7 @@ describe('IngestPipeline — happy path', () => {
   });
 
   it('inserted pending row carries sender, nonce, contents, messageHash', async () => {
-    const h = mkHarness();
+    const h = await mkHarness();
     const raw = signedEnvelope({});
     await h.pipeline.ingest(raw);
     const rows = await h.store.withTxn(async (txn) => txn.listPendingByTag(TAG));
@@ -115,7 +116,7 @@ describe('IngestPipeline — happy path', () => {
 
 describe('IngestPipeline — structural rejections', () => {
   it('non-JSON envelope → malformed', async () => {
-    const h = mkHarness();
+    const h = await mkHarness();
     const raw = new TextEncoder().encode('not-json');
     const res = await h.pipeline.ingest(raw);
     expect(res.accepted).toBe(false);
@@ -124,7 +125,7 @@ describe('IngestPipeline — structural rejections', () => {
   });
 
   it('contents < 32 bytes → malformed (before validator)', async () => {
-    const h = mkHarness();
+    const h = await mkHarness();
     const env = {
       contentTag: TAG,
       message: {
@@ -141,7 +142,7 @@ describe('IngestPipeline — structural rejections', () => {
   });
 
   it('oversized envelope (> maxMessageSizeBytes) → message_too_large', async () => {
-    const h = mkHarness({ maxMessageSizeBytes: 200 });
+    const h = await mkHarness({ maxMessageSizeBytes: 200 });
     const raw = signedEnvelope({ appBytes: new Uint8Array(1024) });
     const res = await h.pipeline.ingest(raw);
     expect(res.accepted).toBe(false);
@@ -152,7 +153,7 @@ describe('IngestPipeline — structural rejections', () => {
 
 describe('IngestPipeline — ordering (CPU-grief) + atomicity', () => {
   it('unsigned garbage never reaches the validator if rate-limit fires first', async () => {
-    const h = mkHarness({ rate: { windowMs: 60_000, maxPerWindow: 2 } });
+    const h = await mkHarness({ rate: { windowMs: 60_000, maxPerWindow: 2 } });
     // Every call comes from the same "sender" (sentinel bucket since
     // signatures won't recover), so the rate-limiter saturates fast.
     const garbage = () => {
@@ -181,7 +182,7 @@ describe('IngestPipeline — ordering (CPU-grief) + atomicity', () => {
   });
 
   it('cross-tag attribution attempts reject before the validator runs', async () => {
-    const h = mkHarness({ allowlist: [TAG, ('0x' + 'bb'.repeat(32)) as Bytes32] });
+    const h = await mkHarness({ allowlist: [TAG, ('0x' + 'bb'.repeat(32)) as Bytes32] });
     // Signer signs for TAG but hint says another tag (same allowlist).
     const otherTag = ('0x' + 'bb'.repeat(32)) as Bytes32;
     const contents = encodeContents(TAG, new Uint8Array([1, 2, 3]));
@@ -204,7 +205,7 @@ describe('IngestPipeline — ordering (CPU-grief) + atomicity', () => {
   });
 
   it('concurrent ingest of the same (sender, nonce) admits exactly one', async () => {
-    const h = mkHarness();
+    const h = await mkHarness();
     const raw = signedEnvelope({});
     // Same bytes, 20 parallel submits. Monotonicity allows no_op on
     // byte-equal retry, so every concurrent call sees the same
@@ -219,7 +220,7 @@ describe('IngestPipeline — ordering (CPU-grief) + atomicity', () => {
   });
 
   it('concurrent ingest of distinct (sender, nonce) admits both', async () => {
-    const h = mkHarness();
+    const h = await mkHarness();
     const raw1 = signedEnvelope({ privateKey: PRIV, sender: SENDER, nonce: 1n });
     const raw2 = signedEnvelope({ privateKey: PRIV_2, sender: SENDER_2, nonce: 1n });
     const [r1, r2] = await Promise.all([
@@ -235,7 +236,7 @@ describe('IngestPipeline — ordering (CPU-grief) + atomicity', () => {
 
 describe('IngestPipeline — nonce monotonicity end-to-end', () => {
   it('stale nonce (lower than last-accepted) rejects', async () => {
-    const h = mkHarness();
+    const h = await mkHarness();
     await h.pipeline.ingest(signedEnvelope({ nonce: 5n }));
     const res = await h.pipeline.ingest(signedEnvelope({ nonce: 4n }));
     expect(res.accepted).toBe(false);
@@ -243,7 +244,7 @@ describe('IngestPipeline — nonce monotonicity end-to-end', () => {
   });
 
   it('byte-equal retry of last-accepted is a no-op', async () => {
-    const h = mkHarness();
+    const h = await mkHarness();
     const raw = signedEnvelope({ nonce: 3n });
     const first = await h.pipeline.ingest(raw);
     const second = await h.pipeline.ingest(raw);
@@ -260,7 +261,7 @@ describe('IngestPipeline — contentTag canonicalization', () => {
     // Downstream store queries run against the lowercase form, so the
     // row must be inserted under lowercase to be discoverable.
     const mixedCase = ('0x' + 'Aa'.repeat(32)) as Bytes32;
-    const h = mkHarness();
+    const h = await mkHarness();
     const raw = signedEnvelope({ tag: mixedCase });
     const res = await h.pipeline.ingest(raw);
     expect(res.accepted).toBe(true);

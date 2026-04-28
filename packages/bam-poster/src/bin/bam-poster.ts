@@ -19,7 +19,7 @@ import { EnvConfigError, parseEnv } from './env.js';
 import { HttpServer } from '../http/server.js';
 import { createPoster } from '../factory.js';
 import { LocalEcdsaSigner } from '../signer/local.js';
-import { createDbStore } from 'bam-store';
+import { createDbStore, createMemoryStore } from 'bam-store';
 import { StartupReconciliationError } from '../startup/reconcile.js';
 import { DEFAULT_MAX_MESSAGE_SIZE_BYTES } from '../ingest/size-bound.js';
 
@@ -72,12 +72,12 @@ export async function runCli(): Promise<void> {
   }
 
   const signer = new LocalEcdsaSigner(env.signerPrivateKey);
-  // CLI default: SQLite at ./poster.db when nothing more specific is set.
-  // bam-store itself reads no environment variables; the CLI resolves them.
-  const store = createDbStore({
-    sqlitePath: env.sqlitePath ?? './poster.db',
-    postgresUrl: env.postgresUrl,
-  });
+  // CLI default: in-process PGLite when `POSTGRES_URL` is not set; real
+  // Postgres when it is. bam-store itself reads no environment
+  // variables; the CLI resolves them.
+  const store = env.postgresUrl
+    ? await createDbStore({ postgresUrl: env.postgresUrl })
+    : await createMemoryStore();
 
   // Real on-chain submission via viem — the default `buildAndSubmit`
   // consults `config.rpcUrl`, builds a blob tx, waits for inclusion,

@@ -1,8 +1,8 @@
-import pg from 'pg';
+import { and, asc, desc, eq, gt, gte, isNotNull, sql } from 'drizzle-orm';
+import { drizzle as drizzlePglite } from 'drizzle-orm/pglite';
+import type { PgDatabase, PgQueryResultHKT } from 'drizzle-orm/pg-core';
+import { PGlite } from '@electric-sql/pglite';
 import type { Address, Bytes32 } from 'bam-sdk';
-
-type PgPool = pg.Pool;
-type PgPoolClient = pg.PoolClient;
 
 import type {
   BamStore,
@@ -19,285 +19,291 @@ import type {
   StoreTxnPendingRow,
 } from './types.js';
 import { decodeNonce, encodeNonce } from './nonce-codec.js';
-import { SCHEMA_VERSION, SQL_CREATE_POSTGRES } from './schema.js';
+import { SCHEMA_VERSION } from './schema/index.js';
+import {
+  bamStoreSchema,
+  batches as batchesT,
+  messages as messagesT,
+  nonces as noncesT,
+  readerCursor as readerCursorT,
+  tagSeq as tagSeqT,
+} from './schema/tables.js';
+import { SQL_CREATE_DDL } from './schema/ddl.js';
 import {
   decodeMessageSnapshot,
   encodeMessageSnapshot,
 } from './snapshot-codec.js';
 
-function isSerializationFailure(err: unknown): boolean {
-  return (
-    typeof err === 'object' &&
-    err !== null &&
-    'code' in err &&
-    (err as { code?: string }).code === '40001'
-  );
+/**
+ * Driver-agnostic Drizzle handle the adapter operates against. Both
+ * `drizzle-orm/pglite` and `drizzle-orm/node-postgres` produce values
+ * that conform to this base shape; the URL factory in `db-store.ts`
+ * builds one externally so this file does not need to reach `pg`.
+ */
+export type DrizzleDb = PgDatabase<PgQueryResultHKT, Record<string, unknown>>;
+
+function execRowCount(res: unknown): number {
+  if (typeof res !== 'object' || res === null) return 0;
+  const r = res as { rowCount?: number | null; affectedRows?: number | null };
+  // node-postgres reports `rowCount`; PGLite reports `affectedRows`.
+  return r.rowCount ?? r.affectedRows ?? 0;
 }
 
-interface MessageRowRaw {
+function isSerializationFailure(err: unknown): boolean {
+  if (typeof err !== 'object' || err === null) return false;
+  const code = (err as { code?: unknown }).code;
+  if (code === '40001') return true;
+  // Drizzle wraps the underlying driver error on transaction; the cause
+  // chain carries the original `code`.
+  const cause = (err as { cause?: unknown }).cause;
+  if (cause) return isSerializationFailure(cause);
+  return false;
+}
+
+function asUint8(value: Buffer | Uint8Array): Uint8Array {
+  return value instanceof Uint8Array && !(value instanceof Buffer)
+    ? value
+    : new Uint8Array(value);
+}
+
+interface RawMessage {
   author: string;
   nonce: string;
-  content_tag: string;
-  contents: Buffer;
-  signature: Buffer;
-  message_hash: string;
-  message_id: string | null;
+  contentTag: string;
+  contents: Uint8Array | Buffer;
+  signature: Uint8Array | Buffer;
+  messageHash: string;
+  messageId: string | null;
   status: string;
-  batch_ref: string | null;
-  ingested_at: string | number | null;
-  ingest_seq: string | number | null;
-  block_number: string | number | null;
-  tx_index: string | number | null;
-  message_index_within_batch: string | number | null;
+  batchRef: string | null;
+  ingestedAt: number | null;
+  ingestSeq: number | null;
+  blockNumber: number | null;
+  txIndex: number | null;
+  messageIndexWithinBatch: number | null;
 }
 
-interface BatchRowRaw {
-  tx_hash: string;
-  chain_id: string | number;
-  content_tag: string;
-  blob_versioned_hash: string;
-  batch_content_hash: string;
-  block_number: string | number | null;
-  tx_index: string | number | null;
+interface RawBatch {
+  txHash: string;
+  chainId: number;
+  contentTag: string;
+  blobVersionedHash: string;
+  batchContentHash: string;
+  blockNumber: number | null;
+  txIndex: number | null;
   status: string;
-  replaced_by_tx_hash: string | null;
-  submitted_at: string | number | null;
-  invalidated_at: string | number | null;
-  message_snapshot: string;
+  replacedByTxHash: string | null;
+  submittedAt: number | null;
+  invalidatedAt: number | null;
+  messageSnapshot: string;
 }
 
-interface CursorRowRaw {
-  chain_id: string | number;
-  last_block_number: string | number;
-  last_tx_index: string | number;
-  updated_at: string | number;
-}
-
-interface NonceRowRaw {
-  sender: string;
-  last_nonce: string;
-  last_message_hash: string;
-}
-
-function toInt(value: string | number): number {
-  return typeof value === 'number' ? value : Number(value);
-}
-
-function toIntOrNull(value: string | number | null): number | null {
-  return value === null || value === undefined ? null : toInt(value);
-}
-
-function mapMessage(raw: MessageRowRaw): MessageRow {
+function mapMessage(raw: RawMessage): MessageRow {
   return {
-    messageId: (raw.message_id ?? null) as Bytes32 | null,
+    messageId: raw.messageId as Bytes32 | null,
     author: raw.author as Address,
     nonce: decodeNonce(raw.nonce),
-    contentTag: raw.content_tag as Bytes32,
-    contents: new Uint8Array(raw.contents),
-    signature: new Uint8Array(raw.signature),
-    messageHash: raw.message_hash as Bytes32,
+    contentTag: raw.contentTag as Bytes32,
+    contents: asUint8(raw.contents),
+    signature: asUint8(raw.signature),
+    messageHash: raw.messageHash as Bytes32,
     status: raw.status as MessageStatus,
-    batchRef: (raw.batch_ref ?? null) as Bytes32 | null,
-    ingestedAt: toIntOrNull(raw.ingested_at),
-    ingestSeq: toIntOrNull(raw.ingest_seq),
-    blockNumber: toIntOrNull(raw.block_number),
-    txIndex: toIntOrNull(raw.tx_index),
-    messageIndexWithinBatch: toIntOrNull(raw.message_index_within_batch),
+    batchRef: raw.batchRef as Bytes32 | null,
+    ingestedAt: raw.ingestedAt,
+    ingestSeq: raw.ingestSeq,
+    blockNumber: raw.blockNumber,
+    txIndex: raw.txIndex,
+    messageIndexWithinBatch: raw.messageIndexWithinBatch,
   };
 }
 
-function mapBatch(raw: BatchRowRaw): BatchRow {
+function mapBatch(raw: RawBatch): BatchRow {
   return {
-    txHash: raw.tx_hash as Bytes32,
-    chainId: toInt(raw.chain_id),
-    contentTag: raw.content_tag as Bytes32,
-    blobVersionedHash: raw.blob_versioned_hash as Bytes32,
-    batchContentHash: raw.batch_content_hash as Bytes32,
-    blockNumber: toIntOrNull(raw.block_number),
-    txIndex: toIntOrNull(raw.tx_index),
+    txHash: raw.txHash as Bytes32,
+    chainId: raw.chainId,
+    contentTag: raw.contentTag as Bytes32,
+    blobVersionedHash: raw.blobVersionedHash as Bytes32,
+    batchContentHash: raw.batchContentHash as Bytes32,
+    blockNumber: raw.blockNumber,
+    txIndex: raw.txIndex,
     status: raw.status as BatchStatus,
-    replacedByTxHash: (raw.replaced_by_tx_hash ?? null) as Bytes32 | null,
-    submittedAt: toIntOrNull(raw.submitted_at),
-    invalidatedAt: toIntOrNull(raw.invalidated_at),
-    messageSnapshot: decodeMessageSnapshot(raw.message_snapshot),
+    replacedByTxHash: raw.replacedByTxHash as Bytes32 | null,
+    submittedAt: raw.submittedAt,
+    invalidatedAt: raw.invalidatedAt,
+    messageSnapshot: decodeMessageSnapshot(raw.messageSnapshot),
   };
 }
 
-function mapPending(raw: MessageRowRaw): StoreTxnPendingRow {
+function mapPending(raw: RawMessage): StoreTxnPendingRow {
+  // `insertPending` always writes ingestedAt + ingestSeq, but the columns
+  // are nullable to accommodate observed-only rows that never went through
+  // the pending pool. A pending row missing either is a write-path bug,
+  // not a state we should silently coerce to 0.
+  if (raw.ingestedAt === null || raw.ingestSeq === null) {
+    throw new Error(
+      `mapPending: pending row (${raw.author}, ${raw.nonce}) has null ingest metadata`
+    );
+  }
   return {
-    contentTag: raw.content_tag as Bytes32,
+    contentTag: raw.contentTag as Bytes32,
     sender: raw.author as Address,
     nonce: decodeNonce(raw.nonce),
-    contents: new Uint8Array(raw.contents),
-    signature: new Uint8Array(raw.signature),
-    messageHash: raw.message_hash as Bytes32,
-    ingestedAt: toIntOrNull(raw.ingested_at) ?? 0,
-    ingestSeq: toIntOrNull(raw.ingest_seq) ?? 0,
+    contents: asUint8(raw.contents),
+    signature: asUint8(raw.signature),
+    messageHash: raw.messageHash as Bytes32,
+    ingestedAt: raw.ingestedAt,
+    ingestSeq: raw.ingestSeq,
   };
+}
+
+/**
+ * Pre-built Drizzle handle plus an optional cleanup callback. Used by
+ * the Node-only URL factory in `db-store.ts` to construct a
+ * `PostgresBamStore` over a `pg.Pool` without making `postgres.ts`
+ * statically reach `pg` (which would pull `pg` into the browser
+ * bundle through `bam-store/browser`).
+ */
+export interface PostgresBamStoreInit {
+  db: DrizzleDb;
+  cleanup?: () => Promise<void>;
 }
 
 export class PostgresBamStore implements BamStore {
-  private readonly pool: PgPool;
-  private ready: Promise<void>;
+  private readonly db: DrizzleDb;
+  private readonly cleanup: (() => Promise<void>) | null;
 
-  constructor(connectionString: string) {
-    this.pool = new pg.Pool({ connectionString });
-    this.ready = this.initSchema();
+  private constructor(db: DrizzleDb, cleanup: (() => Promise<void>) | null) {
+    this.db = db;
+    this.cleanup = cleanup;
   }
 
-  private async initSchema(): Promise<void> {
-    const client = await this.pool.connect();
-    try {
-      for (const stmt of SQL_CREATE_POSTGRES) {
-        await client.query(stmt);
-      }
-      // The singleton row pattern (id=1 with CHECK) plus ON CONFLICT
-      // means concurrent initialisations and mixed-version writers
-      // cannot grow the table beyond one row, so reads are
-      // deterministic. The version-mismatch check itself is owned by
-      // `reconcileSchemaVersion`, which runs separately.
-      await client.query(
-        'INSERT INTO bam_store_schema (id, version) VALUES (1, $1) ON CONFLICT (id) DO NOTHING',
-        [SCHEMA_VERSION]
-      );
-    } finally {
-      client.release();
+  /**
+   * Construct a `PostgresBamStore` over the supplied driver and run the
+   * bootstrap (DDL + singleton schema-version row) before returning.
+   * Construction errors surface from this `await`, not from the first
+   * subsequent operation.
+   */
+  static async open(connection: PGlite | PostgresBamStoreInit): Promise<PostgresBamStore> {
+    let db: DrizzleDb;
+    let cleanup: (() => Promise<void>) | null;
+    if (connection instanceof PGlite) {
+      db = drizzlePglite(connection) as unknown as DrizzleDb;
+      cleanup = null;
+    } else {
+      db = connection.db;
+      cleanup = connection.cleanup ?? null;
     }
+    for (const stmt of SQL_CREATE_DDL) {
+      await db.execute(sql.raw(stmt));
+    }
+    // Singleton row pattern (id=1 with CHECK) plus ON CONFLICT means
+    // concurrent initialisations and mixed-version writers cannot grow
+    // the table beyond one row, so reads are deterministic. The
+    // version-mismatch check itself is owned by `reconcileSchemaVersion`,
+    // which runs separately.
+    await db
+      .insert(bamStoreSchema)
+      .values({ id: 1, version: SCHEMA_VERSION })
+      .onConflictDoNothing({ target: bamStoreSchema.id });
+    return new PostgresBamStore(db, cleanup);
   }
 
   async readSchemaVersion(): Promise<number> {
-    await this.ready;
-    const client = await this.pool.connect();
-    try {
-      const res = await client.query<{ version: number }>(
-        'SELECT version FROM bam_store_schema WHERE id = 1'
+    const rows = await this.db
+      .select({ version: bamStoreSchema.version })
+      .from(bamStoreSchema)
+      .where(eq(bamStoreSchema.id, 1));
+    const row = rows[0];
+    if (!row) {
+      // `open()` always seeds the singleton row via INSERT ... ON
+      // CONFLICT DO NOTHING, so an empty table indicates the bootstrap
+      // never ran or someone deleted the row out from under us. Refuse
+      // it loudly rather than returning a fabricated SCHEMA_VERSION
+      // that would silently green-light the reconciler.
+      throw new Error(
+        'readSchemaVersion: bam_store_schema is empty. Drop the store ' +
+          'tables and restart so the adapter can re-bootstrap.'
       );
-      return res.rows[0]?.version ?? SCHEMA_VERSION;
-    } finally {
-      client.release();
     }
+    return row.version;
   }
 
   async withTxn<T>(fn: (txn: StoreTxn) => Promise<T>): Promise<T> {
-    await this.ready;
     const MAX_RETRIES = 5;
     let lastErr: unknown;
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-      const client = await this.pool.connect();
       try {
-        await client.query('BEGIN ISOLATION LEVEL SERIALIZABLE');
-        try {
-          const txn = makePgTxn(client);
-          const result = await fn(txn);
-          await client.query('COMMIT');
-          return result;
-        } catch (err) {
-          try {
-            await client.query('ROLLBACK');
-          } catch {
-            // ignore
-          }
-          if (!isSerializationFailure(err) || attempt === MAX_RETRIES) {
-            throw err;
-          }
-          lastErr = err;
+        return await this.db.transaction(
+          async (tx) => fn(makeTxn(tx as unknown as DrizzleDb)),
+          { isolationLevel: 'serializable' }
+        );
+      } catch (err) {
+        if (!isSerializationFailure(err) || attempt === MAX_RETRIES) {
+          throw err;
         }
-      } finally {
-        client.release();
+        lastErr = err;
+        await new Promise((resolve) => setTimeout(resolve, 10 * (attempt + 1)));
       }
-      await new Promise((resolve) => setTimeout(resolve, 10 * (attempt + 1)));
     }
     throw lastErr ?? new Error('withTxn: exhausted serialization retries');
   }
 
   async close(): Promise<void> {
-    await this.pool.end();
+    if (this.cleanup) {
+      await this.cleanup();
+    }
+    // PGLite instances are owned by the caller; we don't close them here.
   }
 }
 
-function makePgTxn(client: PgPoolClient): StoreTxn {
-  async function upsertMessage(row: MessageRow): Promise<void> {
-    await client.query(
-      `INSERT INTO messages
-        (author, nonce, content_tag, contents, signature, message_hash,
-         message_id, status, batch_ref, ingested_at, ingest_seq,
-         block_number, tx_index, message_index_within_batch)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
-       ON CONFLICT (author, nonce) DO UPDATE SET
-         content_tag                = EXCLUDED.content_tag,
-         contents                   = EXCLUDED.contents,
-         signature                  = EXCLUDED.signature,
-         message_hash               = EXCLUDED.message_hash,
-         message_id                 = EXCLUDED.message_id,
-         status                     = EXCLUDED.status,
-         batch_ref                  = EXCLUDED.batch_ref,
-         ingested_at                = EXCLUDED.ingested_at,
-         ingest_seq                 = EXCLUDED.ingest_seq,
-         block_number               = EXCLUDED.block_number,
-         tx_index                   = EXCLUDED.tx_index,
-         message_index_within_batch = EXCLUDED.message_index_within_batch`,
-      [
-        row.author.toLowerCase(),
-        encodeNonce(row.nonce),
-        row.contentTag,
-        Buffer.from(row.contents),
-        Buffer.from(row.signature),
-        row.messageHash,
-        row.messageId,
-        row.status,
-        row.batchRef,
-        row.ingestedAt,
-        row.ingestSeq,
-        row.blockNumber,
-        row.txIndex,
-        row.messageIndexWithinBatch,
-      ]
-    );
-  }
-
-
+function makeTxn(tx: DrizzleDb): StoreTxn {
   return {
     // ── pending CRUD (bridged to messages) ──────────────────────────
     async insertPending(row: StoreTxnPendingRow): Promise<void> {
-      const existing = await client.query<MessageRowRaw>(
-        'SELECT status FROM messages WHERE author = $1 AND nonce = $2',
-        [row.sender.toLowerCase(), encodeNonce(row.nonce)]
-      );
-      if (existing.rows[0]) {
-        const s = existing.rows[0].status;
-        if (s !== 'reorged') {
+      const author = row.sender.toLowerCase();
+      const nonce = encodeNonce(row.nonce);
+      const existing = await tx
+        .select({ status: messagesT.status })
+        .from(messagesT)
+        .where(and(eq(messagesT.author, author), eq(messagesT.nonce, nonce)));
+      if (existing[0]) {
+        if (existing[0].status !== 'reorged') {
           throw new Error('insertPending: duplicate (sender, nonce)');
         }
-        await client.query(
-          'DELETE FROM messages WHERE author = $1 AND nonce = $2',
-          [row.sender.toLowerCase(), encodeNonce(row.nonce)]
-        );
+        await tx
+          .delete(messagesT)
+          .where(and(eq(messagesT.author, author), eq(messagesT.nonce, nonce)));
       }
-      await client.query(
-        `INSERT INTO messages
-          (author, nonce, content_tag, contents, signature, message_hash,
-           message_id, status, batch_ref, ingested_at, ingest_seq,
-           block_number, tx_index, message_index_within_batch)
-         VALUES ($1,$2,$3,$4,$5,$6,NULL,'pending',NULL,$7,$8,NULL,NULL,NULL)`,
-        [
-          row.sender.toLowerCase(),
-          encodeNonce(row.nonce),
-          row.contentTag,
-          Buffer.from(row.contents),
-          Buffer.from(row.signature),
-          row.messageHash,
-          row.ingestedAt,
-          row.ingestSeq,
-        ]
-      );
+      await tx.insert(messagesT).values({
+        author,
+        nonce,
+        contentTag: row.contentTag,
+        contents: row.contents,
+        signature: row.signature,
+        messageHash: row.messageHash,
+        messageId: null,
+        status: 'pending',
+        batchRef: null,
+        ingestedAt: row.ingestedAt,
+        ingestSeq: row.ingestSeq,
+        blockNumber: null,
+        txIndex: null,
+        messageIndexWithinBatch: null,
+      });
     },
 
     async getPendingByKey(key: PendingKey): Promise<StoreTxnPendingRow | null> {
-      const res = await client.query<MessageRowRaw>(
-        "SELECT * FROM messages WHERE author = $1 AND nonce = $2 AND status = 'pending'",
-        [key.sender.toLowerCase(), encodeNonce(key.nonce)]
-      );
-      return res.rows[0] ? mapPending(res.rows[0]) : null;
+      const rows = await tx
+        .select()
+        .from(messagesT)
+        .where(
+          and(
+            eq(messagesT.author, key.sender.toLowerCase()),
+            eq(messagesT.nonce, encodeNonce(key.nonce)),
+            eq(messagesT.status, 'pending')
+          )
+        );
+      return rows[0] ? mapPending(rows[0] as unknown as RawMessage) : null;
     },
 
     async listPendingByTag(
@@ -305,83 +311,88 @@ function makePgTxn(client: PgPoolClient): StoreTxn {
       limit?: number,
       sinceSeq?: number
     ): Promise<StoreTxnPendingRow[]> {
-      const clauses = ["content_tag = $1", "status = 'pending'"];
-      const params: Array<string | number> = [tag];
-      if (sinceSeq !== undefined) {
-        clauses.push(`ingest_seq > $${params.length + 1}`);
-        params.push(sinceSeq);
-      }
-      let sql = `SELECT * FROM messages WHERE ${clauses.join(
-        ' AND '
-      )} ORDER BY ingest_seq ASC`;
-      if (typeof limit === 'number') {
-        sql += ` LIMIT $${params.length + 1}`;
-        params.push(limit);
-      }
-      const res = await client.query<MessageRowRaw>(sql, params);
-      return res.rows.map(mapPending);
+      const where = and(
+        eq(messagesT.contentTag, tag),
+        eq(messagesT.status, 'pending'),
+        sinceSeq !== undefined ? gt(messagesT.ingestSeq, sinceSeq) : undefined
+      );
+      let q = tx.select().from(messagesT).where(where).orderBy(asc(messagesT.ingestSeq)).$dynamic();
+      if (typeof limit === 'number') q = q.limit(limit);
+      const rows = await q;
+      return rows.map((r) => mapPending(r as unknown as RawMessage));
     },
 
     async listPendingAll(limit?: number, sinceSeq?: number): Promise<StoreTxnPendingRow[]> {
-      const clauses = ["status = 'pending'"];
-      const params: Array<string | number> = [];
-      if (sinceSeq !== undefined) {
-        clauses.push(`ingest_seq > $${params.length + 1}`);
-        params.push(sinceSeq);
-      }
-      let sql = `SELECT * FROM messages WHERE ${clauses.join(
-        ' AND '
-      )} ORDER BY ingested_at ASC, ingest_seq ASC`;
-      if (typeof limit === 'number') {
-        sql += ` LIMIT $${params.length + 1}`;
-        params.push(limit);
-      }
-      const res = await client.query<MessageRowRaw>(sql, params);
-      return res.rows.map(mapPending);
+      const where = and(
+        eq(messagesT.status, 'pending'),
+        sinceSeq !== undefined ? gt(messagesT.ingestSeq, sinceSeq) : undefined
+      );
+      let q = tx
+        .select()
+        .from(messagesT)
+        .where(where)
+        .orderBy(asc(messagesT.ingestedAt), asc(messagesT.ingestSeq))
+        .$dynamic();
+      if (typeof limit === 'number') q = q.limit(limit);
+      const rows = await q;
+      return rows.map((r) => mapPending(r as unknown as RawMessage));
     },
 
     async countPendingByTag(tag: Bytes32): Promise<number> {
-      const res = await client.query<{ c: string }>(
-        "SELECT COUNT(*) AS c FROM messages WHERE content_tag = $1 AND status = 'pending'",
-        [tag]
-      );
-      return toInt(res.rows[0]?.c ?? 0);
+      const rows = await tx
+        .select({ c: sql<string | number>`COUNT(*)` })
+        .from(messagesT)
+        .where(and(eq(messagesT.contentTag, tag), eq(messagesT.status, 'pending')));
+      const c = rows[0]?.c ?? 0;
+      return typeof c === 'number' ? c : Number(c);
     },
 
     async nextIngestSeq(tag: Bytes32): Promise<number> {
-      const res = await client.query<{ last_seq: string | number }>(
-        `INSERT INTO tag_seq (content_tag, last_seq) VALUES ($1, 1)
-         ON CONFLICT (content_tag) DO UPDATE SET last_seq = tag_seq.last_seq + 1
-         RETURNING last_seq`,
-        [tag]
-      );
-      if (!res.rows[0]) throw new Error('nextIngestSeq: no row returned');
-      return toInt(res.rows[0].last_seq);
+      const rows = await tx
+        .insert(tagSeqT)
+        .values({ contentTag: tag, lastSeq: 1 })
+        .onConflictDoUpdate({
+          target: tagSeqT.contentTag,
+          set: { lastSeq: sql`${tagSeqT.lastSeq} + 1` },
+        })
+        .returning({ lastSeq: tagSeqT.lastSeq });
+      const v = rows[0]?.lastSeq;
+      if (v === undefined || v === null) {
+        throw new Error('nextIngestSeq: no row returned');
+      }
+      return typeof v === 'number' ? v : Number(v);
     },
 
     // ── nonce tracker ────────────────────────────────────────────────
     async getNonce(sender: Address): Promise<NonceTrackerRow | null> {
-      const res = await client.query<NonceRowRaw>(
-        'SELECT * FROM nonces WHERE sender = $1',
-        [sender.toLowerCase()]
-      );
-      const r = res.rows[0];
+      const rows = await tx
+        .select()
+        .from(noncesT)
+        .where(eq(noncesT.sender, sender.toLowerCase()));
+      const r = rows[0];
       if (!r) return null;
       return {
         sender: r.sender as Address,
-        lastNonce: decodeNonce(r.last_nonce),
-        lastMessageHash: r.last_message_hash as Bytes32,
+        lastNonce: decodeNonce(r.lastNonce),
+        lastMessageHash: r.lastMessageHash as Bytes32,
       };
     },
     async setNonce(row: NonceTrackerRow): Promise<void> {
-      await client.query(
-        `INSERT INTO nonces (sender, last_nonce, last_message_hash)
-         VALUES ($1, $2, $3)
-         ON CONFLICT (sender) DO UPDATE SET
-           last_nonce = EXCLUDED.last_nonce,
-           last_message_hash = EXCLUDED.last_message_hash`,
-        [row.sender.toLowerCase(), encodeNonce(row.lastNonce), row.lastMessageHash]
-      );
+      const sender = row.sender.toLowerCase();
+      await tx
+        .insert(noncesT)
+        .values({
+          sender,
+          lastNonce: encodeNonce(row.lastNonce),
+          lastMessageHash: row.lastMessageHash,
+        })
+        .onConflictDoUpdate({
+          target: noncesT.sender,
+          set: {
+            lastNonce: encodeNonce(row.lastNonce),
+            lastMessageHash: row.lastMessageHash,
+          },
+        });
     },
 
     // ── unified-schema lifecycle transitions ─────────────────────────
@@ -390,163 +401,170 @@ function makePgTxn(client: PgPoolClient): StoreTxn {
       const CHUNK = 500;
       for (let i = 0; i < keys.length; i += CHUNK) {
         const slice = keys.slice(i, i + CHUNK);
-        const tuples: string[] = [];
-        const params: Array<string> = [batchRef];
-        for (const k of slice) {
-          tuples.push(`($${params.length + 1}, $${params.length + 2})`);
-          params.push(k.sender.toLowerCase(), encodeNonce(k.nonce));
-        }
-        const res = await client.query(
-          `UPDATE messages SET status = 'submitted', batch_ref = $1
-           WHERE status = 'pending'
-             AND (author, nonce) IN (${tuples.join(', ')})`,
-          params
+        const tuples = slice.map(
+          (k) => sql`(${k.sender.toLowerCase()}, ${encodeNonce(k.nonce)})`
         );
-        if (res.rowCount !== slice.length) {
+        const tupleList = sql.join(tuples, sql`, `);
+        const res = await tx.execute(sql`
+          UPDATE messages SET status = 'submitted', batch_ref = ${batchRef}
+          WHERE status = 'pending'
+            AND (author, nonce) IN (${tupleList})
+        `);
+        const rowCount = execRowCount(res);
+        if (rowCount !== slice.length) {
           throw new Error(
-            `markSubmitted: expected ${slice.length} rows updated, got ${res.rowCount}`
+            `markSubmitted: expected ${slice.length} rows updated, got ${rowCount}`
           );
         }
       }
     },
 
     async upsertObserved(row: MessageRow): Promise<void> {
-      const existing = await client.query<{ status: string; message_hash: string }>(
-        'SELECT status, message_hash FROM messages WHERE author = $1 AND nonce = $2',
-        [row.author.toLowerCase(), encodeNonce(row.nonce)]
-      );
-      const e = existing.rows[0];
-      if (e) {
-        if (e.message_hash !== row.messageHash) {
+      const author = row.author.toLowerCase();
+      const nonce = encodeNonce(row.nonce);
+      const existing = await tx.execute<{
+        status: string;
+        message_hash: string;
+      }>(sql`
+        SELECT status, message_hash FROM messages
+        WHERE author = ${author} AND nonce = ${nonce}
+      `);
+      const existingRow = (existing as { rows: Array<{ status: string; message_hash: string }> })
+        .rows[0];
+      if (existingRow) {
+        if (existingRow.message_hash !== row.messageHash) {
           throw new Error(
             'upsertObserved: existing row has a different messageHash at the same (author, nonce). ' +
               'The nonce-replay-across-batchers duplicate flow is deferred to 004-reader.'
           );
         }
-        if (e.status === 'confirmed') {
+        if (existingRow.status === 'confirmed') {
           return;
         }
       }
-      await upsertMessage(row);
+      await tx.execute(sql`
+        INSERT INTO messages
+          (author, nonce, content_tag, contents, signature, message_hash,
+           message_id, status, batch_ref, ingested_at, ingest_seq,
+           block_number, tx_index, message_index_within_batch)
+        VALUES (${author}, ${nonce}, ${row.contentTag},
+                ${Buffer.from(row.contents)}, ${Buffer.from(row.signature)},
+                ${row.messageHash}, ${row.messageId}, ${row.status},
+                ${row.batchRef}, ${row.ingestedAt}, ${row.ingestSeq},
+                ${row.blockNumber}, ${row.txIndex},
+                ${row.messageIndexWithinBatch})
+        ON CONFLICT (author, nonce) DO UPDATE SET
+          content_tag                = EXCLUDED.content_tag,
+          contents                   = EXCLUDED.contents,
+          signature                  = EXCLUDED.signature,
+          message_hash               = EXCLUDED.message_hash,
+          message_id                 = EXCLUDED.message_id,
+          status                     = EXCLUDED.status,
+          batch_ref                  = EXCLUDED.batch_ref,
+          ingested_at                = EXCLUDED.ingested_at,
+          ingest_seq                 = EXCLUDED.ingest_seq,
+          block_number               = EXCLUDED.block_number,
+          tx_index                   = EXCLUDED.tx_index,
+          message_index_within_batch = EXCLUDED.message_index_within_batch
+      `);
     },
 
     async markReorged(txHash: Bytes32, invalidatedAt: number): Promise<void> {
-      const res = await client.query(
-        `UPDATE batches SET status = 'reorged', invalidated_at = $1 WHERE tx_hash = $2`,
-        [invalidatedAt, txHash]
-      );
-      if (res.rowCount === 0) {
+      const res = await tx
+        .update(batchesT)
+        .set({ status: 'reorged', invalidatedAt })
+        .where(eq(batchesT.txHash, txHash));
+      if (execRowCount(res) === 0) {
         throw new Error(`markReorged: no batch for tx_hash=${txHash}`);
       }
-      await client.query(
-        `UPDATE messages SET status = 'reorged' WHERE batch_ref = $1 AND status = 'confirmed'`,
-        [txHash]
-      );
+      await tx
+        .update(messagesT)
+        .set({ status: 'reorged' })
+        .where(and(eq(messagesT.batchRef, txHash), eq(messagesT.status, 'confirmed')));
     },
 
     // ── unified-schema reads ─────────────────────────────────────────
     async listMessages(query: MessagesQuery): Promise<MessageRow[]> {
-      const clauses: string[] = [];
-      const params: Array<string | number> = [];
-      if (query.contentTag !== undefined) {
-        clauses.push(`content_tag = $${params.length + 1}`);
-        params.push(query.contentTag);
-      }
-      if (query.author !== undefined) {
-        clauses.push(`author = $${params.length + 1}`);
-        params.push(query.author.toLowerCase());
-      }
-      if (query.status !== undefined) {
-        clauses.push(`status = $${params.length + 1}`);
-        params.push(query.status);
-      }
-      if (query.batchRef !== undefined) {
-        clauses.push(`batch_ref = $${params.length + 1}`);
-        params.push(query.batchRef);
-      }
-      if (query.sinceBlock !== undefined) {
-        clauses.push(`block_number IS NOT NULL AND block_number >= $${params.length + 1}`);
-        params.push(Number(query.sinceBlock));
-      }
-      if (query.cursor !== undefined) {
-        clauses.push(
-          `(block_number, tx_index, message_index_within_batch) > ($${params.length + 1}, $${
-            params.length + 2
-          }, $${params.length + 3})`
-        );
-        params.push(
-          query.cursor.blockNumber,
-          query.cursor.txIndex,
-          query.cursor.messageIndexWithinBatch
-        );
-      }
-      let sql = 'SELECT * FROM messages';
-      if (clauses.length) sql += ' WHERE ' + clauses.join(' AND ');
-      sql +=
-        ' ORDER BY (block_number IS NULL) ASC, block_number ASC NULLS LAST, tx_index ASC NULLS LAST, message_index_within_batch ASC NULLS LAST, ingest_seq ASC NULLS LAST';
-      if (typeof query.limit === 'number') {
-        sql += ` LIMIT $${params.length + 1}`;
-        params.push(query.limit);
-      }
-      const res = await client.query<MessageRowRaw>(sql, params);
-      return res.rows.map(mapMessage);
+      const conds = [
+        query.contentTag !== undefined ? eq(messagesT.contentTag, query.contentTag) : undefined,
+        query.author !== undefined ? eq(messagesT.author, query.author.toLowerCase()) : undefined,
+        query.status !== undefined ? eq(messagesT.status, query.status) : undefined,
+        query.batchRef !== undefined ? eq(messagesT.batchRef, query.batchRef) : undefined,
+        query.sinceBlock !== undefined
+          ? and(isNotNull(messagesT.blockNumber), gte(messagesT.blockNumber, Number(query.sinceBlock)))
+          : undefined,
+        query.cursor !== undefined
+          ? sql`(${messagesT.blockNumber}, ${messagesT.txIndex}, ${messagesT.messageIndexWithinBatch}) > (${query.cursor.blockNumber}, ${query.cursor.txIndex}, ${query.cursor.messageIndexWithinBatch})`
+          : undefined,
+      ];
+      const where = and(...conds);
+      let q = tx
+        .select()
+        .from(messagesT)
+        .where(where)
+        .orderBy(
+          sql`(${messagesT.blockNumber} IS NULL) ASC`,
+          sql`${messagesT.blockNumber} ASC NULLS LAST`,
+          sql`${messagesT.txIndex} ASC NULLS LAST`,
+          sql`${messagesT.messageIndexWithinBatch} ASC NULLS LAST`,
+          sql`${messagesT.ingestSeq} ASC NULLS LAST`
+        )
+        .$dynamic();
+      if (typeof query.limit === 'number') q = q.limit(query.limit);
+      const rows = await q;
+      return rows.map((r) => mapMessage(r as unknown as RawMessage));
     },
 
     async getByMessageId(messageId: Bytes32): Promise<MessageRow | null> {
-      const res = await client.query<MessageRowRaw>(
-        'SELECT * FROM messages WHERE message_id = $1',
-        [messageId]
-      );
-      return res.rows[0] ? mapMessage(res.rows[0]) : null;
+      const rows = await tx
+        .select()
+        .from(messagesT)
+        .where(eq(messagesT.messageId, messageId));
+      return rows[0] ? mapMessage(rows[0] as unknown as RawMessage) : null;
     },
 
     async getByAuthorNonce(author: Address, nonce: bigint): Promise<MessageRow | null> {
-      const res = await client.query<MessageRowRaw>(
-        'SELECT * FROM messages WHERE author = $1 AND nonce = $2',
-        [author.toLowerCase(), encodeNonce(nonce)]
-      );
-      return res.rows[0] ? mapMessage(res.rows[0]) : null;
+      const rows = await tx
+        .select()
+        .from(messagesT)
+        .where(
+          and(
+            eq(messagesT.author, author.toLowerCase()),
+            eq(messagesT.nonce, encodeNonce(nonce))
+          )
+        );
+      return rows[0] ? mapMessage(rows[0] as unknown as RawMessage) : null;
     },
 
     // ── unified-schema batch CRUD ────────────────────────────────────
     async upsertBatch(row: BatchRow): Promise<void> {
       const snapshotJson = encodeMessageSnapshot(row.messageSnapshot);
-      await client.query(
-        `INSERT INTO batches
+      await tx.execute(sql`
+        INSERT INTO batches
           (tx_hash, chain_id, content_tag, blob_versioned_hash,
            batch_content_hash, block_number, tx_index, status,
            replaced_by_tx_hash, submitted_at, invalidated_at, message_snapshot)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
-         ON CONFLICT (tx_hash) DO UPDATE SET
-           chain_id            = EXCLUDED.chain_id,
-           content_tag         = EXCLUDED.content_tag,
-           blob_versioned_hash = EXCLUDED.blob_versioned_hash,
-           batch_content_hash  = EXCLUDED.batch_content_hash,
-           block_number        = EXCLUDED.block_number,
-           tx_index            = EXCLUDED.tx_index,
-           status              = EXCLUDED.status,
-           replaced_by_tx_hash = COALESCE(EXCLUDED.replaced_by_tx_hash, batches.replaced_by_tx_hash),
-           submitted_at        = COALESCE(EXCLUDED.submitted_at, batches.submitted_at),
-           invalidated_at      = EXCLUDED.invalidated_at,
-           message_snapshot    = CASE
-             WHEN EXCLUDED.message_snapshot = '[]' THEN batches.message_snapshot
-             ELSE EXCLUDED.message_snapshot
-           END`,
-        [
-          row.txHash,
-          row.chainId,
-          row.contentTag,
-          row.blobVersionedHash,
-          row.batchContentHash,
-          row.blockNumber,
-          row.txIndex,
-          row.status,
-          row.replacedByTxHash,
-          row.submittedAt,
-          row.invalidatedAt,
-          snapshotJson,
-        ]
-      );
+        VALUES (${row.txHash}, ${row.chainId}, ${row.contentTag},
+                ${row.blobVersionedHash}, ${row.batchContentHash},
+                ${row.blockNumber}, ${row.txIndex}, ${row.status},
+                ${row.replacedByTxHash}, ${row.submittedAt},
+                ${row.invalidatedAt}, ${snapshotJson})
+        ON CONFLICT (tx_hash) DO UPDATE SET
+          chain_id            = EXCLUDED.chain_id,
+          content_tag         = EXCLUDED.content_tag,
+          blob_versioned_hash = EXCLUDED.blob_versioned_hash,
+          batch_content_hash  = EXCLUDED.batch_content_hash,
+          block_number        = EXCLUDED.block_number,
+          tx_index            = EXCLUDED.tx_index,
+          status              = EXCLUDED.status,
+          replaced_by_tx_hash = COALESCE(EXCLUDED.replaced_by_tx_hash, batches.replaced_by_tx_hash),
+          submitted_at        = COALESCE(EXCLUDED.submitted_at, batches.submitted_at),
+          invalidated_at      = EXCLUDED.invalidated_at,
+          message_snapshot    = CASE
+            WHEN EXCLUDED.message_snapshot = '[]' THEN batches.message_snapshot
+            ELSE EXCLUDED.message_snapshot
+          END
+      `);
     },
 
     async updateBatchStatus(
@@ -559,89 +577,71 @@ function makePgTxn(client: PgPoolClient): StoreTxn {
         invalidatedAt?: number | null;
       }
     ): Promise<void> {
-      const sets = ['status = $1'];
-      const params: Array<string | number | null> = [status];
-      if (opts?.blockNumber !== undefined) {
-        sets.push(`block_number = $${params.length + 1}`);
-        params.push(opts.blockNumber);
-      }
-      if (opts?.txIndex !== undefined) {
-        sets.push(`tx_index = $${params.length + 1}`);
-        params.push(opts.txIndex);
-      }
-      if (opts?.replacedByTxHash !== undefined) {
-        sets.push(`replaced_by_tx_hash = $${params.length + 1}`);
-        params.push(opts.replacedByTxHash);
-      }
-      if (opts?.invalidatedAt !== undefined) {
-        sets.push(`invalidated_at = $${params.length + 1}`);
-        params.push(opts.invalidatedAt);
-      }
-      params.push(txHash);
-      const res = await client.query(
-        `UPDATE batches SET ${sets.join(', ')} WHERE tx_hash = $${params.length}`,
-        params
-      );
-      if (res.rowCount === 0) {
+      const set: Record<string, unknown> = { status };
+      if (opts?.blockNumber !== undefined) set.blockNumber = opts.blockNumber;
+      if (opts?.txIndex !== undefined) set.txIndex = opts.txIndex;
+      if (opts?.replacedByTxHash !== undefined) set.replacedByTxHash = opts.replacedByTxHash;
+      if (opts?.invalidatedAt !== undefined) set.invalidatedAt = opts.invalidatedAt;
+      const res = await tx.update(batchesT).set(set).where(eq(batchesT.txHash, txHash));
+      if (execRowCount(res) === 0) {
         throw new Error(`updateBatchStatus: no batch for tx_hash=${txHash}`);
       }
     },
 
     async listBatches(query: BatchesQuery): Promise<BatchRow[]> {
-      const clauses: string[] = [];
-      const params: Array<string | number> = [];
-      if (query.contentTag !== undefined) {
-        clauses.push(`content_tag = $${params.length + 1}`);
-        params.push(query.contentTag);
-      }
-      if (query.chainId !== undefined) {
-        clauses.push(`chain_id = $${params.length + 1}`);
-        params.push(query.chainId);
-      }
-      if (query.status !== undefined) {
-        clauses.push(`status = $${params.length + 1}`);
-        params.push(query.status);
-      }
-      if (query.sinceBlock !== undefined) {
-        clauses.push(`block_number IS NOT NULL AND block_number >= $${params.length + 1}`);
-        params.push(Number(query.sinceBlock));
-      }
-      let sql = 'SELECT * FROM batches';
-      if (clauses.length) sql += ' WHERE ' + clauses.join(' AND ');
-      sql += ' ORDER BY submitted_at DESC';
-      if (typeof query.limit === 'number') {
-        sql += ` LIMIT $${params.length + 1}`;
-        params.push(query.limit);
-      }
-      const res = await client.query<BatchRowRaw>(sql, params);
-      return res.rows.map(mapBatch);
+      const conds = [
+        query.contentTag !== undefined ? eq(batchesT.contentTag, query.contentTag) : undefined,
+        query.chainId !== undefined ? eq(batchesT.chainId, query.chainId) : undefined,
+        query.status !== undefined ? eq(batchesT.status, query.status) : undefined,
+        query.sinceBlock !== undefined
+          ? and(isNotNull(batchesT.blockNumber), gte(batchesT.blockNumber, Number(query.sinceBlock)))
+          : undefined,
+      ];
+      const where = and(...conds);
+      let q = tx
+        .select()
+        .from(batchesT)
+        .where(where)
+        .orderBy(desc(batchesT.submittedAt))
+        .$dynamic();
+      if (typeof query.limit === 'number') q = q.limit(query.limit);
+      const rows = await q;
+      return rows.map((r) => mapBatch(r as unknown as RawBatch));
     },
 
     // ── reader cursor ────────────────────────────────────────────────
     async getCursor(chainId: number): Promise<ReaderCursorRow | null> {
-      const res = await client.query<CursorRowRaw>(
-        'SELECT * FROM reader_cursor WHERE chain_id = $1',
-        [chainId]
-      );
-      const r = res.rows[0];
+      const rows = await tx
+        .select()
+        .from(readerCursorT)
+        .where(eq(readerCursorT.chainId, chainId));
+      const r = rows[0];
       if (!r) return null;
       return {
-        chainId: toInt(r.chain_id),
-        lastBlockNumber: toInt(r.last_block_number),
-        lastTxIndex: toInt(r.last_tx_index),
-        updatedAt: toInt(r.updated_at),
+        chainId: r.chainId,
+        lastBlockNumber: r.lastBlockNumber,
+        lastTxIndex: r.lastTxIndex,
+        updatedAt: r.updatedAt,
       };
     },
     async setCursor(row: ReaderCursorRow): Promise<void> {
-      await client.query(
-        `INSERT INTO reader_cursor (chain_id, last_block_number, last_tx_index, updated_at)
-         VALUES ($1, $2, $3, $4)
-         ON CONFLICT (chain_id) DO UPDATE SET
-           last_block_number = EXCLUDED.last_block_number,
-           last_tx_index     = EXCLUDED.last_tx_index,
-           updated_at        = EXCLUDED.updated_at`,
-        [row.chainId, row.lastBlockNumber, row.lastTxIndex, row.updatedAt]
-      );
+      await tx
+        .insert(readerCursorT)
+        .values({
+          chainId: row.chainId,
+          lastBlockNumber: row.lastBlockNumber,
+          lastTxIndex: row.lastTxIndex,
+          updatedAt: row.updatedAt,
+        })
+        .onConflictDoUpdate({
+          target: readerCursorT.chainId,
+          set: {
+            lastBlockNumber: row.lastBlockNumber,
+            lastTxIndex: row.lastTxIndex,
+            updatedAt: row.updatedAt,
+          },
+        });
     },
   };
 }
+

@@ -1,10 +1,10 @@
 /**
  * bam-store — browser-safe entrypoint.
  *
- * Memory backend + the persistence types only. Must NOT transitively
- * import better-sqlite3, pg, node:fs, node:path, node:crypto, etc.
- * See T011's audit (recorded on the PR): `grep better-sqlite3|pg|^\s*node:|fs|path`
- * over the compiled transitive closure of this file returns zero hits.
+ * `createMemoryStore` + the persistence types only. Must NOT
+ * transitively import `pg`, `@electric-sql/pglite/node`, `node:fs`,
+ * `node:path`, `node:crypto`, etc. The browser bundle audit pins the
+ * forbidden import set; see `packages/bam-store/tests/browser-audit.test.ts`.
  */
 
 export type {
@@ -24,4 +24,4 @@ export type {
   StoreTxnPendingRow,
 } from './types.js';
 
-export { createMemoryStore, MemoryBamStore } from './memory-store.js';
+export { createMemoryStore } from './create-memory-store.js';

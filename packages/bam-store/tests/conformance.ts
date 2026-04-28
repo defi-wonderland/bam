@@ -1,7 +1,7 @@
 /**
  * Shared conformance suite — the body run against every backend
- * (memory / SQLite / Postgres). Each adapter that passes every case
- * here is a conforming `BamStore`.
+ * (PGLite in-memory, real Postgres when `BAM_TEST_PG_URL` is set).
+ * Each backend that passes every case here is a conforming `BamStore`.
  */
 
 import { afterEach, describe, expect, it } from 'vitest';

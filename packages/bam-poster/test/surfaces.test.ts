@@ -5,7 +5,7 @@ import { listPending } from '../src/surfaces/pending.js';
 import { listSubmittedBatches } from '../src/surfaces/submitted.js';
 import { readStatus } from '../src/surfaces/status.js';
 import { readHealth } from '../src/surfaces/health.js';
-import { MemoryBamStore } from 'bam-store';
+import { createMemoryStore } from 'bam-store';
 import type { BamStore, BatchStatus } from 'bam-store';
 import type { Signer, StoreTxnPendingRow } from '../src/types.js';
 import type { StatusRpcReader } from '../src/surfaces/status.js';
@@ -112,7 +112,7 @@ class StubSigner implements Signer {
 
 describe('listPending', () => {
   it('returns BAMMessage-shaped rows with messageHash (no v1 content/timestamp)', async () => {
-    const store = new MemoryBamStore();
+    const store = await createMemoryStore();
     await store.withTxn(async (txn) => txn.insertPending(pendingRow()));
     const rows = await listPending(store, {});
     expect(rows.length).toBe(1);
@@ -123,10 +123,10 @@ describe('listPending', () => {
   });
 
   it('filters by contentTag', async () => {
-    const store = new MemoryBamStore();
+    const store = await createMemoryStore();
     await store.withTxn(async (txn) => {
-      txn.insertPending(pendingRow({ nonce: 1n, ingestSeq: 1 }));
-      txn.insertPending(pendingRow({ nonce: 2n, ingestSeq: 2, contentTag: TAG_B }));
+      await txn.insertPending(pendingRow({ nonce: 1n, ingestSeq: 1 }));
+      await txn.insertPending(pendingRow({ nonce: 2n, ingestSeq: 2, contentTag: TAG_B }));
     });
     const a = await listPending(store, { contentTag: TAG_A });
     expect(a.length).toBe(1);
@@ -137,7 +137,7 @@ describe('listPending', () => {
 
 describe('listSubmittedBatches', () => {
   it('status "included" → messageId is populated, invalidatedAt null', async () => {
-    const store = new MemoryBamStore();
+    const store = await createMemoryStore();
     await seedBatch(store);
     const rows = await listSubmittedBatches(store, 31337, {});
     expect(rows.length).toBe(1);
@@ -147,7 +147,7 @@ describe('listSubmittedBatches', () => {
   });
 
   it('status "reorged" → messageId is surfaced as null on every message', async () => {
-    const store = new MemoryBamStore();
+    const store = await createMemoryStore();
     await seedBatch(store, { batchStatus: 'reorged', invalidatedAt: 3_000 });
     const rows = await listSubmittedBatches(store, 31337, {});
     expect(rows[0].status).toBe('reorged');
@@ -156,14 +156,14 @@ describe('listSubmittedBatches', () => {
   });
 
   it('returns batchContentHash on every entry', async () => {
-    const store = new MemoryBamStore();
+    const store = await createMemoryStore();
     await seedBatch(store);
     const rows = await listSubmittedBatches(store, 31337, {});
     expect(rows[0].batchContentHash).toBe('0x' + '03'.repeat(32));
   });
 
   it('filters by sinceBlock', async () => {
-    const store = new MemoryBamStore();
+    const store = await createMemoryStore();
     await seedBatch(store, { txHash: ('0x' + '01'.repeat(32)) as Bytes32, blockNumber: 10 });
     await seedBatch(store, { txHash: ('0x' + '02'.repeat(32)) as Bytes32, blockNumber: 20 });
     const rows = await listSubmittedBatches(store, 31337, { sinceBlock: 15n });
@@ -172,7 +172,7 @@ describe('listSubmittedBatches', () => {
   });
 
   it('filters out batches from a different chainId', async () => {
-    const store = new MemoryBamStore();
+    const store = await createMemoryStore();
     await seedBatch(store, { txHash: ('0x' + '01'.repeat(32)) as Bytes32, blockNumber: 10 });
     // Write a batch on a different chain directly (bypassing seedBatch
     // which hardcodes 31337) to simulate a shared DB.
@@ -198,7 +198,7 @@ describe('listSubmittedBatches', () => {
   });
 
   it('limit: 0 returns no batches', async () => {
-    const store = new MemoryBamStore();
+    const store = await createMemoryStore();
     await seedBatch(store, { txHash: ('0x' + '01'.repeat(32)) as Bytes32 });
     await seedBatch(store, { txHash: ('0x' + '02'.repeat(32)) as Bytes32 });
     const rows = await listSubmittedBatches(store, 31337, { limit: 0 });
@@ -206,7 +206,7 @@ describe('listSubmittedBatches', () => {
   });
 
   it('rejects non-finite or negative limit (programmatic-caller misuse)', async () => {
-    const store = new MemoryBamStore();
+    const store = await createMemoryStore();
     await seedBatch(store);
     await expect(
       listSubmittedBatches(store, 31337, { limit: Number.NaN })
@@ -223,7 +223,7 @@ describe('listSubmittedBatches', () => {
   });
 
   it('filters out batches with null submittedAt (Reader-observed, never submitted by us)', async () => {
-    const store = new MemoryBamStore();
+    const store = await createMemoryStore();
     await seedBatch(store, { txHash: ('0x' + '01'.repeat(32)) as Bytes32 });
     // A batch a Reader observed without us ever submitting it: same
     // chain, but submittedAt is null because we didn't write it.
@@ -251,10 +251,10 @@ describe('listSubmittedBatches', () => {
 
 describe('readStatus', () => {
   it('returns wallet address + balance + per-tag pending counts', async () => {
-    const store = new MemoryBamStore();
+    const store = await createMemoryStore();
     await store.withTxn(async (txn) => {
-      txn.insertPending(pendingRow({ nonce: 1n, ingestSeq: 1 }));
-      txn.insertPending(pendingRow({ nonce: 2n, ingestSeq: 2 }));
+      await txn.insertPending(pendingRow({ nonce: 1n, ingestSeq: 1 }));
+      await txn.insertPending(pendingRow({ nonce: 2n, ingestSeq: 2 }));
     });
     const rpc: StatusRpcReader = {
       async getBalance() {
@@ -275,7 +275,7 @@ describe('readStatus', () => {
   });
 
   it('surfaces lastSubmittedByTag', async () => {
-    const store = new MemoryBamStore();
+    const store = await createMemoryStore();
     await seedBatch(store);
     const rpc: StatusRpcReader = {
       async getBalance() {

@@ -21,7 +21,6 @@ export interface ParsedEnv {
   reorgWindowBlocks: number;
   host: string;
   port: number;
-  sqlitePath?: string;
   postgresUrl?: string;
   decoderAddress?: Address;
   signatureRegistryAddress?: Address;
@@ -106,7 +105,6 @@ export function parseEnv(env: NodeJS.ProcessEnv = process.env): ParsedEnv {
     reorgWindowBlocks,
     host,
     port,
-    sqlitePath: env.POSTER_SQLITE_PATH,
     postgresUrl: env.POSTGRES_URL,
     decoderAddress,
     signatureRegistryAddress,

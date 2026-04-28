@@ -9,7 +9,7 @@ import {
 
 import { IngestPipeline } from '../../src/ingest/pipeline.js';
 import { RateLimiter } from '../../src/ingest/rate-limit.js';
-import { MemoryBamStore } from 'bam-store';
+import { createMemoryStore } from 'bam-store';
 import type { MessageValidator } from '../../src/types.js';
 
 const CHAIN_ID = 31337;
@@ -57,7 +57,7 @@ function bytesToHexStr(b: Uint8Array): `0x${string}` {
  * changing `contents[0..32]` to B invalidates the signature.
  */
 describe('cross-tag attribution replay', () => {
-  function mkPipeline(allowlist: Bytes32[]) {
+  async function mkPipeline(allowlist: Bytes32[]) {
     const state = { calls: 0 };
     const validator: MessageValidator = {
       validate() {
@@ -65,7 +65,7 @@ describe('cross-tag attribution replay', () => {
         return { ok: true };
       },
     };
-    const store = new MemoryBamStore();
+    const store = await createMemoryStore();
     const limiter = new RateLimiter({ windowMs: 60_000, maxPerWindow: 100 });
     const pipeline = new IngestPipeline({
       store,
@@ -80,7 +80,7 @@ describe('cross-tag attribution replay', () => {
   }
 
   it('baseline: a correctly-tagged message is accepted', async () => {
-    const { pipeline, state } = mkPipeline([TAG_A]);
+    const { pipeline, state } = await mkPipeline([TAG_A]);
     const raw = makeEnvelope({ signedTag: TAG_A, envelopeTag: TAG_A });
     const result = await pipeline.ingest(raw);
     expect(result.accepted).toBe(true);
@@ -88,7 +88,7 @@ describe('cross-tag attribution replay', () => {
   });
 
   it('an envelope-tag hint that disagrees with contents[0..32] rejects before the validator runs', async () => {
-    const { pipeline, state } = mkPipeline([TAG_A, TAG_B]);
+    const { pipeline, state } = await mkPipeline([TAG_A, TAG_B]);
     const raw = makeEnvelope({ signedTag: TAG_A, envelopeTag: TAG_B });
     const result = await pipeline.ingest(raw);
     expect(result.accepted).toBe(false);
@@ -116,8 +116,8 @@ describe('cross-tag attribution replay', () => {
     };
     // Use a validator that really runs ECDSA — so we observe the
     // signature-level rejection, not just a tag-prefix rejection.
-    const { pipeline } = (() => {
-      const store = new MemoryBamStore();
+    const { pipeline } = await (async () => {
+      const store = await createMemoryStore();
       const limiter = new RateLimiter({ windowMs: 60_000, maxPerWindow: 100 });
       const validator: MessageValidator = {
         // Reject any message whose sender/sig would verify — but this

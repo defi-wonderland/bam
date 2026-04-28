@@ -1,48 +1,52 @@
 /**
  * Backend parameterizations for the shared conformance suite.
  *
- * The Postgres parameterization runs when `BAMSTORE_PG_URL` is set
+ * The real-Postgres parameterization runs when `BAM_TEST_PG_URL` is set
  * (e.g. pointing at a local `docker run postgres` or the CI test
- * container); otherwise it skips with `describe.skipIf`, so dev
- * machines without Docker still pass the suite.
+ * container). When the env var is absent it surfaces a visible
+ * `it.skip` that names the env var, so the absence is auditable in CI
+ * output rather than silently dropped.
  */
 
-import { describe } from 'vitest';
+import { PGlite } from '@electric-sql/pglite';
+import { describe, it } from 'vitest';
 import pg from 'pg';
 
-import { createMemoryStore, PostgresBamStore, SqliteBamStore } from '../src/index.js';
+import { PostgresBamStore } from '../src/index.js';
+import { createPostgresStoreFromUrl } from '../src/db-store.js';
 import { runConformance } from './conformance.js';
 
-describe('bam-store conformance — memory backend', () => {
-  runConformance(() => createMemoryStore());
+describe('bam-store conformance — pglite backend', () => {
+  runConformance(() => PostgresBamStore.open(new PGlite()));
 });
 
-describe('bam-store conformance — sqlite backend', () => {
-  runConformance(() => new SqliteBamStore(':memory:'));
-});
+const PG_URL = process.env.BAM_TEST_PG_URL;
 
-const PG_URL = process.env.BAMSTORE_PG_URL;
-
-describe.skipIf(!PG_URL)('bam-store conformance — postgres backend', () => {
+describe('bam-store conformance — postgres backend (real)', () => {
+  if (!PG_URL) {
+    it.skip(
+      'real-Postgres factory skipped — set BAM_TEST_PG_URL to run',
+      () => {}
+    );
+    return;
+  }
   // Truncate all tables before each store is handed out so tests are
   // isolated against the shared database. Tables are guaranteed to
   // exist after the first PostgresBamStore constructor runs.
-  const resetPool = PG_URL ? new pg.Pool({ connectionString: PG_URL }) : null;
+  const resetPool = new pg.Pool({ connectionString: PG_URL });
   runConformance(async () => {
-    if (resetPool) {
-      const c = await resetPool.connect();
-      try {
-        // First connection initialises schema if needed via a throwaway store.
-        const bootstrap = new PostgresBamStore(PG_URL!);
-        await bootstrap.close();
-        await c.query(
-          `TRUNCATE messages, batches, reader_cursor, tag_seq, nonces
-           RESTART IDENTITY`
-        );
-      } finally {
-        c.release();
-      }
+    const c = await resetPool.connect();
+    try {
+      // First connection initialises schema if needed via a throwaway store.
+      const bootstrap = await createPostgresStoreFromUrl(PG_URL);
+      await bootstrap.close();
+      await c.query(
+        `TRUNCATE messages, batches, reader_cursor, tag_seq, nonces
+         RESTART IDENTITY`
+      );
+    } finally {
+      c.release();
     }
-    return new PostgresBamStore(PG_URL!);
+    return createPostgresStoreFromUrl(PG_URL);
   });
 });
