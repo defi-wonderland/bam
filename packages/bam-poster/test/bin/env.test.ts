@@ -68,14 +68,12 @@ describe('parseEnv', () => {
     expect(parseEnv({ ...BASE, POSTER_REORG_WINDOW_BLOCKS: '999' }).reorgWindowBlocks).toBe(128);
   });
 
-  it('exposes POSTGRES_URL and POSTER_SQLITE_PATH if set', () => {
+  it('exposes POSTGRES_URL when set', () => {
     const env = parseEnv({
       ...BASE,
       POSTGRES_URL: 'postgres://x',
-      POSTER_SQLITE_PATH: '/tmp/x.db',
     });
     expect(env.postgresUrl).toBe('postgres://x');
-    expect(env.sqlitePath).toBe('/tmp/x.db');
   });
 
   it('defaults host to 127.0.0.1 and port to 8787', () => {

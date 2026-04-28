@@ -2,7 +2,7 @@
  * Poster + Reader convergence integration test (acceptance criterion #2;
  * red-team C-6 cross-cut).
  *
- * Setup: a single sqlite `bam-store` is shared by both writers.
+ * Setup: a single in-process PGLite `bam-store` is shared by both writers.
  *
  *   - The Poster path is exercised by writing through the substrate
  *     directly with the same shape `bam-poster`'s `submission/loop.ts`
@@ -20,10 +20,6 @@
  *   - No row's fields were clobbered by the second writer.
  */
 
-import { existsSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-
 import {
   computeMessageHashForMessage,
   computeMessageId,
@@ -34,8 +30,8 @@ import {
   signECDSAWithKey,
 } from 'bam-sdk';
 import type { Address, BAMMessage, Bytes32 } from 'bam-sdk';
-import { createDbStore, type BatchMessageSnapshotEntry } from 'bam-store';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { createMemoryStore, type BatchMessageSnapshotEntry } from 'bam-store';
+import { describe, expect, it } from 'vitest';
 
 import { processBatch, emptyCounters } from '../../src/loop/process-batch.js';
 import type { BlobBatchRegisteredEvent } from '../../src/discovery/log-scan.js';
@@ -69,21 +65,9 @@ function makeSignedMessage(nonce: bigint, payload: Uint8Array): SignedMessage {
 const FAKE_BLOB = new Uint8Array(4096 * 32);
 
 describe('Poster + Reader convergence', () => {
-  let dbPath: string;
-
-  beforeEach(() => {
-    dbPath = join(tmpdir(), `bam-reader-converge-${Date.now()}-${Math.random().toString(16).slice(2)}.db`);
-  });
-
-  afterEach(() => {
-    for (const ext of ['', '-wal', '-shm']) {
-      const p = dbPath + ext;
-      if (existsSync(p)) rmSync(p);
-    }
-  });
 
   it('Poster-first then Reader: snapshot preserved, no clobber, single batch row', async () => {
-    const store = createDbStore({ sqlitePath: dbPath });
+    const store = await createMemoryStore();
     try {
       const m1 = makeSignedMessage(1n, new Uint8Array([1]));
       const m2 = makeSignedMessage(2n, new Uint8Array([2]));
@@ -203,7 +187,7 @@ describe('Poster + Reader convergence', () => {
   });
 
   it('Reader-first then Poster: Reader writes empty snapshot; Poster fills it in', async () => {
-    const store = createDbStore({ sqlitePath: dbPath });
+    const store = await createMemoryStore();
     try {
       const m1 = makeSignedMessage(1n, new Uint8Array([1]));
       const event: BlobBatchRegisteredEvent = {

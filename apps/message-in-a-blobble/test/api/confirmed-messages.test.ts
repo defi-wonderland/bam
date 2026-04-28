@@ -1,7 +1,3 @@
-import { existsSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-
 import {
   computeMessageHashForMessage,
   computeMessageId,
@@ -44,35 +40,23 @@ function bytesToHex(bytes: Uint8Array): string {
 }
 
 describe('GET /api/confirmed-messages — bam-store source', () => {
-  let dbPath: string;
-
   beforeEach(() => {
-    dbPath = join(
-      tmpdir(),
-      `blobble-confirmed-${Date.now()}-${Math.random().toString(16).slice(2)}.db`
-    );
-    process.env.BAM_STORE_DB_URL = dbPath;
+    // Force the in-process PGLite path so each test gets an isolated
+    // store after `_clearBamStoreForTests()` resets the lazy singleton.
     delete process.env.BAM_STORE_POSTGRES_URL;
     delete process.env.POSTGRES_URL;
   });
 
   afterEach(async () => {
-    delete process.env.BAM_STORE_DB_URL;
-    // Clear the lazy-singleton between tests so each one gets a fresh
-    // store on its own dbPath.
     const { _clearBamStoreForTests } = await import(
       '@/lib/bam-store-client'
     );
-    _clearBamStoreForTests();
-    for (const ext of ['', '-wal', '-shm']) {
-      const p = dbPath + ext;
-      if (existsSync(p)) rmSync(p);
-    }
+    await _clearBamStoreForTests();
   });
 
   it('returns Reader-populated confirmed rows mapped to the legacy ConfirmedRow shape', async () => {
     const { getBamStore } = await import('@/lib/bam-store-client');
-    const store = getBamStore();
+    const store = await getBamStore();
     const m1 = makeSignedMessage(1n, new TextEncoder().encode('hello world'));
     const m2 = makeSignedMessage(
       2n,
@@ -142,7 +126,7 @@ describe('GET /api/confirmed-messages — bam-store source', () => {
 
   it('omits non-confirmed rows', async () => {
     const { getBamStore } = await import('@/lib/bam-store-client');
-    const store = getBamStore();
+    const store = await getBamStore();
     const m = makeSignedMessage(7n, new Uint8Array([0xff]));
     await store.withTxn(async (txn) => {
       await txn.upsertObserved({
@@ -172,17 +156,25 @@ describe('GET /api/confirmed-messages — bam-store source', () => {
   });
 
   it('returns 502 when the store backend is unreachable', async () => {
-    process.env.BAM_STORE_DB_URL = '/no/such/dir/cannot-create.db';
+    // Point at an unreachable Postgres so `createDbStore` rejects when
+    // it tries to bootstrap. localhost:1 refuses TCP fast, so the
+    // failure surfaces immediately rather than after a multi-second
+    // connect timeout.
+    process.env.BAM_STORE_POSTGRES_URL = 'postgres://nobody@127.0.0.1:1/none';
     const { _clearBamStoreForTests } = await import(
       '@/lib/bam-store-client'
     );
-    _clearBamStoreForTests();
-    const { GET } = await import(
-      '../../src/app/api/confirmed-messages/route'
-    );
-    const res = await GET();
-    expect(res.status).toBe(502);
-    const body = (await res.json()) as { error: string };
-    expect(body.error).toBe('bam_store_unreachable');
+    await _clearBamStoreForTests();
+    try {
+      const { GET } = await import(
+        '../../src/app/api/confirmed-messages/route'
+      );
+      const res = await GET();
+      expect(res.status).toBe(502);
+      const body = (await res.json()) as { error: string };
+      expect(body.error).toBe('bam_store_unreachable');
+    } finally {
+      delete process.env.BAM_STORE_POSTGRES_URL;
+    }
   });
 });

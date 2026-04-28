@@ -15,12 +15,9 @@
  * advanced past unwritten rows would skip a block forever.
  */
 
-import { existsSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-
+import { PGlite } from '@electric-sql/pglite';
 import type { Address, Bytes32 } from 'bam-sdk';
-import { createDbStore, type BamStore } from 'bam-store';
+import { PostgresBamStore, type BamStore } from 'bam-store';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { commitBlock, getCursor } from '../../src/discovery/cursor.js';
@@ -90,20 +87,17 @@ function fakeL1(opts: { head: number; events: BlobBatchRegisteredEvent[] }): Liv
 }
 
 describe('crash-injection mid-block', () => {
-  let dbPath: string;
+  // Each test gets a fresh PGLite instance; tests that simulate a
+  // process restart open two stores against the *same* PGlite so data
+  // written before the simulated crash survives the store-level close.
+  let db: PGlite;
 
   beforeEach(() => {
-    dbPath = join(
-      tmpdir(),
-      `bam-reader-crash-${Date.now()}-${Math.random().toString(16).slice(2)}.db`
-    );
+    db = new PGlite();
   });
 
-  afterEach(() => {
-    for (const ext of ['', '-wal', '-shm']) {
-      const p = dbPath + ext;
-      if (existsSync(p)) rmSync(p);
-    }
+  afterEach(async () => {
+    await db.close();
   });
 
   // Helper: count BatchRows for a tx hash.
@@ -116,7 +110,7 @@ describe('crash-injection mid-block', () => {
     // Direct unit-level proof of atomic semantics: throwing inside the
     // writes callback rolls the entire transaction back (no row, no
     // cursor advance).
-    const store = createDbStore({ sqlitePath: dbPath });
+    const store = await PostgresBamStore.open(db);
     try {
       const tx = bytes32('aa', 50);
       await expect(
@@ -155,7 +149,7 @@ describe('crash-injection mid-block', () => {
   });
 
   it('after a crash on block N, restart resumes at the pre-block cursor and re-processes idempotently', async () => {
-    let store = createDbStore({ sqlitePath: dbPath });
+    let store = await PostgresBamStore.open(db);
     const targetBlock = 100;
     const event = fakeEvent({ block: targetBlock });
     let crashedOnce = false;
@@ -213,7 +207,7 @@ describe('crash-injection mid-block', () => {
       // ── Second run: restart with a non-crashing process. Resume from
       // the same cursor (null), re-process the same event, advance the
       // cursor cleanly.
-      store = createDbStore({ sqlitePath: dbPath });
+      store = await PostgresBamStore.open(db);
       const counters2 = emptyCounters();
       const result2 = await liveTailTick({
         store,

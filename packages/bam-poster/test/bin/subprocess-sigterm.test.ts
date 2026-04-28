@@ -76,7 +76,6 @@ describe('bam-poster CLI — SIGTERM graceful shutdown', () => {
         `POSTER_RPC_URL=${rpcUrl}`,
         `POSTER_SIGNER_PRIVATE_KEY=0x${'ab'.repeat(32)}`,
         `POSTER_PORT=0`,
-        `POSTER_SQLITE_PATH=:memory:`,
       ].join('\n')
     );
 
@@ -173,7 +172,6 @@ describe('bam-poster CLI — SIGTERM graceful shutdown', () => {
       POSTER_RPC_URL: rpcUrl,
       POSTER_SIGNER_PRIVATE_KEY: '0x' + 'ab'.repeat(32),
       POSTER_PORT: String(posterPort),
-      POSTER_SQLITE_PATH: ':memory:',
       NODE_NO_WARNINGS: '1',
     };
 

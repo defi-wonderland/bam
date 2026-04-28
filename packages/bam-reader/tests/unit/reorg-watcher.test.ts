@@ -64,7 +64,7 @@ describe('clampReorgWindow', () => {
 
 describe('ReaderReorgWatcher.tick', () => {
   it('leaves an in-window confirmed batch untouched when the tx is still on chain', async () => {
-    const store = createMemoryStore();
+    const store = await createMemoryStore();
     const tx = ('0x' + 'aa'.repeat(32)) as Bytes32;
     await store.withTxn(async (txn) =>
       txn.upsertBatch(makeBatch({ txHash: tx, blockNumber: 95 }))
@@ -85,7 +85,7 @@ describe('ReaderReorgWatcher.tick', () => {
   });
 
   it('marks an in-window batch reorged when its tx no longer resolves', async () => {
-    const store = createMemoryStore();
+    const store = await createMemoryStore();
     const tx = ('0x' + 'bb'.repeat(32)) as Bytes32;
     await store.withTxn(async (txn) =>
       txn.upsertBatch(makeBatch({ txHash: tx, blockNumber: 95 }))
@@ -108,7 +108,7 @@ describe('ReaderReorgWatcher.tick', () => {
   });
 
   it('ignores out-of-window batches even if their tx is no longer on chain', async () => {
-    const store = createMemoryStore();
+    const store = await createMemoryStore();
     const tx = ('0x' + 'cc'.repeat(32)) as Bytes32;
     await store.withTxn(async (txn) =>
       txn.upsertBatch(makeBatch({ txHash: tx, blockNumber: 10 })) // far below head-window
@@ -129,7 +129,7 @@ describe('ReaderReorgWatcher.tick', () => {
   });
 
   it('only considers batches matching the configured chainId', async () => {
-    const store = createMemoryStore();
+    const store = await createMemoryStore();
     const txMine = ('0x' + 'dd'.repeat(32)) as Bytes32;
     const txOther = ('0x' + 'ee'.repeat(32)) as Bytes32;
     await store.withTxn(async (txn) => {
@@ -157,7 +157,7 @@ describe('ReaderReorgWatcher.tick', () => {
 
   // Reader-side divergence from Poster: no re-enqueue.
   it('does not re-enqueue messages of a reorged batch to pending', async () => {
-    const store = createMemoryStore();
+    const store = await createMemoryStore();
     const tx = ('0x' + 'ff'.repeat(32)) as Bytes32;
     const author = '0x000000000000000000000000000000000000aaaa' as Address;
     await store.withTxn(async (txn) => {

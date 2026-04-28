@@ -53,7 +53,7 @@ describe('createReader', () => {
   it('constructs a reader against an in-memory store with no fallback sources', async () => {
     const reader = await createReader(baseConfig(), {
       l1: fakeL1({ chainId: 11155111 }),
-      store: createMemoryStore(),
+      store: await createMemoryStore(),
     });
     const health = await reader.health();
     expect(health.chainId).toBe(11155111);
@@ -65,7 +65,7 @@ describe('createReader', () => {
   it('serve() returns a promise that completes once close() is called', async () => {
     const reader = await createReader(baseConfig(), {
       l1: fakeL1({ chainId: 11155111 }),
-      store: createMemoryStore(),
+      store: await createMemoryStore(),
       livePollMs: 5,
     });
     const serving = reader.serve();
@@ -78,7 +78,7 @@ describe('createReader', () => {
   it('runs a backfill against a stub L1 with no events', async () => {
     const reader = await createReader(baseConfig(), {
       l1: fakeL1({ chainId: 11155111, head: 100 }),
-      store: createMemoryStore(),
+      store: await createMemoryStore(),
     });
     const result = await reader.backfill(0, 50);
     expect(result.scanned).toBe(0);
@@ -87,7 +87,7 @@ describe('createReader', () => {
   });
 
   it('reports blocksBehindHead from cursor + l1 head in health()', async () => {
-    const store = createMemoryStore();
+    const store = await createMemoryStore();
     await store.withTxn(async (txn) => {
       await txn.setCursor({
         chainId: 11155111,

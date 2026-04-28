@@ -1,19 +1,15 @@
 /**
  * Integration test for the live-tail loop. Drives a stubbed L1 against
- * a real (sqlite) `bam-store`, asserting:
+ * a real (PGLite-backed) `bam-store`, asserting:
  *   - `processBatch` is called for every scanned event.
  *   - The cursor advances exactly once per block.
  *   - Out-of-window events are not scanned.
  *   - Counters reflect what the batch processor reports.
  */
 
-import { existsSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-
 import type { Address, Bytes32 } from 'bam-sdk';
-import { createDbStore } from 'bam-store';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { createMemoryStore } from 'bam-store';
+import { describe, expect, it } from 'vitest';
 
 import {
   liveTailTick,
@@ -99,21 +95,9 @@ function fakeL1(opts: {
 }
 
 describe('liveTailTick (integration)', () => {
-  let dbPath: string;
-
-  beforeEach(() => {
-    dbPath = join(tmpdir(), `bam-reader-${Date.now()}-${Math.random().toString(16).slice(2)}.db`);
-  });
-
-  afterEach(() => {
-    for (const ext of ['', '-wal', '-shm']) {
-      const p = dbPath + ext;
-      if (existsSync(p)) rmSync(p);
-    }
-  });
 
   it('scans events in the safe range, advances cursor, and counts processed batches', async () => {
-    const store = createDbStore({ sqlitePath: dbPath });
+    const store = await createMemoryStore();
     try {
       const events = [
         fakeEvent({ block: 100, tx: 0, log: 0 }),
@@ -168,7 +152,7 @@ describe('liveTailTick (integration)', () => {
   });
 
   it('returns immediately with no scan when fromBlock > safeHead', async () => {
-    const store = createDbStore({ sqlitePath: dbPath });
+    const store = await createMemoryStore();
     try {
       // Pre-set the cursor past the safeHead.
       await store.withTxn(async (txn) => {
@@ -203,7 +187,7 @@ describe('liveTailTick (integration)', () => {
   });
 
   it('parks the cursor at the last good block when a transient unreachable lands', async () => {
-    const store = createDbStore({ sqlitePath: dbPath });
+    const store = await createMemoryStore();
     try {
       const events = [
         fakeEvent({ block: 100, tx: 0, log: 0 }),
@@ -297,7 +281,7 @@ describe('liveTailTick (integration)', () => {
   });
 
   it('runs the reorg watcher tick once per call', async () => {
-    const store = createDbStore({ sqlitePath: dbPath });
+    const store = await createMemoryStore();
     try {
       let watcherTicks = 0;
       const counters = emptyCounters();

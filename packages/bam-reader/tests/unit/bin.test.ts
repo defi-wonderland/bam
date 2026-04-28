@@ -147,12 +147,15 @@ describe('bam-reader CLI — subprocess', () => {
     };
   }
 
-  function readerEnv(rpcUrl: string, dbPath: string, chainId = 1): Record<string, string> {
+  function readerEnv(rpcUrl: string, _dbPath: string, chainId = 1): Record<string, string> {
     return {
       READER_CHAIN_ID: String(chainId),
       READER_RPC_URL: rpcUrl,
       READER_BAM_CORE: '0x000000000000000000000000000000000000c07e',
-      READER_DB_URL: `sqlite:${dbPath}`,
+      // In-process PGLite — the CLI no longer accepts sqlite: URLs.
+      // The dbPath argument is kept for callers that still mkdtemp,
+      // but is unused.
+      READER_DB_URL: 'memory:',
       READER_HTTP_BIND: '127.0.0.1',
       READER_HTTP_PORT: '0',
     };

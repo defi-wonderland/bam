@@ -9,12 +9,14 @@ import {
 
 import { IngestPipeline } from '../../src/ingest/pipeline.js';
 import { RateLimiter } from '../../src/ingest/rate-limit.js';
-import { SqliteBamStore } from 'bam-store';
+import { createMemoryStore } from 'bam-store';
 import type { MessageValidator, BamStore } from '../../src/types.js';
 
 /**
  * Integration test — concurrent ingest of the same `(sender, nonce)`
- * against a real sqlite store must admit exactly one pool row.
+ * against the in-process PGLite store must admit exactly one pool
+ * row. PGLite's `SERIALIZABLE` semantics cover the same invariant the
+ * SQLite version of this test exercised (file renamed accordingly).
  */
 
 const CHAIN_ID = 31337;
@@ -24,8 +26,8 @@ const TAG = ('0x' + 'aa'.repeat(32)) as Bytes32;
 
 const stores: BamStore[] = [];
 
-function newStore(): SqliteBamStore {
-  const s = new SqliteBamStore(':memory:');
+async function newStore(): Promise<BamStore> {
+  const s = await createMemoryStore();
   stores.push(s);
   return s;
 }
@@ -74,9 +76,9 @@ function mkPipeline(store: BamStore): IngestPipeline {
   });
 }
 
-describe('concurrency (SQLite) — ingest atomicity', () => {
+describe('concurrency (PGLite) — ingest atomicity', () => {
   it('50 parallel identical submits → exactly one pool row; rest are accepted no-ops', async () => {
-    const store = newStore();
+    const store = await newStore();
     const pipeline = mkPipeline(store);
     const raw = signedEnvelope(1n);
     const results = await Promise.all(
@@ -91,7 +93,7 @@ describe('concurrency (SQLite) — ingest atomicity', () => {
   });
 
   it('concurrent distinct (sender, nonce) pairs all admit', async () => {
-    const store = newStore();
+    const store = await newStore();
     const pipeline = mkPipeline(store);
     const raws = [1n, 2n, 3n, 4n, 5n].map(signedEnvelope);
     const results = await Promise.all(raws.map((r) => pipeline.ingest(r)));
@@ -103,7 +105,7 @@ describe('concurrency (SQLite) — ingest atomicity', () => {
   });
 
   it('concurrent mix of valid + stale nonces → stale ones reject', async () => {
-    const store = newStore();
+    const store = await newStore();
     const pipeline = mkPipeline(store);
     // Seed nonce=3 as last-accepted.
     await pipeline.ingest(signedEnvelope(3n));

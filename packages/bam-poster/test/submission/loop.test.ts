@@ -3,7 +3,8 @@ import type { Address, Bytes32 } from 'bam-sdk';
 
 import { SubmissionLoop } from '../../src/submission/loop.js';
 import { DEFAULT_BACKOFF } from '../../src/submission/backoff.js';
-import { MemoryBamStore } from 'bam-store';
+import { createMemoryStore } from 'bam-store';
+import type { BamStore } from 'bam-store';
 import type { BuildAndSubmit, SubmitOutcome } from '../../src/submission/types.js';
 import type { BatchPolicy, DecodedMessage, PoolView } from '../../src/types.js';
 
@@ -34,18 +35,18 @@ function mkPolicy(select: (pool: PoolView) => DecodedMessage[] | null): BatchPol
 }
 
 interface Harness {
-  store: MemoryBamStore;
+  store: BamStore;
   loop: SubmissionLoop;
   outcomes: SubmitOutcome[];
   build: BuildAndSubmit;
 }
 
-function mkHarness(opts: {
+async function mkHarness(opts: {
   outcome: SubmitOutcome | 'sequence';
   sequence?: SubmitOutcome[];
   policyPicks?: number;
-}): Harness {
-  const store = new MemoryBamStore();
+}): Promise<Harness> {
+  const store = await createMemoryStore();
   const picks = opts.policyPicks ?? 2;
   const policy = mkPolicy((pool) => {
     const msgs = pool.list(TAG);
@@ -62,6 +63,7 @@ function mkHarness(opts: {
   };
   const loop = new SubmissionLoop({
     tag: TAG,
+    chainId: 31337,
     store,
     policy,
     blobCapacityBytes: 100_000,
@@ -73,12 +75,12 @@ function mkHarness(opts: {
   return { store, loop, outcomes: calls, build };
 }
 
-async function seedPending(store: MemoryBamStore, count: number): Promise<void> {
+async function seedPending(store: BamStore, count: number): Promise<void> {
   await store.withTxn(async (txn) => {
     for (let i = 1; i <= count; i++) {
       const contents = new Uint8Array(40);
       contents.fill(0xaa, 0, 32);
-      txn.insertPending({
+      await txn.insertPending({
         contentTag: TAG,
         sender: SENDER,
         nonce: BigInt(i),
@@ -94,7 +96,7 @@ async function seedPending(store: MemoryBamStore, count: number): Promise<void> 
 
 describe('SubmissionLoop', () => {
   it('empty pool → idle, no submission', async () => {
-    const h = mkHarness({
+    const h = await mkHarness({
       outcome: { kind: 'included', txHash: '0x01' as Bytes32, blockNumber: 1, txIndex: 0, blobVersionedHash: '0x02' as Bytes32 },
     });
     const res = await h.loop.tick();
@@ -103,7 +105,7 @@ describe('SubmissionLoop', () => {
   });
 
   it('successful submit records submitted batch, prunes pending, resets backoff', async () => {
-    const h = mkHarness({
+    const h = await mkHarness({
       outcome: {
         kind: 'included',
         txHash: ('0x' + 'aa'.repeat(32)) as Bytes32,
@@ -136,7 +138,7 @@ describe('SubmissionLoop', () => {
   });
 
   it('retryable failure increments backoff without pruning pending', async () => {
-    const h = mkHarness({
+    const h = await mkHarness({
       outcome: { kind: 'retryable', detail: 'rpc_down' },
       policyPicks: 1,
     });
@@ -152,7 +154,7 @@ describe('SubmissionLoop', () => {
   });
 
   it('permanent failure stops the worker (subsequent ticks return "permanent")', async () => {
-    const h = mkHarness({
+    const h = await mkHarness({
       outcome: { kind: 'permanent', detail: 'abi_mismatch' },
       policyPicks: 1,
     });
@@ -164,7 +166,7 @@ describe('SubmissionLoop', () => {
   });
 
   it('degraded health after N consecutive retryable failures', async () => {
-    const h = mkHarness({
+    const h = await mkHarness({
       outcome: { kind: 'retryable', detail: 'rpc_down' },
       policyPicks: 1,
     });
@@ -182,7 +184,7 @@ describe('SubmissionLoop', () => {
     // silently missing from the snapshot, and listSubmittedBatches
     // would then surface a confirmed batch with fewer messages than
     // were actually submitted. Build from `picked` instead.
-    const h = mkHarness({
+    const h = await mkHarness({
       outcome: {
         kind: 'included',
         txHash: ('0x' + 'aa'.repeat(32)) as Bytes32,
@@ -200,6 +202,7 @@ describe('SubmissionLoop', () => {
     const originalBuild = h.build;
     h.loop = new SubmissionLoop({
       tag: TAG,
+      chainId: 31337,
       store: h.store,
       policy: mkPolicy((pool) => {
         const msgs = pool.list(TAG);

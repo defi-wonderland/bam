@@ -9,7 +9,7 @@ import {
   DEFAULT_REORG_WINDOW,
   type BlockSource,
 } from '../../src/submission/reorg-watcher.js';
-import { MemoryBamStore } from 'bam-store';
+import { createMemoryStore } from 'bam-store';
 import type { BamStore } from 'bam-store';
 
 interface Snapshot {
@@ -129,7 +129,7 @@ describe('clampReorgWindow', () => {
 
 describe('ReorgWatcher', () => {
   it('in-window reorg marks included row as reorged with invalidatedAt set', async () => {
-    const store = new MemoryBamStore();
+    const store = await createMemoryStore();
     const submittedAt = 1_000;
     await seedConfirmedBatch(store, {
         txHash: TX_A,
@@ -156,7 +156,7 @@ describe('ReorgWatcher', () => {
   });
 
   it('in-window reorg re-enqueues messages in original ingest order', async () => {
-    const store = new MemoryBamStore();
+    const store = await createMemoryStore();
     await seedConfirmedBatch(store, {
         txHash: TX_A,
         contentTag: TAG,
@@ -182,7 +182,7 @@ describe('ReorgWatcher', () => {
   });
 
   it('last-accepted-nonce tracker does NOT regress on reorg', async () => {
-    const store = new MemoryBamStore();
+    const store = await createMemoryStore();
     await store.withTxn(async (txn) => txn.setNonce({
         sender: SENDER,
         lastNonce: 10n,
@@ -210,7 +210,7 @@ describe('ReorgWatcher', () => {
   });
 
   it('out-of-window reorg is ignored (row stays included)', async () => {
-    const store = new MemoryBamStore();
+    const store = await createMemoryStore();
     await seedConfirmedBatch(store, {
         txHash: TX_A,
         contentTag: TAG,
@@ -236,7 +236,7 @@ describe('ReorgWatcher', () => {
   });
 
   it('tx still on chain keeps status included', async () => {
-    const store = new MemoryBamStore();
+    const store = await createMemoryStore();
     await seedConfirmedBatch(store, {
         txHash: TX_A,
         contentTag: TAG,
@@ -259,7 +259,7 @@ describe('ReorgWatcher', () => {
   });
 
   it('re-enqueued messages become listable via listPendingByTag', async () => {
-    const store = new MemoryBamStore();
+    const store = await createMemoryStore();
     await seedConfirmedBatch(store, {
         txHash: TX_A,
         contentTag: TAG,

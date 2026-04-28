@@ -1,6 +1,6 @@
 import type { Address } from 'bam-sdk';
 
-import { SCHEMA_VERSION, SqliteBamStore, PostgresBamStore } from 'bam-store';
+import { SCHEMA_VERSION, PostgresBamStore } from 'bam-store';
 import type { BamStore } from '../types.js';
 
 /**
@@ -58,17 +58,13 @@ export async function reconcileStartup(
  * at the remedy.
  */
 export async function reconcileSchemaVersion(store: BamStore): Promise<void> {
-  // Duck-type the adapters that expose a schema-version read. The
-  // in-memory store has no persisted schema (always current), so we
-  // skip it silently.
-  let found: number | null = null;
-  if (store instanceof SqliteBamStore) {
-    found = store.readSchemaVersion();
-  } else if (store instanceof PostgresBamStore) {
-    found = await store.readSchemaVersion();
-  } else {
-    return;
-  }
+  // Only `PostgresBamStore` exposes a persisted schema-version row; the
+  // PGLite-backed in-memory store is also a `PostgresBamStore`, but its
+  // schema is freshly created at construction time so its read always
+  // matches `SCHEMA_VERSION`. Other store implementations (none today)
+  // have no persisted schema and are skipped silently.
+  if (!(store instanceof PostgresBamStore)) return;
+  const found = await store.readSchemaVersion();
   if (found !== SCHEMA_VERSION) {
     throw new StartupReconciliationError(
       `schema-version mismatch: DB=${found} expected=${SCHEMA_VERSION}. ` +

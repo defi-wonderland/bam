@@ -15,8 +15,6 @@ describe('@bam/poster public surface', () => {
 
   it('exports store constructors', () => {
     expect(typeof poster.createMemoryStore).toBe('function');
-    expect(typeof poster.MemoryBamStore).toBe('function');
-    expect(typeof poster.SqliteBamStore).toBe('function');
     expect(typeof poster.PostgresBamStore).toBe('function');
     expect(typeof poster.createDbStore).toBe('function');
   });

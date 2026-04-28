@@ -88,7 +88,7 @@ Different processes, different owners. The Poster's vars (`POSTER_*`) only matte
 - **React Query** — data fetching
 - **bam-sdk** — encoding, signatures, KZG (browser entrypoint for client)
 - **viem** — EIP-4844 blob transactions
-- **better-sqlite3** / **Vercel Postgres** — storage
+- **bam-store** — storage (PGLite in-process, or real Postgres via `POSTGRES_URL`)
 
 ## License
 

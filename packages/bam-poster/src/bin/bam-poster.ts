@@ -19,7 +19,7 @@ import { EnvConfigError, parseEnv } from './env.js';
 import { HttpServer } from '../http/server.js';
 import { createPoster } from '../factory.js';
 import { LocalEcdsaSigner } from '../signer/local.js';
-import { createDbStore } from 'bam-store';
+import { createDbStore, createMemoryStore } from 'bam-store';
 import { StartupReconciliationError } from '../startup/reconcile.js';
 import { DEFAULT_MAX_MESSAGE_SIZE_BYTES } from '../ingest/size-bound.js';
 
@@ -72,12 +72,27 @@ export async function runCli(): Promise<void> {
   }
 
   const signer = new LocalEcdsaSigner(env.signerPrivateKey);
-  // CLI default: SQLite at ./poster.db when nothing more specific is set.
-  // bam-store itself reads no environment variables; the CLI resolves them.
-  const store = createDbStore({
-    sqlitePath: env.sqlitePath ?? './poster.db',
-    postgresUrl: env.postgresUrl,
-  });
+  // CLI default: in-process PGLite when `POSTGRES_URL` is not set; real
+  // Postgres when it is. bam-store itself reads no environment
+  // variables; the CLI resolves them.
+  let store;
+  if (env.postgresUrl) {
+    store = await createDbStore({ postgresUrl: env.postgresUrl });
+  } else {
+    // The pre-consolidation CLI used a persistent SQLite file as its
+    // default. PGLite-in-memory restores the "open and go" experience
+    // for local dev, but a misconfigured production deploy would boot
+    // fine and silently lose all pending/submitted state on restart.
+    // Surface the swap loudly so the operator notices before the
+    // first restart bites them.
+    process.stderr.write(
+      'bam-poster: WARNING — POSTGRES_URL is unset; using an in-process ' +
+        'PGLite store. State is NOT persistent and will be lost on ' +
+        'restart. Set POSTGRES_URL to a real Postgres for any deploy ' +
+        'that needs durability.\n'
+    );
+    store = await createMemoryStore();
+  }
 
   // Real on-chain submission via viem — the default `buildAndSubmit`
   // consults `config.rpcUrl`, builds a blob tx, waits for inclusion,
