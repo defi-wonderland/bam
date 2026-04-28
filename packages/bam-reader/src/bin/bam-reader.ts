@@ -17,16 +17,68 @@
  *   4 — bad subcommand / argv parse error
  */
 
+import { existsSync } from 'node:fs';
+import path from 'node:path';
+import { config as dotenvConfig } from 'dotenv';
+
 import { ChainIdMismatch } from '../errors.js';
 import { EnvConfigError, parseEnv } from './env.js';
 import { createReader } from '../factory.js';
 import { ReaderHttpServer } from '../http/server.js';
 import { createViemL1 } from './viem-l1.js';
 
+/**
+ * Resolve + load a dotenv file so users don't have to `export` each
+ * READER_* var before running. Mirrors the Poster's `loadDotenv` —
+ * resolution order:
+ *   1. `READER_ENV_FILE` — explicit override (e.g.
+ *      `READER_ENV_FILE=.env.sepolia pnpm dev:reader`).
+ *   2. Walk up (bounded at 5 ancestors) looking for `.env.local`,
+ *      then `.env`, in each directory. `.env.local` wins within a
+ *      directory — same convention as the Poster + Next.js + Vite,
+ *      so a single workspace `.env.local` feeds both backend
+ *      services.
+ *
+ * Existing `process.env` values always win — dotenv only fills in
+ * variables that aren't already set, matching standard semantics.
+ */
+function loadDotenv(): void {
+  const explicit = process.env.READER_ENV_FILE;
+  if (explicit !== undefined && explicit !== '') {
+    if (existsSync(explicit)) dotenvConfig({ path: explicit });
+    return;
+  }
+  let dir = process.cwd();
+  for (let i = 0; i < 5; i++) {
+    for (const name of ['.env.local', '.env']) {
+      const candidate = path.join(dir, name);
+      if (existsSync(candidate)) {
+        dotenvConfig({ path: candidate });
+        return;
+      }
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) return;
+    dir = parent;
+  }
+}
+
 export interface ParsedArgs {
   subcommand: 'serve' | 'backfill';
   fromBlock?: number;
   toBlock?: number;
+}
+
+/**
+ * `JSON.stringify` replacer that stringifies bigints to decimal.
+ * `ReaderEvent.message_conflict` carries `nonce: bigint` and at least
+ * one structured-log call site emits it from inside a withTxn —
+ * without a replacer, the throw kills the live-tail tick instead of
+ * surfacing the conflict. Same convention as
+ * `http/routes.ts:jsonResponse`.
+ */
+export function jsonReplacer(_k: string, v: unknown): unknown {
+  return typeof v === 'bigint' ? v.toString() : v;
 }
 
 export class ArgParseError extends Error {
@@ -107,6 +159,8 @@ export async function runCli(
     process.exit(4);
   }
 
+  loadDotenv();
+
   let cfg;
   try {
     cfg = parseEnv();
@@ -127,7 +181,14 @@ export async function runCli(
       decodePublicClient: adapter.decodePublicClient,
       verifyPublicClient: adapter.verifyPublicClient,
       logger: (event) => {
-        process.stdout.write(`[bam-reader] ${JSON.stringify(event)}\n`);
+        // ReaderEvent.message_conflict carries `nonce: bigint`; without
+        // the replacer, JSON.stringify throws synchronously and the
+        // live-tail tick catches it as a "tick failed" instead of
+        // logging the conflict. Same convention as
+        // `http/routes.ts:jsonResponse`.
+        process.stdout.write(
+          `[bam-reader] ${JSON.stringify(event, jsonReplacer)}\n`
+        );
       },
     });
   } catch (err) {
@@ -142,7 +203,7 @@ export async function runCli(
     try {
       const result = await reader.backfill(args.fromBlock!, args.toBlock!);
       process.stdout.write(
-        `[bam-reader] backfill complete: ${JSON.stringify(result)}\n`
+        `[bam-reader] backfill complete: ${JSON.stringify(result, jsonReplacer)}\n`
       );
       await reader.close();
       process.exit(0);

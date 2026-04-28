@@ -1,82 +1,139 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createPublicClient, http } from 'viem';
-import { sepolia } from 'viem/chains';
-import { fetchBlobForTx, extractUsableBytes, decodeBlobBatch } from '@/lib/blob-fetch';
-import { decodeSocialContents } from '@/lib/contents-codec';
 
+import { MESSAGE_IN_A_BLOBBLE_TAG } from '@/lib/constants';
+import { decodeSocialContents } from '@/lib/contents-codec';
+import {
+  getBatch,
+  listConfirmedMessages,
+  readerErrorToResponse,
+} from '@/lib/reader-client';
+
+interface SnapshotEntry {
+  author: string;
+  nonce: string;
+  messageId: string;
+  messageIndexWithinBatch: number;
+  messageHash: string;
+}
+
+interface ReaderBatch {
+  txHash: string;
+  blockNumber: number | null;
+  blobVersionedHash: string;
+  messageSnapshot: SnapshotEntry[];
+}
+
+interface ReaderMessage {
+  author: string;
+  nonce: string;
+  contents: string;
+  batchRef: string | null;
+  messageIndexWithinBatch: number | null;
+}
+
+interface DecodedMessage {
+  sender: string;
+  content: string | null;
+  timestamp: number | null;
+  nonce: string;
+}
+
+function hexToBytes(hex: string): Uint8Array {
+  const c = hex.startsWith('0x') ? hex.slice(2) : hex;
+  if (c.length % 2 !== 0 || !/^[0-9a-fA-F]*$/.test(c)) {
+    throw new Error('invalid hex');
+  }
+  const out = new Uint8Array(c.length / 2);
+  for (let i = 0; i < out.length; i++) {
+    out[i] = parseInt(c.slice(i * 2, i * 2 + 2), 16);
+  }
+  return out;
+}
+
+function safeDecode(contentsHex: string): { timestamp: number; content: string } | null {
+  try {
+    const { app } = decodeSocialContents(hexToBytes(contentsHex));
+    return app;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Detail view for a single confirmed batch. Two Reader calls in
+ * parallel: one for the batch row (gives `blobVersionedHash`,
+ * `blockNumber`, ordering via `messageSnapshot`), one for the
+ * messages attached to that batch (gives the payload bytes that
+ * decode into rendered text).
+ *
+ * `messageSnapshot` alone would let us render authors and nonces
+ * but no `content` text — the snapshot does not carry payload
+ * bytes. The matching `MessageRow.contents` field does, so we
+ * fetch and merge.
+ */
 export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ txHash: string }> }
-) {
+): Promise<NextResponse> {
   try {
     const { txHash } = await params;
-    const rpcUrl = process.env.NEXT_PUBLIC_RPC_URL || undefined;
-    const publicClient = createPublicClient({
-      chain: sepolia,
-      transport: http(rpcUrl),
-    });
 
-    const receipt = await publicClient.getTransactionReceipt({
-      hash: txHash as `0x${string}`,
-    });
+    const [batchRes, messagesRes] = await Promise.all([
+      getBatch(txHash),
+      listConfirmedMessages({
+        contentTag: MESSAGE_IN_A_BLOBBLE_TAG,
+        batchRef: txHash,
+      }),
+    ]);
 
-    if (!receipt) {
-      return NextResponse.json({ error: 'Transaction not found' }, { status: 404 });
+    // Forward upstream non-200 verbatim — same convention as the
+    // confirmed-messages and blobbles list routes. The Reader's 404
+    // body is `{ error: 'not_found' }`.
+    if (batchRes.status !== 200) {
+      return NextResponse.json(batchRes.body, { status: batchRes.status });
+    }
+    const batch = (batchRes.body as { batch?: ReaderBatch }).batch;
+    if (!batch) {
+      return NextResponse.json({ error: 'not_found' }, { status: 404 });
     }
 
-    const tx = await publicClient.getTransaction({
-      hash: txHash as `0x${string}`,
-    });
-
-    const blobVersionedHashes = tx.blobVersionedHashes;
-    if (!blobVersionedHashes || blobVersionedHashes.length === 0) {
-      return NextResponse.json({ error: 'No blobs in this transaction' }, { status: 400 });
-    }
-
-    const blobData = await fetchBlobForTx(txHash);
-
-    if (!blobData) {
-      return NextResponse.json({
-        txHash,
-        blockNumber: Number(receipt.blockNumber),
-        blobVersionedHashes,
-        messages: null,
-        note: 'Blob data not available (blobs are pruned after ~18 days, or RPC does not support blob retrieval)',
-      });
-    }
-
-    const usableBytes = extractUsableBytes(blobData);
-    const decoded = decodeBlobBatch(usableBytes);
-
-    const messages = decoded.messages.map((m) => {
-      try {
-        const { app } = decodeSocialContents(m.contents);
-        return {
-          sender: m.sender,
-          nonce: m.nonce.toString(),
-          timestamp: app.timestamp,
-          content: app.content,
-        };
-      } catch {
-        return {
-          sender: m.sender,
-          nonce: m.nonce.toString(),
-          timestamp: null,
-          content: null,
-        };
+    // Build a (author,nonce) → MessageRow lookup so we can attach
+    // payload bytes to each snapshot entry. The Reader returns 200
+    // even with no rows; treat that as "snapshot has identity but
+    // payload bytes weren't observed" rather than an error.
+    const byKey = new Map<string, ReaderMessage>();
+    if (messagesRes.status === 200) {
+      const rows =
+        (messagesRes.body as { messages?: ReaderMessage[] }).messages ?? [];
+      for (const m of rows) {
+        byKey.set(`${m.author.toLowerCase()}:${m.nonce}`, m);
       }
-    });
+    }
+
+    const messages: DecodedMessage[] = batch.messageSnapshot
+      .slice()
+      .sort((a, b) => a.messageIndexWithinBatch - b.messageIndexWithinBatch)
+      .map((entry) => {
+        const match = byKey.get(`${entry.author.toLowerCase()}:${entry.nonce}`);
+        const decoded = match ? safeDecode(match.contents) : null;
+        return {
+          sender: entry.author,
+          nonce: entry.nonce,
+          timestamp: decoded?.timestamp ?? null,
+          content: decoded?.content ?? null,
+        };
+      });
 
     return NextResponse.json({
-      txHash,
-      blockNumber: Number(receipt.blockNumber),
-      blobVersionedHashes,
+      txHash: batch.txHash,
+      blockNumber: batch.blockNumber ?? 0,
+      blobVersionedHashes: [batch.blobVersionedHash],
       messageCount: messages.length,
       messages,
     });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Unknown error';
-    console.error('Failed to fetch blobble details:', error);
-    return NextResponse.json({ error: message }, { status: 500 });
+  } catch (err) {
+    const mapped = readerErrorToResponse(err);
+    if (mapped) return mapped;
+    throw err;
   }
 }

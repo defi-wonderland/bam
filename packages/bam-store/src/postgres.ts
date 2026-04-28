@@ -600,6 +600,17 @@ function makeTxn(tx: DrizzleDb): StoreTxn {
       }
     },
 
+    async getBatchByTxHash(
+      chainId: number,
+      txHash: Bytes32
+    ): Promise<BatchRow | null> {
+      const rows = await tx
+        .select()
+        .from(batchesT)
+        .where(and(eq(batchesT.chainId, chainId), eq(batchesT.txHash, txHash)));
+      return rows[0] ? mapBatch(rows[0] as unknown as RawBatch) : null;
+    },
+
     async listBatches(query: BatchesQuery): Promise<BatchRow[]> {
       const conds = [
         query.contentTag !== undefined ? eq(batchesT.contentTag, query.contentTag) : undefined,

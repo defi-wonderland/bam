@@ -90,6 +90,7 @@ export interface StoreTxn {
     }
   ): Promise<void>;
   listBatches(query: BatchesQuery): Promise<BatchRow[]>;
+  getBatchByTxHash(chainId: number, txHash: Bytes32): Promise<BatchRow | null>;
 
   // ── reader cursor ────────────────────────────────────────────────────
   getCursor(chainId: number): Promise<ReaderCursorRow | null>;

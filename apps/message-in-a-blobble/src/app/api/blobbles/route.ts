@@ -1,85 +1,57 @@
 import { NextResponse } from 'next/server';
-import { createPublicClient, http, parseAbiItem } from 'viem';
-import { sepolia } from 'viem/chains';
-import { BAM_CORE_ADDRESS, MESSAGE_IN_A_BLOBBLE_TAG } from '@/lib/constants';
+
+import { MESSAGE_IN_A_BLOBBLE_TAG } from '@/lib/constants';
+import { listBatches, readerErrorToResponse } from '@/lib/reader-client';
 
 interface Blobble {
   versionedHash: string;
-  submitter: string;
   timestamp: number;
   txHash: string;
   blockNumber: number;
 }
 
+interface ReaderBatchRow {
+  txHash: string;
+  contentTag: string;
+  blobVersionedHash: string;
+  blockNumber: number | null;
+  submittedAt: number | null;
+  messageSnapshot: Array<{ author: string }>;
+}
+
 /**
- * Read path for the amended ERC-8180 BAM core: filter
- * `BlobBatchRegistered` by this app's content tag, window the last
- * ~day of blocks, enrich with block timestamps (the event dropped
- * the explicit `timestamp` field the legacy contract had).
+ * Read path for confirmed batches — proxies to the Reader's
+ * `GET /batches` endpoint. The Reader's L1-tailing loop already
+ * derived this view from `BlobBatchRegistered` events, so the demo
+ * no longer needs to re-query L1 RPC for it. The wire shape exposed
+ * to the browser is the legacy `Blobble[]` shape; reshaping happens
+ * here so the Reader's HTTP surface stays generic.
  */
-export async function GET() {
+export async function GET(): Promise<NextResponse> {
   try {
-    const rpcUrl = process.env.NEXT_PUBLIC_RPC_URL || undefined;
-    const client = createPublicClient({ chain: sepolia, transport: http(rpcUrl) });
-
-    if (BAM_CORE_ADDRESS === '0x0000000000000000000000000000000000000000') {
-      return NextResponse.json(
-        { error: 'NEXT_PUBLIC_BAM_CORE_ADDRESS is not configured' },
-        { status: 500 }
-      );
-    }
-
-    const head = await client.getBlockNumber();
-    // Look back ~1 day of blocks (12 s each).
-    const fromBlock = head - 7200n > 0n ? head - 7200n : 0n;
-
-    const logs = await client.getLogs({
-      address: BAM_CORE_ADDRESS,
-      event: parseAbiItem(
-        'event BlobBatchRegistered(bytes32 indexed versionedHash, address indexed submitter, bytes32 indexed contentTag, address decoder, address signatureRegistry)'
-      ),
-      args: { contentTag: MESSAGE_IN_A_BLOBBLE_TAG },
-      fromBlock,
-      toBlock: 'latest',
+    const res = await listBatches({
+      contentTag: MESSAGE_IN_A_BLOBBLE_TAG,
+      status: 'confirmed',
     });
+    if (res.status !== 200) {
+      return NextResponse.json(res.body, { status: res.status });
+    }
+    const rows = (res.body as { batches?: ReaderBatchRow[] }).batches ?? [];
 
-    // Fetch unique block timestamps under bounded concurrency so a
-    // window with many distinct event-carrying blocks can't fan out
-    // into thousands of simultaneous RPC calls and trip rate limits
-    // (qodo review). Memoize so duplicate events in the same block
-    // reuse a single fetch.
-    const uniqueBlocks = Array.from(new Set(logs.map((l) => l.blockNumber)));
-    const timestampByBlock = new Map<bigint, number>();
-    const RPC_CONCURRENCY = 8;
-    let cursor = 0;
-    const workers = Array.from(
-      { length: Math.min(RPC_CONCURRENCY, uniqueBlocks.length) },
-      async () => {
-        while (true) {
-          const i = cursor++;
-          if (i >= uniqueBlocks.length) return;
-          const blk = uniqueBlocks[i];
-          const b = await client.getBlock({ blockNumber: blk });
-          timestampByBlock.set(blk, Number(b.timestamp));
-        }
-      }
-    );
-    await Promise.all(workers);
-
-    const blobbles: Blobble[] = logs.map((log) => ({
-      versionedHash: log.args.versionedHash!,
-      submitter: log.args.submitter!,
-      timestamp: timestampByBlock.get(log.blockNumber) ?? 0,
-      txHash: log.transactionHash,
-      blockNumber: Number(log.blockNumber),
+    const blobbles: Blobble[] = rows.map((r) => ({
+      versionedHash: r.blobVersionedHash,
+      timestamp:
+        r.submittedAt !== null ? Math.floor(r.submittedAt / 1000) : 0,
+      txHash: r.txHash,
+      blockNumber: r.blockNumber ?? 0,
     }));
 
     blobbles.sort((a, b) => b.blockNumber - a.blockNumber);
 
     return NextResponse.json({ blobbles });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Unknown error';
-    console.error('Failed to fetch blobbles:', error);
-    return NextResponse.json({ error: message }, { status: 500 });
+  } catch (err) {
+    const mapped = readerErrorToResponse(err);
+    if (mapped) return mapped;
+    throw err;
   }
 }

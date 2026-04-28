@@ -1,15 +1,18 @@
 import { NextResponse } from 'next/server';
 
-import { getBamStore } from '@/lib/bam-store-client';
 import { MESSAGE_IN_A_BLOBBLE_TAG } from '@/lib/constants';
+import {
+  listConfirmedMessages,
+  readerErrorToResponse,
+} from '@/lib/reader-client';
 
 /**
- * Read surface for **confirmed** messages — sourced from the shared
- * `bam-store` substrate (populated by the Reader, and optionally by a
- * co-located Poster). Each row carries `{ sender, nonce, contents:
- * hex, signature, messageHash, messageId }`. `contents` is left
- * opaque at this boundary — the client side (`lib/messages.ts` +
- * `contents-codec.ts`) decodes it for display.
+ * Read surface for **confirmed** messages — sourced from the Reader's
+ * `GET /messages` endpoint over HTTP. The wire shape exposed to the
+ * browser (`{ messages: ConfirmedRow[] }`) is held constant; the
+ * Reader returns generic `bam-store` rows (with `bigint` stringified
+ * and bytea fields rendered as `0x`-prefixed hex), and this route
+ * reshapes them.
  */
 interface ConfirmedRow {
   message_id: string;
@@ -23,21 +26,32 @@ interface ConfirmedRow {
   status: 'posted';
 }
 
-function bytesToHex(bytes: Uint8Array): string {
-  let out = '0x';
-  for (const b of bytes) out += b.toString(16).padStart(2, '0');
-  return out;
+interface ReaderMessageRow {
+  messageId: string | null;
+  author: string;
+  nonce: string;
+  contentTag: string;
+  contents: string;
+  signature: string;
+  messageHash: string;
+  status: string;
+  batchRef: string | null;
+  blockNumber: number | null;
 }
 
 export async function GET(): Promise<NextResponse> {
   try {
-    const store = await getBamStore();
-    const rows = await store.withTxn(async (txn) =>
-      txn.listMessages({
-        contentTag: MESSAGE_IN_A_BLOBBLE_TAG,
-        status: 'confirmed',
-      })
-    );
+    const res = await listConfirmedMessages({
+      contentTag: MESSAGE_IN_A_BLOBBLE_TAG,
+      status: 'confirmed',
+    });
+    if (res.status !== 200) {
+      // Forward the Reader's error verbatim so a 4xx/5xx from the
+      // upstream stays visible to the client (parallel to the Poster
+      // proxy pattern).
+      return NextResponse.json(res.body, { status: res.status });
+    }
+    const rows = (res.body as { messages?: ReaderMessageRow[] }).messages ?? [];
 
     // Substrate invariant: a `confirmed` MessageRow always has a
     // non-null `batchRef` (points to the BatchRow it landed in). Drop
@@ -47,22 +61,16 @@ export async function GET(): Promise<NextResponse> {
       if (r.batchRef === null) return [];
       const txHash = r.batchRef;
       const id = r.messageId ?? r.messageHash;
-      // `blobbleId` was a substring of the blobVersionedHash; the
-      // Reader writes the same `batchRef = txHash`, and the BatchRow's
-      // `blobVersionedHash` is unavailable directly on a MessageRow,
-      // so use the txHash prefix as the stable ID instead. Equivalent
-      // length / role for the UI.
-      const blobbleId = txHash.slice(0, 18);
       return [
         {
           message_id: id,
           sender: r.author,
-          nonce: String(r.nonce),
-          contents: bytesToHex(r.contents),
-          signature: bytesToHex(r.signature),
+          nonce: r.nonce,
+          contents: r.contents,
+          signature: r.signature,
           tx_hash: txHash,
           block_number: r.blockNumber,
-          blobble_id: blobbleId,
+          blobble_id: txHash.slice(0, 18),
           status: 'posted',
         },
       ];
@@ -70,13 +78,8 @@ export async function GET(): Promise<NextResponse> {
 
     return NextResponse.json({ messages });
   } catch (err) {
-    // Log the underlying detail server-side; clients only get the
-    // generic code so we don't leak DSN strings, schema hints, or
-    // stack traces into the response body.
-    console.error('[confirmed-messages] bam_store_unreachable:', err);
-    return NextResponse.json(
-      { error: 'bam_store_unreachable' },
-      { status: 502 }
-    );
+    const mapped = readerErrorToResponse(err);
+    if (mapped) return mapped;
+    throw err;
   }
 }

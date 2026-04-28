@@ -8,8 +8,9 @@
     "test:run": "pnpm -r test:run",
     "lint": "pnpm -r lint",
     "clean": "pnpm -r clean",
-    "dev": "pnpm --parallel --stream --filter @bam/poster --filter message-in-a-blobble dev",
+    "dev": "pnpm --parallel --stream --filter @bam/poster --filter bam-reader --filter message-in-a-blobble dev",
     "dev:poster": "pnpm --filter @bam/poster dev",
+    "dev:reader": "pnpm --filter bam-reader dev",
     "db:up": "docker compose up -d --wait postgres",
     "db:down": "docker compose down",
     "db:reset": "docker compose down -v",
@@ -26,7 +27,6 @@
   },
   "pnpm": {
     "onlyBuiltDependencies": [
-      "better-sqlite3",
       "c-kzg",
       "esbuild"
     ]

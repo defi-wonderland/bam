@@ -17,11 +17,18 @@
  * the network or the filesystem.
  */
 
-import type { BamStore } from 'bam-store';
+import type {
+  BamStore,
+  BatchRow,
+  BatchesQuery,
+  MessageRow,
+  MessagesQuery,
+} from 'bam-store';
 import {
   createDbStore,
   createMemoryStore,
 } from 'bam-store';
+import type { Bytes32 } from 'bam-sdk';
 
 import { ChainIdMismatch } from './errors.js';
 import { assertChainIdMatches } from './bin/env.js';
@@ -53,6 +60,9 @@ export interface Reader {
   backfill(from: number, to: number): Promise<BackfillCounters>;
   health(): Promise<ReaderHealthSnapshot>;
   close(): Promise<void>;
+  listConfirmedMessages(query: MessagesQuery): Promise<MessageRow[]>;
+  listBatches(query: BatchesQuery): Promise<BatchRow[]>;
+  getBatch(txHash: Bytes32): Promise<BatchRow | null>;
 }
 
 export interface ReaderFactoryExtras {
@@ -201,6 +211,18 @@ export async function createReader(
         blocksBehindHead,
         counters: { ...counters },
       };
+    },
+
+    async listConfirmedMessages(query) {
+      return store.withTxn((txn) => txn.listMessages(query));
+    },
+
+    async listBatches(query) {
+      return store.withTxn((txn) => txn.listBatches(query));
+    },
+
+    async getBatch(txHash) {
+      return store.withTxn((txn) => txn.getBatchByTxHash(config.chainId, txHash));
     },
 
     async close() {

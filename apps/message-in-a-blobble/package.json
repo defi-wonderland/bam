@@ -8,15 +8,13 @@
     "start": "next start",
     "lint": "next lint",
     "test": "vitest",
-    "test:run": "vitest --run"
+    "test:run": "vitest --run",
+    "test:bundle-audit": "node scripts/audit-bundle.mjs"
   },
   "dependencies": {
     "@rainbow-me/rainbowkit": "^2.2.4",
     "@tanstack/react-query": "^5.62.16",
-    "@bam/poster": "workspace:*",
-    "bam-reader": "workspace:*",
     "bam-sdk": "workspace:*",
-    "bam-store": "workspace:*",
     "next": "^15.1.4",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
@@ -24,6 +22,7 @@
     "wagmi": "^2.14.11"
   },
   "devDependencies": {
+    "@bam/poster": "workspace:*",
     "@types/node": "^20.11.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",

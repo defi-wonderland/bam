@@ -6,7 +6,6 @@ import { AddressLink } from '@/components/AddressLink';
 
 interface OnChainBlobble {
   versionedHash: string;
-  submitter: string;
   timestamp: number;
   txHash: string;
   blockNumber: number;

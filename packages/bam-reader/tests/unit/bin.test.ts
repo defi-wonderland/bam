@@ -21,9 +21,11 @@ import { describe, expect, it } from 'vitest';
 
 import {
   ArgParseError,
+  jsonReplacer,
   parseArgs,
   usage,
 } from '../../src/bin/bam-reader.js';
+import type { ReaderEvent } from '../../src/types.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -75,6 +77,38 @@ describe('bam-reader CLI — argv parsing', () => {
     expect(u).toMatch(/backfill/);
     expect(u).toMatch(/--from/);
     expect(u).toMatch(/--to/);
+  });
+});
+
+describe('bam-reader CLI — structured log replacer', () => {
+  it('serializes message_conflict (the bigint-bearing event) without throwing', () => {
+    // Regression guard: `ReaderEvent.message_conflict` carries
+    // `nonce: bigint`. Without `jsonReplacer`, JSON.stringify throws
+    // "Do not know how to serialize a BigInt" synchronously, the
+    // throw escapes the logger callback inside withTxn, the txn
+    // rolls back, and the live-tail tick reports
+    // `live_tail_tick_failed` instead of the actual conflict.
+    const event: ReaderEvent = {
+      kind: 'message_conflict',
+      txHash: ('0x' + '11'.repeat(32)) as never,
+      messageHash: ('0x' + '22'.repeat(32)) as never,
+      author: ('0x' + '33'.repeat(20)) as never,
+      nonce: 42n,
+    };
+    expect(() => JSON.stringify(event, jsonReplacer)).not.toThrow();
+    const parsed = JSON.parse(JSON.stringify(event, jsonReplacer));
+    expect(parsed.nonce).toBe('42');
+    expect(parsed.kind).toBe('message_conflict');
+  });
+
+  it('passes non-bigint values through unchanged', () => {
+    const event: ReaderEvent = {
+      kind: 'message_verified',
+      txHash: ('0x' + '11'.repeat(32)) as never,
+      messageHash: ('0x' + '22'.repeat(32)) as never,
+    };
+    const parsed = JSON.parse(JSON.stringify(event, jsonReplacer));
+    expect(parsed).toEqual(event);
   });
 });
 

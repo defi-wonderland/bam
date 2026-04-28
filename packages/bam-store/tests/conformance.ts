@@ -391,6 +391,45 @@ export function runConformance(make: StoreFactory): void {
     });
   });
 
+  describe('getBatchByTxHash', () => {
+    it('returns the same row that listBatches would, and null for an unknown hash', async () => {
+      const store = await newStore();
+      const snap: BatchMessageSnapshotEntry[] = [snapshotEntry()];
+      await store.withTxn((txn) =>
+        txn.upsertBatch(
+          batchRow({ txHash: TX_A, status: 'confirmed', blockNumber: 10, messageSnapshot: snap })
+        )
+      );
+      await store.withTxn((txn) =>
+        txn.upsertBatch(
+          batchRow({ txHash: TX_B, status: 'confirmed', blockNumber: 20 })
+        )
+      );
+
+      const fromList = await store.withTxn((txn) =>
+        txn.listBatches({ contentTag: TAG_A })
+      );
+      const targetA = fromList.find((b) => b.txHash === TX_A) ?? null;
+      expect(targetA).not.toBeNull();
+
+      const direct = await store.withTxn((txn) => txn.getBatchByTxHash(1, TX_A));
+      expect(direct).not.toBeNull();
+      expect(direct).toEqual(targetA);
+
+      const missing = await store.withTxn((txn) =>
+        txn.getBatchByTxHash(1, ('0x' + 'ee'.repeat(32)) as Bytes32)
+      );
+      expect(missing).toBeNull();
+
+      // Cross-chain isolation: same txHash on a different chainId
+      // must not return the row.
+      const wrongChain = await store.withTxn((txn) =>
+        txn.getBatchByTxHash(999, TX_A)
+      );
+      expect(wrongChain).toBeNull();
+    });
+  });
+
   describe('cross-component write interleaving in one withTxn', () => {
     it('Poster marks submitted while Reader upserts observed; both persist without loss', async () => {
       const store = await newStore();
