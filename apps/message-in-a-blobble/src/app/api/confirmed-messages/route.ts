@@ -31,7 +31,7 @@ function bytesToHex(bytes: Uint8Array): string {
 
 export async function GET(): Promise<NextResponse> {
   try {
-    const store = getBamStore();
+    const store = await getBamStore();
     const rows = await store.withTxn(async (txn) =>
       txn.listMessages({
         contentTag: MESSAGE_IN_A_BLOBBLE_TAG,

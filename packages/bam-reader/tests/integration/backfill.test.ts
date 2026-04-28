@@ -1,17 +1,13 @@
 /**
- * Backfill integration test. Drives a stubbed L1 against a sqlite
- * `bam-store`; covers an in-window blob (transient unreachable),
+ * Backfill integration test. Drives a stubbed L1 against an in-process
+ * PGLite `bam-store`; covers an in-window blob (transient unreachable),
  * an out-of-window blob (permanent unreachable), and a non-BAM
  * tx (no-op). Re-runs the same range to confirm idempotency.
  */
 
-import { existsSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-
 import type { Address, Bytes32 } from 'bam-sdk';
-import { createDbStore } from 'bam-store';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { createMemoryStore } from 'bam-store';
+import { describe, expect, it } from 'vitest';
 
 import { backfill, DEFAULT_RETENTION_THRESHOLD_BLOCKS } from '../../src/loop/backfill.js';
 import type { LiveTailL1Client } from '../../src/loop/live-tail.js';
@@ -83,21 +79,9 @@ function fakeL1(opts: {
 }
 
 describe('backfill (integration)', () => {
-  let dbPath: string;
-
-  beforeEach(() => {
-    dbPath = join(tmpdir(), `bam-reader-backfill-${Date.now()}-${Math.random().toString(16).slice(2)}.db`);
-  });
-
-  afterEach(() => {
-    for (const ext of ['', '-wal', '-shm']) {
-      const p = dbPath + ext;
-      if (existsSync(p)) rmSync(p);
-    }
-  });
 
   it('classifies in-window unreachable as transient and out-of-window as permanent; ignores non-BAM blocks', async () => {
-    const store = createDbStore({ sqlitePath: dbPath });
+    const store = await createMemoryStore();
     try {
       const recentBlock = 100_000;
       const ancientBlock = 1; // very old
@@ -141,7 +125,7 @@ describe('backfill (integration)', () => {
   });
 
   it('uses an explicit retentionThresholdBlocks to split permanent vs transient', async () => {
-    const store = createDbStore({ sqlitePath: dbPath });
+    const store = await createMemoryStore();
     try {
       const head = 1000;
       const events = [
@@ -181,7 +165,7 @@ describe('backfill (integration)', () => {
   });
 
   it('is idempotent: re-running the same range writes no duplicates', async () => {
-    const store = createDbStore({ sqlitePath: dbPath });
+    const store = await createMemoryStore();
     try {
       const event = fakeEvent({ block: 50 });
       const counters = emptyCounters();

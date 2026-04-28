@@ -74,18 +74,21 @@ export interface ReaderFactoryExtras {
 
 const DEFAULT_LIVE_POLL_MS = 12_000;
 
-function createStoreFromDbUrl(dbUrl: string): BamStore {
+async function createStoreFromDbUrl(dbUrl: string): Promise<BamStore> {
   if (dbUrl === 'memory:' || dbUrl === 'memory') {
     return createMemoryStore();
-  }
-  if (dbUrl.startsWith('sqlite:')) {
-    return createDbStore({ sqlitePath: dbUrl.slice('sqlite:'.length) });
   }
   if (dbUrl.startsWith('postgres:') || dbUrl.startsWith('postgresql:')) {
     return createDbStore({ postgresUrl: dbUrl });
   }
+  if (dbUrl.startsWith('sqlite:')) {
+    throw new Error(
+      `READER_DB_URL=${dbUrl}: SQLite is no longer supported. Use ` +
+        'memory: for an in-process PGLite store, or a postgres:// URL.'
+    );
+  }
   throw new Error(
-    `unrecognized READER_DB_URL: ${dbUrl} (expect sqlite:..., postgres://..., or memory:)`
+    `unrecognized READER_DB_URL: ${dbUrl} (expect postgres://... or memory:)`
   );
 }
 
@@ -96,7 +99,7 @@ export async function createReader(
   // 1. Validate chainId at construction (red-team C-3).
   await assertChainIdMatches(extras.l1, config.chainId);
 
-  const store = extras.store ?? createStoreFromDbUrl(config.dbUrl);
+  const store = extras.store ?? (await createStoreFromDbUrl(config.dbUrl));
   const counters = emptyCounters();
   const startBlock = extras.startBlock ?? 0;
   const pollMs = extras.livePollMs ?? DEFAULT_LIVE_POLL_MS;

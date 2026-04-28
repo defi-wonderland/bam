@@ -73,7 +73,7 @@ const FAKE_BLOB = new Uint8Array(4096 * 32); // 1Ã—128 KB; payload meaningless â
 
 describe('processBatch', () => {
   it('writes a confirmed BatchRow + per-message rows on the happy path', async () => {
-    const store = createMemoryStore();
+    const store = await createMemoryStore();
     const counters = emptyCounters();
     const m1 = makeSignedMessage(1n, new Uint8Array([1, 2, 3]));
     const m2 = makeSignedMessage(2n, new Uint8Array([4, 5, 6]));
@@ -128,7 +128,7 @@ describe('processBatch', () => {
   });
 
   it('drops a single bad-signature message but lands the rest of the batch', async () => {
-    const store = createMemoryStore();
+    const store = await createMemoryStore();
     const counters = emptyCounters();
     const m1 = makeSignedMessage(1n, new Uint8Array([1]));
     const m2 = makeSignedMessage(2n, new Uint8Array([2]));
@@ -171,7 +171,7 @@ describe('processBatch', () => {
   });
 
   it('writes a BatchRow with empty snapshot and zero MessageRows on structural decode failure', async () => {
-    const store = createMemoryStore();
+    const store = await createMemoryStore();
     const counters = emptyCounters();
     const events: ReaderEvent[] = [];
     await processBatch({
@@ -208,7 +208,7 @@ describe('processBatch', () => {
   });
 
   it('continues past a substrate (author, nonce) conflict and preserves the prior row', async () => {
-    const store = createMemoryStore();
+    const store = await createMemoryStore();
     const counters = emptyCounters();
     const m1 = makeSignedMessage(1n, new Uint8Array([1]));
 
@@ -266,7 +266,7 @@ describe('processBatch', () => {
   });
 
   it('writes only an empty BatchRow when the blob is unreachable from all sources', async () => {
-    const store = createMemoryStore();
+    const store = await createMemoryStore();
     const counters = emptyCounters();
     const events: ReaderEvent[] = [];
     await processBatch({
@@ -297,7 +297,7 @@ describe('processBatch', () => {
   });
 
   it('writes two distinct BatchRows when the same versionedHash registers under two tags (red-team C-6)', async () => {
-    const store = createMemoryStore();
+    const store = await createMemoryStore();
     const counters = emptyCounters();
     const versionedHash = ('0x01' + 'cc'.repeat(31)) as Bytes32;
     const m1 = makeSignedMessage(1n, new Uint8Array([1]), TAG_A);

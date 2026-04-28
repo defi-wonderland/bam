@@ -54,7 +54,7 @@ describe('ReaderHttpServer', () => {
   });
 
   it('returns the documented /health JSON shape on GET /health', async () => {
-    const store = createMemoryStore();
+    const store = await createMemoryStore();
     await store.withTxn(async (txn) => {
       await txn.setCursor({
         chainId: CHAIN_ID,
@@ -97,7 +97,7 @@ describe('ReaderHttpServer', () => {
   it('binds to 127.0.0.1 by default (host accessor reflects this)', async () => {
     const reader = await createReader(baseConfig(), {
       l1: fakeL1({ head: 100 }),
-      store: createMemoryStore(),
+      store: await createMemoryStore(),
     });
     cleanups.push(() => reader.close());
     const http = await ReaderHttpServer.start({ reader, port: 0 });
@@ -108,7 +108,7 @@ describe('ReaderHttpServer', () => {
   it('returns 404 for unknown routes', async () => {
     const reader = await createReader(baseConfig(), {
       l1: fakeL1({ head: 100 }),
-      store: createMemoryStore(),
+      store: await createMemoryStore(),
     });
     cleanups.push(() => reader.close());
     const http = await ReaderHttpServer.start({ reader, port: 0 });

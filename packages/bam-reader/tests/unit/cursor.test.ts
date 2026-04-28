@@ -7,7 +7,7 @@ const CHAIN_ID = 11155111;
 
 describe('commitBlock', () => {
   it('advances the cursor only after writes succeed', async () => {
-    const store = createMemoryStore();
+    const store = await createMemoryStore();
     const observed: string[] = [];
     await commitBlock(store, {
       chainId: CHAIN_ID,
@@ -29,7 +29,7 @@ describe('commitBlock', () => {
   });
 
   it('does not advance the cursor when writes throw', async () => {
-    const store = createMemoryStore();
+    const store = await createMemoryStore();
     await expect(
       commitBlock(store, {
         chainId: CHAIN_ID,
@@ -45,7 +45,7 @@ describe('commitBlock', () => {
   });
 
   it('preserves the prior cursor when a later block fails mid-write', async () => {
-    const store = createMemoryStore();
+    const store = await createMemoryStore();
     await commitBlock(store, {
       chainId: CHAIN_ID,
       blockNumber: 100,
@@ -68,7 +68,7 @@ describe('commitBlock', () => {
   });
 
   it('passes the same StoreTxn to writes that setCursor uses', async () => {
-    const store = createMemoryStore();
+    const store = await createMemoryStore();
     const seen: unknown[] = [];
     await commitBlock(store, {
       chainId: CHAIN_ID,

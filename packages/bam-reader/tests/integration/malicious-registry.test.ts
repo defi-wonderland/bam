@@ -75,7 +75,7 @@ function makeEvent(opts: { txHash: Bytes32; signatureRegistry: Address; block: n
 
 describe('malicious-registry eth_call DoS', () => {
   it('treats a hanging registry call as per-message skip + continues to the next batch', async () => {
-    const store = createMemoryStore();
+    const store = await createMemoryStore();
     const counters = emptyCounters();
     const m1 = makeSignedMessage(1n, new Uint8Array([1]));
     const m2 = makeSignedMessage(2n, new Uint8Array([2]));
@@ -120,7 +120,7 @@ describe('malicious-registry eth_call DoS', () => {
   });
 
   it('treats a "gas exceeds allowance" revert as per-message skip + continues', async () => {
-    const store = createMemoryStore();
+    const store = await createMemoryStore();
     const counters = emptyCounters();
     const m = makeSignedMessage(1n, new Uint8Array([1]));
 
