@@ -87,13 +87,44 @@ function parseBigint(raw: string, key: string, opts?: { min?: bigint }): bigint 
 }
 
 /**
+ * Default sentinel returned when neither `READER_DB_URL` nor
+ * `POSTGRES_URL` is set. The factory recognises this as the in-process
+ * PGLite path (mirrors the Poster's `POSTGRES_URL`-unset behaviour).
+ */
+const MEMORY_DB_URL = 'memory:';
+
+/**
  * Parse `process.env` into a `ReaderConfig`. Defaults match the plan's
  * Public API / wire format section.
+ *
+ * Optional `warn` sink receives a one-line message when the parser
+ * applies a fallback the operator probably wants to see (e.g.
+ * defaulting to in-process PGLite). The CLI wires this to stderr;
+ * tests use it to assert the warning surfaces without scraping
+ * `process.stderr`.
  */
-export function parseEnv(env: NodeJS.ProcessEnv = process.env): ReaderConfig {
+export function parseEnv(
+  env: NodeJS.ProcessEnv = process.env,
+  warn?: (message: string) => void
+): ReaderConfig {
   const chainId = parseInteger(requireEnv(env, 'READER_CHAIN_ID'), 'READER_CHAIN_ID', {
     min: 1,
   });
+
+  // Cross-check against POSTER_CHAIN_ID when both are present in the
+  // environment (e.g. `pnpm dev` runs both services from the same
+  // shell). Catches the split-brain case where an operator points
+  // each service at a different chain. Silent when either var is unset.
+  const posterChainIdRaw = optionalString(env, 'POSTER_CHAIN_ID');
+  if (posterChainIdRaw !== undefined) {
+    const posterChainId = parseInteger(posterChainIdRaw, 'POSTER_CHAIN_ID', { min: 1 });
+    if (posterChainId !== chainId) {
+      throw new EnvConfigError(
+        `READER_CHAIN_ID=${chainId} does not match POSTER_CHAIN_ID=${posterChainId}; refusing to start. ` +
+          `Both services share a Postgres substrate — pointing them at different chains would cross-write rows.`
+      );
+    }
+  }
 
   const rpcUrl = requireEnv(env, 'READER_RPC_URL');
   const bamCoreAddress = requireAddress(env, 'READER_BAM_CORE');
@@ -107,7 +138,25 @@ export function parseEnv(env: NodeJS.ProcessEnv = process.env): ReaderConfig {
     env.READER_REORG_WINDOW_BLOCKS ? Number(env.READER_REORG_WINDOW_BLOCKS) : 32
   );
 
-  const dbUrl = requireEnv(env, 'READER_DB_URL');
+  // DSN resolution mirrors the Poster's "just run it" defaulting:
+  //   1. `READER_DB_URL` — explicit Reader-side override.
+  //   2. `POSTGRES_URL` — the shared workspace DSN (also what
+  //      Vercel-managed Postgres bindings ship with). Used by the
+  //      Poster as its primary DSN; reusing it here means a
+  //      `pnpm dev` checkout doesn't need two copies of the same
+  //      connection string.
+  //   3. Fallback: `memory:` — in-process PGLite, non-durable.
+  //      Operators wanting durability set the env var explicitly.
+  const dbUrl =
+    optionalString(env, 'READER_DB_URL') ??
+    optionalString(env, 'POSTGRES_URL') ??
+    MEMORY_DB_URL;
+  if (dbUrl === MEMORY_DB_URL) {
+    warn?.(
+      'bam-reader: neither READER_DB_URL nor POSTGRES_URL set; defaulting to in-process PGLite (memory:). ' +
+        'Confirmed rows are non-durable across restarts.'
+    );
+  }
 
   const httpBind = env.READER_HTTP_BIND ?? '127.0.0.1';
   const httpPort = parseInteger(env.READER_HTTP_PORT ?? '8788', 'READER_HTTP_PORT', {

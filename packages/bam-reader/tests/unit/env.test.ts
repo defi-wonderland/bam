@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   EnvConfigError,
@@ -83,6 +83,84 @@ describe('parseEnv', () => {
     expect(() =>
       parseEnv({ ...VALID, READER_CONTENT_TAGS: '0xabc' })
     ).toThrow(/invalid bytes32/);
+  });
+
+  describe('dbUrl resolution', () => {
+    function withoutDbUrl(over: Record<string, string> = {}): NodeJS.ProcessEnv {
+      const partial: Record<string, string> = { ...VALID, ...over };
+      delete partial.READER_DB_URL;
+      return partial;
+    }
+
+    it('uses READER_DB_URL when set; never warns', () => {
+      const warn = vi.fn();
+      const cfg = parseEnv(VALID, warn);
+      expect(cfg.dbUrl).toBe('sqlite:./reader.db');
+      expect(warn).not.toHaveBeenCalled();
+    });
+
+    it('falls back to POSTGRES_URL when READER_DB_URL is unset', () => {
+      const warn = vi.fn();
+      const cfg = parseEnv(
+        withoutDbUrl({ POSTGRES_URL: 'postgres://example/bam' }),
+        warn
+      );
+      expect(cfg.dbUrl).toBe('postgres://example/bam');
+      expect(warn).not.toHaveBeenCalled();
+    });
+
+    it('READER_DB_URL takes precedence over POSTGRES_URL when both are set', () => {
+      const cfg = parseEnv({
+        ...VALID,
+        POSTGRES_URL: 'postgres://example/bam',
+      });
+      expect(cfg.dbUrl).toBe('sqlite:./reader.db');
+    });
+
+    it('defaults to memory: and emits a warning when neither is set', () => {
+      const warn = vi.fn();
+      const cfg = parseEnv(withoutDbUrl(), warn);
+      expect(cfg.dbUrl).toBe('memory:');
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn.mock.calls[0][0]).toMatch(/non-durable/i);
+    });
+
+    it('treats empty-string env values as unset for the fallback chain', () => {
+      // dotenv users sometimes write `POSTGRES_URL=` to "blank out" a
+      // value; the optionalString helper already collapses '' to
+      // undefined, but make the contract explicit.
+      const warn = vi.fn();
+      const cfg = parseEnv(
+        { ...withoutDbUrl(), POSTGRES_URL: '' },
+        warn
+      );
+      expect(cfg.dbUrl).toBe('memory:');
+      expect(warn).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('chain id cross-check against POSTER_CHAIN_ID', () => {
+    it('passes when both are present and match', () => {
+      const cfg = parseEnv({ ...VALID, POSTER_CHAIN_ID: '11155111' });
+      expect(cfg.chainId).toBe(11155111);
+    });
+
+    it('throws when both are present and differ', () => {
+      expect(() =>
+        parseEnv({ ...VALID, POSTER_CHAIN_ID: '1' })
+      ).toThrow(/READER_CHAIN_ID=11155111 does not match POSTER_CHAIN_ID=1/);
+    });
+
+    it('is silent when POSTER_CHAIN_ID is unset', () => {
+      const cfg = parseEnv(VALID);
+      expect(cfg.chainId).toBe(11155111);
+    });
+
+    it('rejects a malformed POSTER_CHAIN_ID rather than silently ignoring it', () => {
+      expect(() =>
+        parseEnv({ ...VALID, POSTER_CHAIN_ID: 'not-a-number' })
+      ).toThrow(/POSTER_CHAIN_ID/);
+    });
   });
 });
 
