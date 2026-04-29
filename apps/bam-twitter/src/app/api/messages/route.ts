@@ -5,9 +5,14 @@ import { TWITTER_TAG } from '@/lib/constants';
 
 /**
  * Thin HTTP proxy to the shared Poster, scoped to the bam-twitter
- * contentTag. GET forwards to `/pending`, POST forwards to `/submit`
- * after backfilling the contentTag (the Poster rejects envelopes
- * without one).
+ * contentTag. GET forwards to `/pending`, POST forwards to `/submit`.
+ *
+ * The contentTag on the forwarded envelope is **always** TWITTER_TAG —
+ * a client-supplied tag is ignored. The signed `contents` already carry
+ * the tag in `contents[0..32]`, and the Poster enforces
+ * `envelope.contentTag === contents[0..32]`, so a wrong tag would be
+ * rejected upstream anyway. Pinning it here makes per-app isolation a
+ * property of the route, not a property of caller behavior.
  */
 
 export async function GET(): Promise<NextResponse> {
@@ -35,16 +40,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     body && typeof body === 'object' && !Array.isArray(body)
       ? (body as Record<string, unknown>)
       : null;
-  const envelope =
-    parsed && 'message' in parsed
-      ? {
-          contentTag:
-            typeof parsed.contentTag === 'string'
-              ? parsed.contentTag
-              : TWITTER_TAG,
-          message: parsed.message,
-        }
-      : { contentTag: TWITTER_TAG, message: body };
+  const message = parsed && 'message' in parsed ? parsed.message : body;
+  const envelope = { contentTag: TWITTER_TAG, message };
   try {
     const poster = await submitMessage({
       rawEnvelope: new TextEncoder().encode(JSON.stringify(envelope)),

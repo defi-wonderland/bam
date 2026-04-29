@@ -17,6 +17,14 @@ export function Tweet({ tweet, replies = [] }: TweetProps) {
   const [showReply, setShowReply] = useState(false);
   const time = new Date(tweet.timestamp * 1000).toLocaleString();
 
+  // v1 caps reply depth at one level: top-level posts are repliable,
+  // replies are not. The Timeline only renders direct replies under
+  // top-level posts, so allowing replies-to-replies would silently
+  // accept tweets that never get displayed. Lifting this cap means
+  // also rendering the reply tree recursively (with depth limits +
+  // indentation) — out of scope for v1.
+  const isReplyable = tweet.parentMessageHash === null;
+
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-4 hover:bg-slate-50 transition-colors">
       <div className="flex items-center justify-between mb-1">
@@ -37,13 +45,15 @@ export function Tweet({ tweet, replies = [] }: TweetProps) {
       <p className="text-slate-900 whitespace-pre-wrap break-words">{tweet.content}</p>
 
       <div className="mt-3 flex items-center gap-3 text-xs text-slate-500">
-        <button
-          type="button"
-          onClick={() => setShowReply((v) => !v)}
-          className="hover:text-bird-600 focus:outline-none focus:ring-2 focus:ring-bird-300 rounded px-1"
-        >
-          {showReply ? 'Cancel' : 'Reply'}
-        </button>
+        {isReplyable && (
+          <button
+            type="button"
+            onClick={() => setShowReply((v) => !v)}
+            className="hover:text-bird-600 focus:outline-none focus:ring-2 focus:ring-bird-300 rounded px-1"
+          >
+            {showReply ? 'Cancel' : 'Reply'}
+          </button>
+        )}
         {tweet.tx_hash && (
           <a
             href={`https://sepolia.etherscan.io/tx/${tweet.tx_hash}`}
