@@ -111,11 +111,19 @@ export function lookupDeployBlock(chainId: number): number {
 
 /**
  * Resolve a `backfill` ParsedArgs into concrete `[fromBlock, toBlock]`
- * bounds. Shared between `--from deploy` (T010) and `--catchup` (T012)
- * — the catchup branch lands once `Reader.cursorBlock()` exists.
+ * bounds. Shared between `--from deploy` (T010) and `--catchup` (T012).
+ *
+ * Reorg safety: when `--to` is omitted, both `deploy` and `catchup`
+ * default to `safeHead = head - reorgWindowBlocks` rather than `head`.
+ * Advancing the cursor past `safeHead` would let a reorg within the
+ * window land new `BlobBatchRegistered` logs that live-tail (which
+ * resumes at `cursor + 1`) would never re-scan. Operators can still
+ * pass an explicit `--to N` past `safeHead` — that's an opt-in.
  *
  * Throws `UnknownChainDeploymentError` on `--from deploy` against an
- * unknown chainId; the bin maps this to exit code 4.
+ * unknown chainId. Throws `ArgParseError` when an explicit `--to N`
+ * for `--from deploy` is below the resolved deploy block (an inverted
+ * range that would silently no-op). The bin maps both to exit 4.
  */
 export async function resolveBackfillRange(
   args: ParsedArgs & { subcommand: 'backfill' },
@@ -128,8 +136,16 @@ export async function resolveBackfillRange(
   }
   if (args.fromMarker === 'deploy') {
     const fromBlock = lookupDeployBlock(cfg.chainId);
-    const toBlock =
-      args.toBlock !== undefined ? args.toBlock : Number(await l1.getBlockNumber());
+    const head = Number(await l1.getBlockNumber());
+    const safeHead = head - cfg.reorgWindowBlocks;
+    const toBlock = args.toBlock !== undefined ? args.toBlock : safeHead;
+    if (toBlock < fromBlock) {
+      const source = args.toBlock !== undefined ? `--to ${args.toBlock}` : `safe head ${safeHead}`;
+      throw new ArgParseError(
+        `backfill --from deploy: resolved fromBlock=${fromBlock} but toBlock=${toBlock} ` +
+          `(${source}); pass --to <block> >= ${fromBlock}`
+      );
+    }
     return { fromBlock, toBlock };
   }
   if (args.fromMarker === 'catchup') {
@@ -145,7 +161,8 @@ export async function resolveBackfillRange(
       );
     }
     const head = Number(await l1.getBlockNumber());
-    return { fromBlock: cursor + 1, toBlock: head };
+    const safeHead = head - cfg.reorgWindowBlocks;
+    return { fromBlock: cursor + 1, toBlock: safeHead };
   }
   // Exhaustiveness guard.
   const _exhaustive: never = args.fromMarker;

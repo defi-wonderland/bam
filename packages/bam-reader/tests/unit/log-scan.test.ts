@@ -254,6 +254,36 @@ describe('scanLogs', () => {
     expect(calls).toBe(1);
   });
 
+  it('rejects a non-integer chunkSize with TypeError (boundary validation)', async () => {
+    const client = fakeClient([]);
+    await expect(
+      scanLogs({
+        publicClient: client,
+        bamCoreAddress: BAM_CORE,
+        fromBlock: 0,
+        toBlock: 100,
+        chunkSize: 1.5,
+      })
+    ).rejects.toBeInstanceOf(TypeError);
+    // Critically, no getLogs call is issued before validation.
+    expect(client.calls.length).toBe(0);
+  });
+
+  it('rejects chunkSize = 0 and negative chunkSize', async () => {
+    const client = fakeClient([]);
+    for (const bad of [0, -1, -100]) {
+      await expect(
+        scanLogs({
+          publicClient: client,
+          bamCoreAddress: BAM_CORE,
+          fromBlock: 0,
+          toBlock: 100,
+          chunkSize: bad,
+        })
+      ).rejects.toBeInstanceOf(TypeError);
+    }
+  });
+
   it('does not halve on `exceeds the gas limit` (eth_call family, not range)', async () => {
     // Regression guard: an earlier `/exceeds the.*limit/i` pattern would
     // have matched legitimate eth_call gas-limit errors and triggered

@@ -184,10 +184,16 @@ async function fetchWithHalving(
 export async function scanLogs(
   opts: ScanLogsOptions
 ): Promise<BlobBatchRegisteredEvent[]> {
+  if (opts.chunkSize !== undefined) {
+    if (!Number.isInteger(opts.chunkSize) || opts.chunkSize < 1) {
+      throw new TypeError(
+        `scanLogs.chunkSize must be a positive integer, got ${opts.chunkSize}`
+      );
+    }
+  }
   if (opts.fromBlock > opts.toBlock) return [];
 
-  const chunkSize =
-    opts.chunkSize !== undefined && opts.chunkSize > 0 ? opts.chunkSize : undefined;
+  const chunkSize = opts.chunkSize;
   const rangeLen = opts.toBlock - opts.fromBlock + 1;
 
   let events: BlobBatchRegisteredEvent[];

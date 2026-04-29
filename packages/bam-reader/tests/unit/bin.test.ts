@@ -174,22 +174,40 @@ describe('bam-reader CLI — resolveBackfillRange', () => {
     expect(r).toEqual({ fromBlock: 10, toBlock: 100 });
   });
 
-  it('resolves fromMarker=deploy via the bam-sdk deploy table; defaults to= to head', async () => {
+  it('defaults --from deploy toBlock to safe head (head - reorgWindowBlocks)', async () => {
     const r = await resolveBackfillRange(
       { subcommand: 'backfill', fromMarker: 'deploy', toBlock: undefined },
-      baseCfg({ chainId: 11155111 }),
+      baseCfg({ chainId: 11155111, reorgWindowBlocks: 32 }),
       fakeL1(11_500_000)
     );
-    expect(r).toEqual({ fromBlock: 10_697_923, toBlock: 11_500_000 });
+    // Reorg safety: cursor must not advance past safeHead = 11_500_000 - 32.
+    expect(r).toEqual({ fromBlock: 10_697_923, toBlock: 11_499_968 });
   });
 
-  it('honors --to override under fromMarker=deploy', async () => {
+  it('honors --to override under fromMarker=deploy (operator opt-in past safeHead)', async () => {
     const r = await resolveBackfillRange(
       { subcommand: 'backfill', fromMarker: 'deploy', toBlock: 11_000_000 },
       baseCfg({ chainId: 11155111 }),
       fakeL1(11_500_000)
     );
     expect(r).toEqual({ fromBlock: 10_697_923, toBlock: 11_000_000 });
+  });
+
+  it('rejects --from deploy --to N when N < deployBlock (inverted range)', async () => {
+    await expect(
+      resolveBackfillRange(
+        { subcommand: 'backfill', fromMarker: 'deploy', toBlock: 1_000 },
+        baseCfg({ chainId: 11155111 }),
+        fakeL1(11_500_000)
+      )
+    ).rejects.toBeInstanceOf(ArgParseError);
+    await expect(
+      resolveBackfillRange(
+        { subcommand: 'backfill', fromMarker: 'deploy', toBlock: 1_000 },
+        baseCfg({ chainId: 11155111 }),
+        fakeL1(11_500_000)
+      )
+    ).rejects.toThrow(/fromBlock=10697923/);
   });
 
   it('throws UnknownChainDeploymentError when chainId is not in the table', async () => {
@@ -202,7 +220,7 @@ describe('bam-reader CLI — resolveBackfillRange', () => {
     ).rejects.toBeInstanceOf(UnknownChainDeploymentError);
   });
 
-  it('resolves --catchup against a populated cursor as [cursor + 1, head]', async () => {
+  it('resolves --catchup against a populated cursor as [cursor + 1, safe head]', async () => {
     const reader = {
       async cursorBlock() {
         return 1_000;
@@ -210,11 +228,29 @@ describe('bam-reader CLI — resolveBackfillRange', () => {
     };
     const r = await resolveBackfillRange(
       { subcommand: 'backfill', fromMarker: 'catchup' },
-      baseCfg({ chainId: 11155111 }),
+      baseCfg({ chainId: 11155111, reorgWindowBlocks: 32 }),
       fakeL1(2_500),
       reader
     );
-    expect(r).toEqual({ fromBlock: 1_001, toBlock: 2_500 });
+    // Reorg safety: cursor must not advance past safeHead = 2_500 - 32.
+    expect(r).toEqual({ fromBlock: 1_001, toBlock: 2_468 });
+  });
+
+  it('--catchup with cursor already past safeHead returns an empty (idempotent) range', async () => {
+    // safeHead = 2500 - 32 = 2468; cursor at 2470 means caught up.
+    const reader = {
+      async cursorBlock() {
+        return 2_470;
+      },
+    };
+    const r = await resolveBackfillRange(
+      { subcommand: 'backfill', fromMarker: 'catchup' },
+      baseCfg({ chainId: 11155111, reorgWindowBlocks: 32 }),
+      fakeL1(2_500),
+      reader
+    );
+    // fromBlock > toBlock — backfill's empty-range early return handles it.
+    expect(r.fromBlock).toBeGreaterThan(r.toBlock);
   });
 
   it('rejects --catchup against an empty cursor with an ArgParseError naming alternatives', async () => {

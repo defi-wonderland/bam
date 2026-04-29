@@ -155,13 +155,19 @@ The CLI accepts four backfill forms:
 ```bash
 bam-reader backfill --from <block> --to <block>   # explicit range
 bam-reader backfill --from deploy [--to <block>]  # from the BAM Core deploy block
-bam-reader backfill --catchup                     # [cursor + 1, head]
+bam-reader backfill --catchup                     # [cursor + 1, safe head]
 bam-reader serve                                  # long-running live-tail daemon
 ```
 
 `--from deploy` and `--catchup` are mutually exclusive with each
 other and with `--from N --to M`. When `--to` is omitted,
-`--from deploy` and `--catchup` default to current head.
+`--from deploy` and `--catchup` default to **safe head**
+(`current head − reorgWindowBlocks`). Advancing the cursor past
+the reorg window would let a subsequent reorg drop new
+`BlobBatchRegistered` logs that live-tail (which resumes at
+`cursor + 1`) would never re-scan. Operators who want to backfill
+into the reorg window can pass an explicit `--to <block>` — that is
+treated as an opt-in.
 
 ## Specs
 
