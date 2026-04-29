@@ -1,15 +1,29 @@
 #!/usr/bin/env bash
 # Imports per-service secrets into Fly from .env.local, plus the Managed
-# Postgres DSN passed as the first arg.
+# Postgres DSN read from env or stdin.
 #
-# Usage:
-#   scripts/fly-set-secrets.sh "postgres://user:pass@host/db"
+# Usage (env):    FLY_POSTGRES_URL='postgres://user:pass@host/db' scripts/fly-set-secrets.sh
+# Usage (stdin):  scripts/fly-set-secrets.sh <<< 'postgres://user:pass@host/db'
 #
-# Run once for each app (the script handles both: bam-poster and bam-reader).
+# The DSN is intentionally NOT accepted as a positional argument so it
+# does not appear in `ps`, shell history, or process audit logs.
+#
+# Run once; the script handles both apps (bam-poster and bam-reader).
 
 set -euo pipefail
 
-DSN="${1:?usage: fly-set-secrets.sh <POSTGRES_DSN>}"
+DSN="${FLY_POSTGRES_URL:-}"
+if [[ -z "$DSN" && ! -t 0 ]]; then
+  read -r DSN
+fi
+if [[ -z "$DSN" ]]; then
+  cat >&2 <<'USAGE'
+error: Postgres DSN required.
+  via env:    FLY_POSTGRES_URL='postgres://...' scripts/fly-set-secrets.sh
+  via stdin:  scripts/fly-set-secrets.sh <<< 'postgres://...'
+USAGE
+  exit 1
+fi
 ENV_FILE="${ENV_FILE:-.env.local}"
 
 if [[ ! -f "$ENV_FILE" ]]; then
