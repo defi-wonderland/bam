@@ -43,11 +43,25 @@ describe('PostgresBamStore — concurrent bootstrap (real Postgres)', () => {
       await pool.end();
     }
 
-    const [a, b] = await Promise.all([
+    // Use allSettled so a partial failure doesn't leak the sibling
+    // store's pg.Pool — Promise.all short-circuits on the first
+    // rejection, skipping the close path for the already-fulfilled
+    // store and hanging Vitest on its open handle.
+    const results = await Promise.allSettled([
       createPostgresStoreFromUrl(PG_URL),
       createPostgresStoreFromUrl(PG_URL),
     ]);
+    const opened = results.flatMap((r) =>
+      r.status === 'fulfilled' ? [r.value] : []
+    );
     try {
+      const failure = results.find(
+        (r): r is PromiseRejectedResult => r.status === 'rejected'
+      );
+      if (failure) {
+        throw failure.reason;
+      }
+      const [a, b] = opened;
       expect(await a.readSchemaVersion()).toBe(SCHEMA_VERSION);
       expect(await b.readSchemaVersion()).toBe(SCHEMA_VERSION);
 
@@ -62,8 +76,9 @@ describe('PostgresBamStore — concurrent bootstrap (real Postgres)', () => {
         await probePool.end();
       }
     } finally {
-      await a.close();
-      await b.close();
+      for (const store of opened) {
+        await store.close();
+      }
     }
   });
 });

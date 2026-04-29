@@ -219,7 +219,8 @@ export class PostgresBamStore implements BamStore {
       cleanup = connection.cleanup ?? null;
     }
     // Run DDL + singleton seed inside one transaction guarded by a
-    // session-level advisory lock. `CREATE TABLE IF NOT EXISTS` on its
+    // transaction-scoped advisory lock (`pg_advisory_xact_lock`, auto-
+    // released on commit/rollback). `CREATE TABLE IF NOT EXISTS` on its
     // own is *not* race-safe in Postgres — two concurrent transactions
     // can both pass the existence check and then collide on the
     // pg_type / pg_class system-catalog unique indexes. The advisory
