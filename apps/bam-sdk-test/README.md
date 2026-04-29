@@ -17,7 +17,7 @@ pnpm --filter bam-sdk-test dev
 |-------------|-----------|
 | Hex         | `hexToBytes`, `bytesToHex` |
 | Message     | `encodeContents`, `splitContents`, `computeMessageHash`, `computeMessageId` |
-| ECDSA       | `generateECDSAPrivateKey`, `deriveAddress`, `computeECDSADigest`, `signECDSAWithKey`, `verifyECDSA` |
+| ECDSA       | `generateECDSAPrivateKey`, `deriveAddress`, `computeECDSADigest`, `signECDSAWithKey`, `signECDSA` (via injected wallet), `verifyECDSA` |
 | BLS         | `generateBLSPrivateKey`, `deriveBLSPublicKey`, `signBLS`, `verifyBLS`, `aggregateBLS`, `verifyAggregateBLS` |
 | Batch       | `encodeBatch`, `decodeBatch`, `estimateBatchSize` |
 | Exposure    | `buildRawMessageBytes`, `encodeExposureBatch`, `decodeExposureBatch` |
@@ -26,11 +26,14 @@ pnpm --filter bam-sdk-test dev
 
 ## What's NOT surfaced
 
-- Wallet-path `signECDSA` (needs a viem `WalletClient` / connected wallet)
 - KZG proof generation (`kzg/*`) — requires the `c-kzg` native addon
 - `parseBlobForMessages` / `buildExposureParams` — depend on KZG
 - `loadBundledDictionary` / `loadDictionaryFromFile` — Node-only (`node:fs`, `node:crypto`)
 - `BAMClient` / `AggregatorClient` — require live RPC + aggregator endpoints
+
+The wallet path uses a minimal viem `createWalletClient({ transport: custom(window.ethereum) })`
+— no wagmi/RainbowKit. Any injected EIP-1193 provider (MetaMask, Rabby, Brave, …) works.
+The wallet's current chain id is what gets bound into the EIP-712 signature.
 
 For the wallet + on-chain flow, see the [`message-in-a-blobble`](../message-in-a-blobble)
 app instead.
