@@ -48,6 +48,9 @@ function baseConfig(): ReaderConfig {
     httpPort: 0,
     ethCallGasCap: 50_000_000n,
     ethCallTimeoutMs: 5_000,
+    logScanChunkBlocks: 2_000,
+    backfillProgressIntervalMs: 10_000,
+    backfillProgressEveryChunks: 5,
   };
 }
 

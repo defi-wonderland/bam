@@ -1,0 +1,46 @@
+# Keep the build context lean. The builder stage runs `pnpm install` from
+# the lockfile, so local node_modules / dist / native cache must NOT leak in.
+
+# Dependencies + build outputs
+**/node_modules
+**/dist
+**/.next
+**/*.tsbuildinfo
+
+# Foundry artifacts (bam-contracts is not built in the image)
+packages/bam-contracts/lib
+packages/bam-contracts/out
+packages/bam-contracts/cache
+packages/bam-contracts/broadcast
+.foundry
+.svm
+
+# Local env
+.env
+.env.*
+
+# SQLite (from local poster runs)
+**/*.db
+**/*.db-wal
+**/*.db-shm
+
+# Local Postgres data (compose volume mount, not bind, but be safe)
+data/postgres
+
+# Git + IDE + OS
+.git
+.gitignore
+.idea
+.vscode
+**/*.swp
+.DS_Store
+
+# Spec kit scratch
+docs/specs/features
+
+# Claude scratch
+.claude/context-snapshots
+.claude/settings.local.json
+
+# Don't ship the local docker artifacts into themselves
+docker-compose.override.yml

@@ -63,6 +63,13 @@ export interface Reader {
   listConfirmedMessages(query: MessagesQuery): Promise<MessageRow[]>;
   listBatches(query: BatchesQuery): Promise<BatchRow[]>;
   getBatch(txHash: Bytes32): Promise<BatchRow | null>;
+  /**
+   * The last block the cursor recorded for the configured chainId, or
+   * `null` when no cursor row exists yet. Used by the bin's
+   * `--catchup` resolver to compute `[cursor + 1, head]` without
+   * reaching into `store.withTxn` directly.
+   */
+  cursorBlock(): Promise<number | null>;
 }
 
 export interface ReaderFactoryExtras {
@@ -78,7 +85,11 @@ export interface ReaderFactoryExtras {
   logger?: (event: ReaderEvent) => void;
   /** Time between live-tail polls. Default 12s. */
   livePollMs?: number;
-  /** Initial block for first-time deployments. */
+  /**
+   * Initial block for first-time-run when no cursor row exists.
+   * Wins over `config.startBlock` when both are set; the bin uses
+   * this slot to pass the deploy-table-resolved value.
+   */
   startBlock?: number;
 }
 
@@ -111,7 +122,7 @@ export async function createReader(
 
   const store = extras.store ?? (await createStoreFromDbUrl(config.dbUrl));
   const counters = emptyCounters();
-  const startBlock = extras.startBlock ?? 0;
+  const startBlock = extras.startBlock ?? config.startBlock ?? 0;
   const pollMs = extras.livePollMs ?? DEFAULT_LIVE_POLL_MS;
 
   const sources = {
@@ -144,6 +155,7 @@ export async function createReader(
               contentTags: config.contentTags,
               reorgWindowBlocks: config.reorgWindowBlocks,
               startBlock,
+              logScanChunkBlocks: config.logScanChunkBlocks,
               ethCallGasCap: config.ethCallGasCap,
               ethCallTimeoutMs: config.ethCallTimeoutMs,
               sources,
@@ -178,6 +190,9 @@ export async function createReader(
         contentTags: config.contentTags,
         fromBlock: from,
         toBlock: to,
+        logScanChunkBlocks: config.logScanChunkBlocks,
+        progressIntervalMs: config.backfillProgressIntervalMs,
+        progressEveryChunks: config.backfillProgressEveryChunks,
         ethCallGasCap: config.ethCallGasCap,
         ethCallTimeoutMs: config.ethCallTimeoutMs,
         sources,
@@ -223,6 +238,11 @@ export async function createReader(
 
     async getBatch(txHash) {
       return store.withTxn((txn) => txn.getBatchByTxHash(config.chainId, txHash));
+    },
+
+    async cursorBlock() {
+      const cursor = await store.withTxn((txn) => txn.getCursor(config.chainId));
+      return cursor?.lastBlockNumber ?? null;
     },
 
     async close() {

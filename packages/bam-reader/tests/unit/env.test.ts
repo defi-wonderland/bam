@@ -85,6 +85,69 @@ describe('parseEnv', () => {
     ).toThrow(/invalid bytes32/);
   });
 
+  describe('reader scan ergonomics knobs', () => {
+    it('defaults the scan-ergonomics knobs when env is silent', () => {
+      const cfg = parseEnv({ ...VALID });
+      expect(cfg.startBlock).toBeUndefined();
+      expect(cfg.logScanChunkBlocks).toBe(2_000);
+      expect(cfg.backfillProgressIntervalMs).toBe(10_000);
+      expect(cfg.backfillProgressEveryChunks).toBe(5);
+    });
+
+    it('reads READER_START_BLOCK as a non-negative integer', () => {
+      const cfg = parseEnv({ ...VALID, READER_START_BLOCK: '1234567' });
+      expect(cfg.startBlock).toBe(1_234_567);
+    });
+
+    it('rejects READER_START_BLOCK below 0', () => {
+      expect(() =>
+        parseEnv({ ...VALID, READER_START_BLOCK: '-1' })
+      ).toThrow(/READER_START_BLOCK/);
+    });
+
+    it('rejects READER_LOG_SCAN_CHUNK_BLOCKS outside [64, 100_000]', () => {
+      expect(() =>
+        parseEnv({ ...VALID, READER_LOG_SCAN_CHUNK_BLOCKS: '63' })
+      ).toThrow(/READER_LOG_SCAN_CHUNK_BLOCKS/);
+      expect(() =>
+        parseEnv({ ...VALID, READER_LOG_SCAN_CHUNK_BLOCKS: '100001' })
+      ).toThrow(/READER_LOG_SCAN_CHUNK_BLOCKS/);
+    });
+
+    it('reads READER_LOG_SCAN_CHUNK_BLOCKS at the bounds', () => {
+      expect(parseEnv({ ...VALID, READER_LOG_SCAN_CHUNK_BLOCKS: '64' }).logScanChunkBlocks).toBe(64);
+      expect(
+        parseEnv({ ...VALID, READER_LOG_SCAN_CHUNK_BLOCKS: '100000' }).logScanChunkBlocks
+      ).toBe(100_000);
+    });
+
+    it('rejects READER_BACKFILL_PROGRESS_INTERVAL_MS < 1', () => {
+      expect(() =>
+        parseEnv({ ...VALID, READER_BACKFILL_PROGRESS_INTERVAL_MS: '0' })
+      ).toThrow(/READER_BACKFILL_PROGRESS_INTERVAL_MS/);
+    });
+
+    it('rejects READER_BACKFILL_PROGRESS_EVERY_CHUNKS < 1', () => {
+      expect(() =>
+        parseEnv({ ...VALID, READER_BACKFILL_PROGRESS_EVERY_CHUNKS: '0' })
+      ).toThrow(/READER_BACKFILL_PROGRESS_EVERY_CHUNKS/);
+    });
+
+    it('reads non-default values for all four knobs', () => {
+      const cfg = parseEnv({
+        ...VALID,
+        READER_START_BLOCK: '7800000',
+        READER_LOG_SCAN_CHUNK_BLOCKS: '500',
+        READER_BACKFILL_PROGRESS_INTERVAL_MS: '2500',
+        READER_BACKFILL_PROGRESS_EVERY_CHUNKS: '3',
+      });
+      expect(cfg.startBlock).toBe(7_800_000);
+      expect(cfg.logScanChunkBlocks).toBe(500);
+      expect(cfg.backfillProgressIntervalMs).toBe(2_500);
+      expect(cfg.backfillProgressEveryChunks).toBe(3);
+    });
+  });
+
   describe('dbUrl resolution', () => {
     function withoutDbUrl(over: Record<string, string> = {}): NodeJS.ProcessEnv {
       const partial: Record<string, string> = { ...VALID, ...over };

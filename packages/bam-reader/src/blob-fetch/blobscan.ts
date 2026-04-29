@@ -10,6 +10,8 @@
  * rejected the same way as a wrong-hash beacon sidecar.
  */
 
+import { isIP } from 'node:net';
+
 import type { Bytes32 } from 'bam-sdk';
 
 import { assertVersionedHashMatches } from './versioned-hash.js';
@@ -22,6 +24,14 @@ export interface BlobscanFetchOptions {
   /** Optional injected `fetch` for tests; defaults to global `fetch`. */
   fetchImpl?: FetchLike;
 }
+
+/**
+ * EIP-4844 blob size: 4096 field elements × 32 bytes. A storage URL
+ * should serve exactly this many bytes; a much larger response is a
+ * sign of a misbehaving or hostile upstream and is rejected before
+ * the body is buffered.
+ */
+const MAX_BLOB_BYTES = 131072;
 
 function trimSlash(s: string): string {
   return s.replace(/\/$/, '');
@@ -41,6 +51,73 @@ function hexToBytes(hex: string): Uint8Array {
     out[i] = parseInt(cleaned.slice(i * 2, i * 2 + 2), 16);
   }
   return out;
+}
+
+/**
+ * Blobscan v2 (current at time of writing) returns metadata only and
+ * points at one or more public storage URLs (`dataStorageReferences[].url`)
+ * that serve the raw blob bytes. The Reader hash-verifies the fetched
+ * bytes against the requested versioned hash, so a malicious URL cannot
+ * forge content. The hash check does NOT prevent the *outbound request*
+ * itself from hitting an internal target, so URLs are passed through
+ * `assertPublicHttpUrl` before fetch — see that function for the
+ * remaining residual risk (DNS rebinding) and the recommended
+ * network-level mitigation.
+ */
+function extractStorageUrls(data: unknown): string[] {
+  if (!data || typeof data !== 'object') return [];
+  const refs = (data as Record<string, unknown>).dataStorageReferences;
+  if (!Array.isArray(refs)) return [];
+  const out: string[] = [];
+  for (const ref of refs) {
+    if (!ref || typeof ref !== 'object') continue;
+    const url = (ref as { url?: unknown }).url;
+    if (typeof url === 'string' && (url.startsWith('https://') || url.startsWith('http://'))) {
+      out.push(url);
+    }
+  }
+  return out;
+}
+
+/**
+ * Reject storage URLs whose host is an IP literal or an obvious internal
+ * name. Defends against a compromised Blobscan response steering the
+ * reader's outbound HTTP at internal targets such as cloud metadata
+ * services (169.254.169.254) or RFC1918 networks.
+ *
+ * Residual risk: DNS rebinding — a public hostname that resolves to a
+ * private IP at request time — is not detected here. Production deploys
+ * should layer egress-firewall rules on top.
+ */
+function assertPublicHttpUrl(url: string): void {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new Error(`refusing invalid storage URL: ${url}`);
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new Error(`refusing storage URL with non-http(s) scheme: ${parsed.protocol}`);
+  }
+  // Strip the FQDN trailing root dot (e.g. "localhost." resolves the same
+  // as "localhost" but would bypass an endsWith('.local') check).
+  // Node's URL.hostname also keeps the brackets on IPv6 literals
+  // (e.g. "[::1]"), so strip them before handing to isIP().
+  const host = parsed.hostname.toLowerCase().replace(/\.$/, '');
+  const ipCandidate =
+    host.startsWith('[') && host.endsWith(']') ? host.slice(1, -1) : host;
+  if (isIP(ipCandidate) !== 0) {
+    throw new Error(`refusing IP-literal storage URL host: ${host}`);
+  }
+  if (
+    host === 'localhost' ||
+    host === 'localhost.localdomain' ||
+    host.endsWith('.local') ||
+    host.endsWith('.internal') ||
+    host.endsWith('.lan')
+  ) {
+    throw new Error(`refusing internal storage URL host: ${host}`);
+  }
 }
 
 function extractBlobHex(data: unknown): string | null {
@@ -94,8 +171,52 @@ export async function fetchFromBlobscan(
   const data = await res.json();
 
   const hex = extractBlobHex(data);
-  if (!hex) return null;
-  const bytes = hexToBytes(hex);
-  assertVersionedHashMatches(bytes, opts.versionedHash);
-  return bytes;
+  if (hex) {
+    const bytes = hexToBytes(hex);
+    assertVersionedHashMatches(bytes, opts.versionedHash);
+    return bytes;
+  }
+
+  // v2 path: metadata-only response; follow the first storage URL.
+  // Redirects are disabled — a public hostname that 302s to an internal
+  // target would otherwise bypass assertPublicHttpUrl.
+  for (const url of extractStorageUrls(data)) {
+    assertPublicHttpUrl(url);
+    let bin;
+    try {
+      bin = await fetchImpl(url, {
+        headers: { Accept: 'application/octet-stream' },
+        redirect: 'error',
+      });
+    } catch (err) {
+      throw new Error(
+        `storage URL fetch failed (redirects disabled): ${url}: ${(err as Error).message}`
+      );
+    }
+    if (!bin.ok) continue;
+    if (typeof bin.arrayBuffer !== 'function') {
+      throw new Error(
+        'fetchImpl response missing arrayBuffer(); cannot read v2 blobscan storage URL'
+      );
+    }
+    // Bound the response before buffering. Hash check runs after the
+    // full body is read, so an unbounded body could OOM the reader.
+    const lenHeader = bin.headers?.get('content-length');
+    if (lenHeader == null) {
+      throw new Error(
+        `refusing storage response without Content-Length: ${url}`
+      );
+    }
+    const len = Number(lenHeader);
+    if (!Number.isFinite(len) || len < 0 || len > MAX_BLOB_BYTES) {
+      throw new Error(
+        `refusing storage response with implausible Content-Length=${lenHeader}: ${url}`
+      );
+    }
+    const buf = await bin.arrayBuffer();
+    const bytes = new Uint8Array(buf);
+    assertVersionedHashMatches(bytes, opts.versionedHash);
+    return bytes;
+  }
+  return null;
 }

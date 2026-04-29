@@ -1,0 +1,37 @@
+# bam-reader — scans L1 for BlobBatchRegistered, decodes/verifies, persists.
+# Build the shared image, override CMD to the reader binary in `serve` mode.
+
+app = "bam-reader"
+primary_region = "ams"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[experimental]
+  cmd = ["node", "/app/reader/dist/esm/bin/bam-reader.js", "serve"]
+
+[env]
+  READER_HTTP_BIND = "0.0.0.0"
+  READER_HTTP_PORT = "8788"
+
+[http_service]
+  internal_port = 8788
+  force_https = true
+  # Keep the machine running — the reader's L1 scan loop must keep
+  # advancing between HTTP reads. Fly's auto-stop only watches incoming
+  # proxy traffic, not internal CPU.
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["app"]
+
+  [[http_service.checks]]
+    interval = "15s"
+    timeout = "5s"
+    grace_period = "10s"
+    method = "GET"
+    path = "/health"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

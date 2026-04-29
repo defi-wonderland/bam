@@ -25,6 +25,9 @@ function baseConfig(): ReaderConfig {
     httpPort: 8788,
     ethCallGasCap: 50_000_000n,
     ethCallTimeoutMs: 5_000,
+    logScanChunkBlocks: 2_000,
+    backfillProgressIntervalMs: 10_000,
+    backfillProgressEveryChunks: 5,
   };
 }
 
@@ -89,6 +92,93 @@ describe('createReader', () => {
     expect(result.scanned).toBe(0);
     expect(result.processed).toBe(0);
     await reader.close();
+  });
+
+  it('cursorBlock() returns null on a fresh DB and the last block after a backfill', async () => {
+    const store = await createMemoryStore();
+    const reader = await createReader(baseConfig(), {
+      l1: fakeL1({ chainId: 11155111, head: 100 }),
+      store,
+    });
+    expect(await reader.cursorBlock()).toBeNull();
+    await reader.backfill(0, 50);
+    expect(await reader.cursorBlock()).toBe(50);
+    await reader.close();
+    await store.close();
+  });
+
+  it('honors config.startBlock for the live-tail first tick when extras.startBlock is unset', async () => {
+    // Regression guard: the factory must thread `config.startBlock` to
+    // the live-tail when the caller didn't pass `extras.startBlock`.
+    const calls: Array<{ from: number; to: number }> = [];
+    const l1: LiveTailL1Client = {
+      async getChainId() {
+        return 11155111;
+      },
+      async getBlockNumber() {
+        return 5_000n;
+      },
+      async getTransactionBlock() {
+        return null;
+      },
+      async getBlockHeader() {
+        return { parentBeaconBlockRoot: null, timestampUnixSec: 0 };
+      },
+      async getLogs(args) {
+        calls.push({ from: Number(args.fromBlock), to: Number(args.toBlock) });
+        return [];
+      },
+    };
+    const store = await createMemoryStore();
+    const reader = await createReader(
+      { ...baseConfig(), startBlock: 1234, reorgWindowBlocks: 32 },
+      { l1, store, livePollMs: 60_000 }
+    );
+    const serving = reader.serve();
+    for (let i = 0; i < 100 && calls.length === 0; i++) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    await reader.close();
+    await serving;
+    expect(calls.length).toBeGreaterThan(0);
+    expect(calls[0].from).toBe(1234);
+    await store.close();
+  });
+
+  it('extras.startBlock wins over config.startBlock', async () => {
+    const calls: Array<{ from: number; to: number }> = [];
+    const l1: LiveTailL1Client = {
+      async getChainId() {
+        return 11155111;
+      },
+      async getBlockNumber() {
+        return 5_000n;
+      },
+      async getTransactionBlock() {
+        return null;
+      },
+      async getBlockHeader() {
+        return { parentBeaconBlockRoot: null, timestampUnixSec: 0 };
+      },
+      async getLogs(args) {
+        calls.push({ from: Number(args.fromBlock), to: Number(args.toBlock) });
+        return [];
+      },
+    };
+    const store = await createMemoryStore();
+    const reader = await createReader(
+      { ...baseConfig(), startBlock: 1234, reorgWindowBlocks: 32 },
+      { l1, store, livePollMs: 60_000, startBlock: 4000 }
+    );
+    const serving = reader.serve();
+    for (let i = 0; i < 100 && calls.length === 0; i++) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    await reader.close();
+    await serving;
+    expect(calls.length).toBeGreaterThan(0);
+    expect(calls[0].from).toBe(4000);
+    await store.close();
   });
 
   describe('read façade — pass-throughs over bam-store', () => {

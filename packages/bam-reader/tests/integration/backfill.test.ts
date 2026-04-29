@@ -100,6 +100,9 @@ describe('backfill (integration)', () => {
         toBlock: head,
         ethCallGasCap: 50_000_000n,
         ethCallTimeoutMs: 5_000,
+        logScanChunkBlocks: 2_000,
+        progressIntervalMs: 10_000,
+        progressEveryChunks: 5,
         sources: {},
         counters,
         // Stub processBatch: every event is unreachable. The age check
@@ -143,6 +146,9 @@ describe('backfill (integration)', () => {
         retentionThresholdBlocks: 500,
         ethCallGasCap: 50_000_000n,
         ethCallTimeoutMs: 5_000,
+        logScanChunkBlocks: 2_000,
+        progressIntervalMs: 10_000,
+        progressEveryChunks: 5,
         sources: {},
         counters,
         processBatchImpl: async (opts) => {
@@ -178,6 +184,9 @@ describe('backfill (integration)', () => {
         toBlock: 100,
         ethCallGasCap: 50_000_000n,
         ethCallTimeoutMs: 5_000,
+        logScanChunkBlocks: 2_000,
+        progressIntervalMs: 10_000,
+        progressEveryChunks: 5,
         sources: {},
         counters,
         processBatchImpl: async (o: import('../../src/loop/process-batch.js').ProcessBatchOptions) => {
