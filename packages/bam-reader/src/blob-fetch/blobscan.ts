@@ -43,6 +43,28 @@ function hexToBytes(hex: string): Uint8Array {
   return out;
 }
 
+/**
+ * Blobscan v2 (current at time of writing) returns metadata only and
+ * points at one or more public storage URLs (`dataStorageReferences[].url`)
+ * that serve the raw blob bytes. The Reader still hash-verifies the
+ * fetched bytes against the requested versioned hash, so an attacker
+ * substituting a malicious URL can only deny service, not forge content.
+ */
+function extractStorageUrls(data: unknown): string[] {
+  if (!data || typeof data !== 'object') return [];
+  const refs = (data as Record<string, unknown>).dataStorageReferences;
+  if (!Array.isArray(refs)) return [];
+  const out: string[] = [];
+  for (const ref of refs) {
+    if (!ref || typeof ref !== 'object') continue;
+    const url = (ref as { url?: unknown }).url;
+    if (typeof url === 'string' && (url.startsWith('https://') || url.startsWith('http://'))) {
+      out.push(url);
+    }
+  }
+  return out;
+}
+
 function extractBlobHex(data: unknown): string | null {
   if (typeof data === 'string' && /^0x[0-9a-fA-F]+$/.test(data)) return data;
   if (!data || typeof data !== 'object') return null;
@@ -94,8 +116,27 @@ export async function fetchFromBlobscan(
   const data = await res.json();
 
   const hex = extractBlobHex(data);
-  if (!hex) return null;
-  const bytes = hexToBytes(hex);
-  assertVersionedHashMatches(bytes, opts.versionedHash);
-  return bytes;
+  if (hex) {
+    const bytes = hexToBytes(hex);
+    assertVersionedHashMatches(bytes, opts.versionedHash);
+    return bytes;
+  }
+
+  // v2 path: metadata-only response; follow the first storage URL.
+  for (const url of extractStorageUrls(data)) {
+    const bin = await fetchImpl(url, {
+      headers: { Accept: 'application/octet-stream' },
+    });
+    if (!bin.ok) continue;
+    if (typeof bin.arrayBuffer !== 'function') {
+      throw new Error(
+        'fetchImpl response missing arrayBuffer(); cannot read v2 blobscan storage URL'
+      );
+    }
+    const buf = await bin.arrayBuffer();
+    const bytes = new Uint8Array(buf);
+    assertVersionedHashMatches(bytes, opts.versionedHash);
+    return bytes;
+  }
+  return null;
 }

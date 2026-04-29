@@ -22,7 +22,12 @@ import { assertVersionedHashMatches } from './versioned-hash.js';
 export type FetchLike = (
   input: string,
   init?: { headers?: Record<string, string> }
-) => Promise<{ ok: boolean; status: number; json: () => Promise<unknown> }>;
+) => Promise<{
+  ok: boolean;
+  status: number;
+  json: () => Promise<unknown>;
+  arrayBuffer?: () => Promise<ArrayBuffer>;
+}>;
 
 export interface BeaconFetchOptions {
   beaconUrl: string;
