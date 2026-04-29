@@ -53,7 +53,7 @@ contract DeployABIDecoder is Script {
         console2.log("ABIDecoder:       ", address(decoder));
         console2.log("");
         console2.log("Paste the address into:");
-        console2.log("  - packages/bam-contracts/deployments/<chainId>.json (abiDecoder)");
+        console2.log("  - packages/bam-contracts/deployments/<chainId>.json (ABIDecoder)");
         console2.log("  - then run: npx tsx scripts/sync-deployments.ts");
     }
 }

@@ -20,7 +20,9 @@
  * hermetic in environments without foundry.
  */
 
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { spawnSync } from 'node:child_process';
+
+import { afterAll, beforeAll, describe, expect, it, type TaskContext } from 'vitest';
 
 import { decodeBatchABI } from 'bam-sdk';
 
@@ -32,16 +34,34 @@ import {
   type DeployedContracts,
 } from './_fixture.js';
 
-let anvilAvailable = true;
+// `describe.skipIf(...)` is evaluated at collect time, before `beforeAll`
+// runs — so we can't gate the suite on a flag mutated inside `beforeAll`.
+// Probe `anvil --version` synchronously here, at module load, so the
+// describe-level skip sees the real value. Async setup failures (port
+// collision, deploy revert, etc.) are still possible after the probe
+// passes; those flip `setupFailed` and each `it` skips itself runtime-side
+// via `ctx.skip()`.
+function isAnvilOnPath(): boolean {
+  try {
+    const probe = spawnSync('anvil', ['--version'], { encoding: 'utf-8' });
+    return probe.status === 0;
+  } catch {
+    return false;
+  }
+}
+
+const anvilAvailable = isAnvilOnPath();
+let setupFailed = false;
 let anvil: AnvilHandle | null = null;
 let deployments: DeployedContracts | null = null;
 
 beforeAll(async () => {
+  if (!anvilAvailable) return;
   try {
     anvil = await setupAnvil();
     deployments = await deployContracts(anvil.rpcUrl);
   } catch (err) {
-    anvilAvailable = false;
+    setupFailed = true;
     if (anvil) await anvil.stop().catch(() => undefined);
     anvil = null;
     deployments = null;
@@ -58,9 +78,14 @@ afterAll(async () => {
   if (anvil) await anvil.stop();
 });
 
+function skipIfSetupFailed(ctx: TaskContext): void {
+  if (setupFailed || !anvil || !deployments) ctx.skip();
+}
+
 describe.skipIf(!anvilAvailable)('canonical-dispatch e2e', () => {
-  it('default profile → counters advance, addresses zero, no eth_calls', async () => {
-    if (!anvil || !deployments) throw new Error('fixture not initialized');
+  it('default profile → counters advance, addresses zero, no eth_calls', async (ctx) => {
+    skipIfSetupFailed(ctx);
+    if (!anvil || !deployments) throw new Error('unreachable: skip should have fired');
     const result = await runScenario({
       profile: 'default',
       rpcUrl: anvil.rpcUrl,
@@ -83,8 +108,9 @@ describe.skipIf(!anvilAvailable)('canonical-dispatch e2e', () => {
     expect(result.rpcTap.ethCalls.length).toBe(0);
   });
 
-  it('canonical-registry profile → registry non-zero, eth_call against ECDSARegistry observed', async () => {
-    if (!anvil || !deployments) throw new Error('fixture not initialized');
+  it('canonical-registry profile → registry non-zero, eth_call against ECDSARegistry observed', async (ctx) => {
+    skipIfSetupFailed(ctx);
+    if (!anvil || !deployments) throw new Error('unreachable: skip should have fired');
     const result = await runScenario({
       profile: 'canonical-registry',
       rpcUrl: anvil.rpcUrl,
@@ -111,8 +137,9 @@ describe.skipIf(!anvilAvailable)('canonical-dispatch e2e', () => {
     expect(calls).not.toContain(deployments.abiDecoder.toLowerCase());
   });
 
-  it('canonical-full profile → both addresses non-zero, eth_calls against both, blob round-trips via decodeBatchABI', async () => {
-    if (!anvil || !deployments) throw new Error('fixture not initialized');
+  it('canonical-full profile → both addresses non-zero, eth_calls against both, blob round-trips via decodeBatchABI', async (ctx) => {
+    skipIfSetupFailed(ctx);
+    if (!anvil || !deployments) throw new Error('unreachable: skip should have fired');
     const result = await runScenario({
       profile: 'canonical-full',
       rpcUrl: anvil.rpcUrl,

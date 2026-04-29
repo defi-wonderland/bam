@@ -1,13 +1,16 @@
-import { estimateBatchSize } from 'bam-sdk';
+import { BLOB_USABLE_CAPACITY, estimateBatchSize } from 'bam-sdk';
 import type { BAMMessage, Bytes32 } from 'bam-sdk';
 
 import type { BatchPolicy, DecodedMessage, PoolView } from '../types.js';
 
 /**
- * Default blob-capacity exposed to the policy. Leaves headroom under
- * the 128 KiB EIP-4844 blob cap for batch framing and compression slack.
+ * Default blob-capacity exposed to the policy. Clamped to
+ * `BLOB_USABLE_CAPACITY` (4096 × 31 = 126,976 bytes) — `createBlob` will
+ * throw above that, and the resulting error is currently classified as
+ * retryable, so we never want the policy to select a batch that submission
+ * is guaranteed to reject.
  */
-export const DEFAULT_BLOB_CAPACITY_BYTES = 126 * 1024;
+export const DEFAULT_BLOB_CAPACITY_BYTES = Math.min(126 * 1024, BLOB_USABLE_CAPACITY);
 
 export interface DefaultBatchPolicyConfig {
   /** Fire when pending size (bytes) would fill a blob up to this ratio. */

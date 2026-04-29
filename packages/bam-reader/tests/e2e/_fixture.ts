@@ -186,10 +186,13 @@ export async function deployContracts(
 
 /**
  * Track every JSON-RPC `eth_call` made during a scenario so the test can
- * assert which deployed addresses the Reader actually queried.
+ * assert which deployed addresses the Reader actually queried. The
+ * `pending` array carries unresolved body-parse promises — `runScenario`
+ * drains it before returning so assertions never race the parse.
  */
 export interface RpcTap {
   ethCalls: { to: Address; data: `0x${string}` }[];
+  pending: Promise<void>[];
 }
 
 function makeTappedClient(rpcUrl: string, tap: RpcTap): PublicClient {
@@ -202,8 +205,9 @@ function makeTappedClient(rpcUrl: string, tap: RpcTap): PublicClient {
         // The Request body in node-fetch / undici is a stream; viem
         // serializes JSON to body, but the simplest portable path is to
         // sniff the request via `request.text()`. Since this is
-        // test-only, await an explicit clone.
-        request
+        // test-only, await an explicit clone. The promise is recorded on
+        // `tap.pending` so `runScenario` can drain it before returning.
+        const parsePromise = request
           .clone()
           .text()
           .then((text) => {
@@ -225,6 +229,7 @@ function makeTappedClient(rpcUrl: string, tap: RpcTap): PublicClient {
             }
           })
           .catch(() => undefined);
+        tap.pending.push(parsePromise);
         void body;
       },
     }),
@@ -288,7 +293,7 @@ export async function runScenario(opts: RunScenarioOptions): Promise<ScenarioRes
   ensureTrustedSetup();
   const { profile, rpcUrl, chainId, deployments } = opts;
   const store = opts.store ?? createMemoryStore();
-  const tap: RpcTap = { ethCalls: [] };
+  const tap: RpcTap = { ethCalls: [], pending: [] };
   const tappedClient = makeTappedClient(rpcUrl, tap);
 
   // Choose addresses + encoder per profile (matches the Poster's
@@ -349,6 +354,11 @@ export async function runScenario(opts: RunScenarioOptions): Promise<ScenarioRes
     decodePublicClient: tappedClient as ReadContractClient,
     verifyPublicClient: tappedClient as VerifyReadContractClient,
   });
+
+  // Drain the body-parse promises so assertions read a fully-populated
+  // tap. `onFetchRequest` schedules an async clone+parse; without the
+  // drain, `tap.ethCalls` can lag behind the request that triggered it.
+  await Promise.all(tap.pending);
 
   const batches = await store.withTxn(async (txn) => txn.listBatches({ chainId }));
   const rows = await store.withTxn(async (txn) => txn.listMessages({ contentTag: TAG }));
