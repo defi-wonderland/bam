@@ -22,6 +22,7 @@ Built by [Wonderland](https://wonderland.xyz).
 | App | Description |
 |-----|-------------|
 | [`message-in-a-blobble`](apps/message-in-a-blobble) | Demo — sign messages with ECDSA in the browser; the app proxies submission to `@bam/poster` and confirmed reads to `bam-reader` |
+| [`bam-twitter`](apps/bam-twitter) | Twitter-style demo — posts and replies sharing the same Poster + Reader as `message-in-a-blobble`; isolated by a distinct `contentTag` |
 | [`bam-sdk-test`](apps/bam-sdk-test) | Playground — surfaces the `bam-sdk/browser` API one section at a time (hex, message, ECDSA, BLS, batch, exposure, BPE, compression) |
 
 ## Getting Started
@@ -33,14 +34,16 @@ pnpm -r build
 pnpm -r test:run
 ```
 
-To run the demo end-to-end, bring up Postgres for `bam-store` and start all three processes from the workspace root:
+To run the demos end-to-end, bring up Postgres for `bam-store` and start the shared Poster + Reader plus both demo apps from the workspace root:
 
 ```bash
 pnpm db:up   # Postgres for bam-store (Poster + Reader share it)
-pnpm dev     # @bam/poster :8787 + bam-reader :8788 + message-in-a-blobble :3000
+pnpm dev     # @bam/poster :8787 + bam-reader :8788 + message-in-a-blobble :3000 + bam-twitter :3001
 ```
 
-Or run each on its own with `pnpm dev:poster` / `pnpm dev:reader` / `pnpm --filter message-in-a-blobble dev`. See [`apps/message-in-a-blobble/README.md`](apps/message-in-a-blobble/README.md) for env setup.
+Or run pieces on their own with `pnpm dev:poster` / `pnpm dev:reader` / `pnpm --filter message-in-a-blobble dev` / `pnpm --filter bam-twitter dev`. See each app's README for env setup; the Poster + Reader env lives at the workspace root (`.env.local`).
+
+For deploying the Poster and Reader to fly.io, see `fly.poster.toml` / `fly.reader.toml` and `scripts/fly-set-secrets.sh`.
 
 ### Requirements
 
