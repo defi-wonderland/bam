@@ -68,6 +68,13 @@ for _ in $(seq 1 60); do
   fi
   sleep 1
 done
+
+if ! curl -fsS -o /dev/null "http://127.0.0.1:${POSTER_PORT_LOCAL}/health"; then
+  log "bam-poster did not become ready in time; aborting"
+  kill -TERM "$POSTER_PID" "$PG_PID" 2>/dev/null || true
+  wait 2>/dev/null || true
+  exit 1
+fi
 log "bam-poster is ready"
 
 log "starting bam-reader"
@@ -96,4 +103,13 @@ for pid in "${CHILDREN[@]}"; do
   kill -TERM "$pid" 2>/dev/null || true
 done
 wait 2>/dev/null || true
+# Reaching this branch means a supervised child exited unexpectedly
+# (intentional shutdown is handled by the SIGTERM/SIGINT trap, which
+# exits 0 directly). If the child exited with status 0 — e.g. one of
+# the services finished early — surface that as a failure so the
+# orchestrator restarts the container instead of treating "service
+# vanished cleanly" as success.
+if [ "$EXIT_CODE" -eq 0 ]; then
+  EXIT_CODE=1
+fi
 exit "$EXIT_CODE"

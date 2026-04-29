@@ -40,14 +40,18 @@ RUN pnpm \
 # ---- Runtime ---------------------------------------------------------------
 FROM postgres:16-bookworm AS runtime
 
+# Pull node + ca-certs + curl in via apt (no piping a remote installer to
+# bash). The node binary itself comes from the official slim image — same
+# distro family (bookworm), so its dynamic links resolve against the
+# system libs already present in postgres:16-bookworm. curl stays so the
+# supervisor can poll /health.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
        curl \
        ca-certificates \
-       gnupg \
-    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
-    && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
+
+COPY --from=node:20-bookworm-slim /usr/local/bin/node /usr/local/bin/node
 
 # Postgres bootstrap (used by upstream docker-entrypoint.sh on first boot)
 ENV POSTGRES_DB=bam \
