@@ -44,6 +44,20 @@ export interface ReaderConfig {
   ethCallGasCap: bigint;
   /** Bound for non-zero decode/verify `eth_call` wallclock timeout. */
   ethCallTimeoutMs: number;
+  /**
+   * Override for the live-tail's first-tick block when no cursor row
+   * exists. The bin's `resolveStartBlock` resolves a default from the
+   * bam-sdk deploy table when this is unset, falling back to `0` with
+   * a stderr warning. SDK consumers may set this directly; the
+   * factory honors it when `extras.startBlock` isn't provided.
+   */
+  startBlock?: number;
+  /** Default chunk size for `scanLogs`'s paged `eth_getLogs` calls. */
+  logScanChunkBlocks: number;
+  /** Backfill progress: minimum interval between events (ms). */
+  backfillProgressIntervalMs: number;
+  /** Backfill progress: minimum chunks between events. */
+  backfillProgressEveryChunks: number;
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -102,4 +116,12 @@ export type ReaderEvent =
     }
   | { kind: 'cursor_advanced'; chainId: number; blockNumber: number }
   | { kind: 'reorg_detected'; txHash: Bytes32 }
-  | { kind: 'live_tail_tick_failed'; error: string };
+  | { kind: 'live_tail_tick_failed'; error: string }
+  | {
+      kind: 'backfill_progress';
+      fromBlock: number;
+      toBlock: number;
+      currentBlock: number;
+      scanned: number;
+      processed: number;
+    };

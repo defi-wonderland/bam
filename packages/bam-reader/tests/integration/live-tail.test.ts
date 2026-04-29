@@ -119,6 +119,7 @@ describe('liveTailTick (integration)', () => {
         bamCoreAddress: BAM_CORE,
         reorgWindowBlocks: 4,
         startBlock: 1,
+        logScanChunkBlocks: 2_000,
         ethCallGasCap: 50_000_000n,
         ethCallTimeoutMs: 5_000,
         sources: {},
@@ -174,6 +175,7 @@ describe('liveTailTick (integration)', () => {
         bamCoreAddress: BAM_CORE,
         reorgWindowBlocks: 32,
         startBlock: 1,
+        logScanChunkBlocks: 2_000,
         ethCallGasCap: 50_000_000n,
         ethCallTimeoutMs: 5_000,
         sources: {},
@@ -206,6 +208,7 @@ describe('liveTailTick (integration)', () => {
         bamCoreAddress: BAM_CORE,
         reorgWindowBlocks: 4,
         startBlock: 1,
+        logScanChunkBlocks: 2_000,
         ethCallGasCap: 50_000_000n,
         ethCallTimeoutMs: 5_000,
         sources: {},
@@ -253,6 +256,7 @@ describe('liveTailTick (integration)', () => {
         bamCoreAddress: BAM_CORE,
         reorgWindowBlocks: 4,
         startBlock: 1,
+        logScanChunkBlocks: 2_000,
         ethCallGasCap: 50_000_000n,
         ethCallTimeoutMs: 5_000,
         sources: {},
@@ -309,6 +313,7 @@ describe('liveTailTick (integration)', () => {
           bamCoreAddress: BAM_CORE,
           reorgWindowBlocks: 4,
           startBlock: 1,
+          logScanChunkBlocks: 2_000,
           ethCallGasCap: 50_000_000n,
           ethCallTimeoutMs: 5_000,
           sources: {},
@@ -326,6 +331,102 @@ describe('liveTailTick (integration)', () => {
     }
   });
 
+  it('preserves the cursor invariant under chunk halving (G-5)', async () => {
+    const store = await createMemoryStore();
+    try {
+      // Three events spaced across a 300-block range. With a chunk
+      // size that triggers a "range too large" cap on the first call,
+      // halving should still produce the same ordered set of writes
+      // as a single-call control.
+      const events = [
+        fakeEvent({ block: 110, tx: 0, log: 0, txHash: bytes32('aa', 110) }),
+        fakeEvent({ block: 220, tx: 0, log: 0, txHash: bytes32('aa', 220) }),
+        fakeEvent({ block: 305, tx: 0, log: 0, txHash: bytes32('aa', 305) }),
+      ];
+      const baseL1 = fakeL1({ head: 340, events });
+      // Wrap getLogs to throw "range too large" on any call wider than 200 blocks.
+      const cap = 200;
+      const wrapped: LiveTailL1Client = Object.assign(Object.create(null), {
+        ...baseL1,
+        getLogs: async (args: Parameters<LiveTailL1Client['getLogs']>[0]) => {
+          const span = Number(args.toBlock) - Number(args.fromBlock) + 1;
+          if (span > cap) throw new Error('Block range is too large');
+          return baseL1.getLogs(args);
+        },
+      });
+
+      const seen: number[] = [];
+      const counters = emptyCounters();
+      const result = await liveTailTick({
+        store,
+        l1: wrapped,
+        chainId: CHAIN_ID,
+        bamCoreAddress: BAM_CORE,
+        reorgWindowBlocks: 4,
+        startBlock: 100,
+        logScanChunkBlocks: 1_000, // single scanLogs call; halving inside fetchWithHalving
+        ethCallGasCap: 50_000_000n,
+        ethCallTimeoutMs: 5_000,
+        sources: {},
+        counters,
+        processBatchImpl: async (opts) => {
+          seen.push(opts.event.blockNumber);
+          opts.counters.decoded += 1;
+          return {
+            txIndex: opts.event.txIndex,
+            blockNumber: opts.event.blockNumber,
+            outcome: 'decoded',
+            messagesWritten: 1,
+          };
+        },
+      });
+      // safeHead = 340 - 4 = 336. All three events fall in [100, 336].
+      expect(result.scanned).toBe(3);
+      expect(result.processed).toBe(3);
+      expect(seen).toEqual([110, 220, 305]); // canonical order preserved
+      // Cursor advances to safeHead via the empty-range catch-up.
+      const cursor = await store.withTxn((txn) => txn.getCursor(CHAIN_ID));
+      expect(cursor?.lastBlockNumber).toBe(336);
+    } finally {
+      await store.close();
+    }
+  });
+
+  it('issues exactly one getLogs call when the per-tick range fits in one chunk (G-7)', async () => {
+    const store = await createMemoryStore();
+    try {
+      // Pre-position the cursor at safeHead - 1 so the tick scans
+      // exactly one block.
+      await store.withTxn(async (txn) => {
+        await txn.setCursor({
+          chainId: CHAIN_ID,
+          lastBlockNumber: 99,
+          lastTxIndex: 0,
+          updatedAt: 0,
+        });
+      });
+      const l1 = fakeL1({ head: 104, events: [] }); // safeHead = 100 (window=4)
+      const counters = emptyCounters();
+      await liveTailTick({
+        store,
+        l1,
+        chainId: CHAIN_ID,
+        bamCoreAddress: BAM_CORE,
+        reorgWindowBlocks: 4,
+        startBlock: 0,
+        logScanChunkBlocks: 2_000,
+        ethCallGasCap: 50_000_000n,
+        ethCallTimeoutMs: 5_000,
+        sources: {},
+        counters,
+      });
+      const callsRecord = l1 as unknown as { logs: number };
+      expect(callsRecord.logs).toBe(1);
+    } finally {
+      await store.close();
+    }
+  });
+
   it('runs the reorg watcher tick once per call', async () => {
     const store = await createMemoryStore();
     try {
@@ -338,6 +439,7 @@ describe('liveTailTick (integration)', () => {
         bamCoreAddress: BAM_CORE,
         reorgWindowBlocks: 32,
         startBlock: 1,
+        logScanChunkBlocks: 2_000,
         ethCallGasCap: 50_000_000n,
         ethCallTimeoutMs: 5_000,
         sources: {},

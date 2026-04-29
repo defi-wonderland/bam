@@ -69,6 +69,14 @@ export interface ScanLogsOptions {
   fromBlock: number;
   toBlock: number;
   contentTags?: Bytes32[];
+  /**
+   * When set and the requested range exceeds it, page the range
+   * into back-to-back slices of this many blocks. When the range
+   * fits in one chunk, exactly one `getLogs` call is issued —
+   * preserving the steady-state live-tail's single-RPC-per-tick
+   * behavior.
+   */
+  chunkSize?: number;
 }
 
 function toNumber(v: bigint | number): number {
@@ -76,16 +84,40 @@ function toNumber(v: bigint | number): number {
 }
 
 /**
- * Fetch and order all `BlobBatchRegistered` events emitted by
- * `bamCoreAddress` in `[fromBlock, toBlock]`. With a non-empty
- * `contentTags` allowlist, only events whose indexed `contentTag`
- * is in the set are returned.
+ * Minimum chunk size below which adaptive halving stops and the
+ * provider error is rethrown to the caller. Documented in
+ * `docs/specs/features/008-reader-scan-ergonomics/plan.md` §*Security
+ * impact* (gate G-6). Exported so tests can pin the bound.
  */
-export async function scanLogs(
-  opts: ScanLogsOptions
-): Promise<BlobBatchRegisteredEvent[]> {
-  if (opts.fromBlock > opts.toBlock) return [];
+export const MIN_CHUNK_BLOCKS = 64;
 
+/**
+ * Patterns surfaced by public RPC providers when an `eth_getLogs`
+ * range / result-set exceeds their cap. Treated as one error family —
+ * "the chunk was too big, retry smaller". Other errors (timeouts,
+ * rate limits, transient 5xx) bubble out unchanged.
+ */
+const RANGE_TOO_LARGE_PATTERNS = [
+  /block range is too large/i,
+  /block range too large/i,
+  /log response size exceeded/i,
+  /response size exceeded/i,
+  /query returned more than/i,
+  /more than \d+ results/i,
+  /exceeds.*(?:result|response|range|log|block)\s*(?:limit|size|cap)/i,
+];
+
+function isRangeTooLargeError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  const msg = err.message;
+  return RANGE_TOO_LARGE_PATTERNS.some((re) => re.test(msg));
+}
+
+async function fetchRange(
+  opts: ScanLogsOptions,
+  fromBlock: number,
+  toBlock: number
+): Promise<BlobBatchRegisteredEvent[]> {
   const filterTags =
     opts.contentTags && opts.contentTags.length > 0 ? opts.contentTags : undefined;
 
@@ -93,11 +125,11 @@ export async function scanLogs(
     address: opts.bamCoreAddress,
     event: BLOB_BATCH_REGISTERED_EVENT,
     args: filterTags ? { contentTag: filterTags } : undefined,
-    fromBlock: BigInt(opts.fromBlock),
-    toBlock: BigInt(opts.toBlock),
+    fromBlock: BigInt(fromBlock),
+    toBlock: BigInt(toBlock),
   });
 
-  const events: BlobBatchRegisteredEvent[] = raw.map((log) => ({
+  return raw.map((log) => ({
     blockNumber: toNumber(log.blockNumber),
     txIndex: toNumber(log.transactionIndex),
     logIndex: toNumber(log.logIndex),
@@ -108,6 +140,73 @@ export async function scanLogs(
     decoder: log.args.decoder,
     signatureRegistry: log.args.signatureRegistry,
   }));
+}
+
+/**
+ * Fetch a chunk with adaptive halving on "range too large" /
+ * "result too large" provider errors. On a matching error, the
+ * chunk is split in half and the two halves are retried
+ * recursively. Bounded by `MIN_CHUNK_BLOCKS`: if a chunk at the
+ * minimum size still throws the family error, the error
+ * rethrows to the caller. Non-matching errors rethrow
+ * immediately (gate G-6).
+ */
+async function fetchWithHalving(
+  opts: ScanLogsOptions,
+  fromBlock: number,
+  toBlock: number
+): Promise<BlobBatchRegisteredEvent[]> {
+  try {
+    return await fetchRange(opts, fromBlock, toBlock);
+  } catch (err) {
+    if (!isRangeTooLargeError(err)) throw err;
+    const span = toBlock - fromBlock + 1;
+    if (span <= MIN_CHUNK_BLOCKS) throw err;
+    const mid = fromBlock + Math.floor(span / 2) - 1;
+    const left = await fetchWithHalving(opts, fromBlock, mid);
+    const right = await fetchWithHalving(opts, mid + 1, toBlock);
+    return left.concat(right);
+  }
+}
+
+/**
+ * Fetch and order all `BlobBatchRegistered` events emitted by
+ * `bamCoreAddress` in `[fromBlock, toBlock]`. With a non-empty
+ * `contentTags` allowlist, only events whose indexed `contentTag`
+ * is in the set are returned.
+ *
+ * When `chunkSize` is set and the range exceeds it, the call is
+ * paged into back-to-back chunks; results are concatenated and
+ * re-sorted into canonical `(blockNumber, logIndex)` order. Each
+ * chunk is fetched via `fetchWithHalving` so a single oversized
+ * chunk recovers automatically by splitting smaller.
+ */
+export async function scanLogs(
+  opts: ScanLogsOptions
+): Promise<BlobBatchRegisteredEvent[]> {
+  if (opts.chunkSize !== undefined) {
+    if (!Number.isInteger(opts.chunkSize) || opts.chunkSize < 1) {
+      throw new TypeError(
+        `scanLogs.chunkSize must be a positive integer, got ${opts.chunkSize}`
+      );
+    }
+  }
+  if (opts.fromBlock > opts.toBlock) return [];
+
+  const chunkSize = opts.chunkSize;
+  const rangeLen = opts.toBlock - opts.fromBlock + 1;
+
+  let events: BlobBatchRegisteredEvent[];
+  if (chunkSize === undefined || rangeLen <= chunkSize) {
+    events = await fetchWithHalving(opts, opts.fromBlock, opts.toBlock);
+  } else {
+    events = [];
+    for (let from = opts.fromBlock; from <= opts.toBlock; from += chunkSize) {
+      const to = Math.min(from + chunkSize - 1, opts.toBlock);
+      const chunk = await fetchWithHalving(opts, from, to);
+      events.push(...chunk);
+    }
+  }
 
   events.sort((a, b) => {
     if (a.blockNumber !== b.blockNumber) return a.blockNumber - b.blockNumber;

@@ -74,6 +74,11 @@ export interface LiveTailOptions {
   reorgWindowBlocks: number;
   /** Default cursor for first-time-run when no cursor row exists. */
   startBlock: number;
+  /**
+   * Page size for `scanLogs`'s `eth_getLogs` calls. When the per-tick
+   * range fits in one chunk, exactly one RPC is issued (gate G-7).
+   */
+  logScanChunkBlocks: number;
   ethCallGasCap: bigint;
   ethCallTimeoutMs: number;
   sources: { beaconUrl?: string; blobscanUrl?: string };
@@ -132,6 +137,7 @@ export async function liveTailTick(opts: LiveTailOptions): Promise<TickResult> {
     fromBlock,
     toBlock,
     contentTags: opts.contentTags,
+    chunkSize: opts.logScanChunkBlocks,
   });
 
   const byBlock = groupByBlock(events);

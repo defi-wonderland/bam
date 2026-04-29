@@ -63,3 +63,18 @@ export class ChainIdMismatch extends ReaderError {
     this.name = 'ChainIdMismatch';
   }
 }
+
+/**
+ * Thrown when the CLI's deploy-marker resolver looks up a chainId
+ * that has no `BlobAuthenticatedMessagingCore.deployBlock` entry in
+ * the bam-sdk deploy table. Surfaced by the bin as exit code 4
+ * (parallel to `ArgParseError`) with a message naming the explicit
+ * `--from N` form.
+ */
+export class UnknownChainDeploymentError extends Error {
+  readonly code = 'unknown_chain_deployment';
+  constructor(message: string) {
+    super(message);
+    this.name = 'UnknownChainDeploymentError';
+  }
+}

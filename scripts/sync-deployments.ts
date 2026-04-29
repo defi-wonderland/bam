@@ -20,6 +20,7 @@ const outputFile = join(root, 'packages', 'bam-sdk', 'src', 'contracts', 'deploy
 
 interface DeploymentContract {
   address: string;
+  deployBlock?: number;
 }
 
 interface Deployment {
@@ -61,6 +62,8 @@ function main() {
     '',
     'export interface DeployedContract {',
     '  address: `0x${string}`;',
+    '  /** Block number at which the contract was deployed. Optional. */',
+    '  deployBlock?: number;',
     '}',
     '',
     'export interface ChainDeployment {',
@@ -78,7 +81,11 @@ function main() {
     lines.push(`    name: '${d.name}',`);
     lines.push('    contracts: {');
     for (const [name, info] of Object.entries(d.contracts)) {
-      lines.push(`      ${name}: { address: '${info.address}' },`);
+      const fields = [`address: '${info.address}'`];
+      if (info.deployBlock !== undefined) {
+        fields.push(`deployBlock: ${info.deployBlock}`);
+      }
+      lines.push(`      ${name}: { ${fields.join(', ')} },`);
     }
     lines.push('    },');
     lines.push('  },');

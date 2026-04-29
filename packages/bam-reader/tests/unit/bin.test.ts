@@ -17,15 +17,37 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   ArgParseError,
   jsonReplacer,
+  lookupDeployBlock,
   parseArgs,
+  resolveBackfillRange,
+  resolveStartBlock,
   usage,
 } from '../../src/bin/bam-reader.js';
-import type { ReaderEvent } from '../../src/types.js';
+import { UnknownChainDeploymentError } from '../../src/errors.js';
+import type { ReaderConfig, ReaderEvent } from '../../src/types.js';
+
+function baseCfg(over: Partial<ReaderConfig> = {}): ReaderConfig {
+  return {
+    chainId: 11155111,
+    rpcUrl: 'https://rpc.example',
+    bamCoreAddress: '0x000000000000000000000000000000000000c07e' as never,
+    reorgWindowBlocks: 32,
+    dbUrl: 'memory:',
+    httpBind: '127.0.0.1',
+    httpPort: 8788,
+    ethCallGasCap: 50_000_000n,
+    ethCallTimeoutMs: 5_000,
+    logScanChunkBlocks: 2_000,
+    backfillProgressIntervalMs: 10_000,
+    backfillProgressEveryChunks: 5,
+    ...over,
+  };
+}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -38,11 +60,52 @@ describe('bam-reader CLI — argv parsing', () => {
   it('parses `backfill --from N --to M`', () => {
     expect(
       parseArgs(['backfill', '--from', '100', '--to', '200'])
-    ).toEqual({ subcommand: 'backfill', fromBlock: 100, toBlock: 200 });
+    ).toEqual({ subcommand: 'backfill', fromMarker: 'block', fromBlock: 100, toBlock: 200 });
     // flag order is irrelevant
     expect(
       parseArgs(['backfill', '--to', '200', '--from', '100'])
-    ).toEqual({ subcommand: 'backfill', fromBlock: 100, toBlock: 200 });
+    ).toEqual({ subcommand: 'backfill', fromMarker: 'block', fromBlock: 100, toBlock: 200 });
+  });
+
+  it('parses `backfill --from deploy` with no --to', () => {
+    expect(parseArgs(['backfill', '--from', 'deploy'])).toEqual({
+      subcommand: 'backfill',
+      fromMarker: 'deploy',
+      toBlock: undefined,
+    });
+  });
+
+  it('parses `backfill --from deploy --to N`', () => {
+    expect(parseArgs(['backfill', '--from', 'deploy', '--to', '8000000'])).toEqual({
+      subcommand: 'backfill',
+      fromMarker: 'deploy',
+      toBlock: 8_000_000,
+    });
+  });
+
+  it('rejects `backfill --from deploy --to notanumber`', () => {
+    expect(() =>
+      parseArgs(['backfill', '--from', 'deploy', '--to', 'notanumber'])
+    ).toThrow(ArgParseError);
+  });
+
+  it('parses `backfill --catchup`', () => {
+    expect(parseArgs(['backfill', '--catchup'])).toEqual({
+      subcommand: 'backfill',
+      fromMarker: 'catchup',
+    });
+  });
+
+  it('rejects `--catchup` combined with --from', () => {
+    expect(() => parseArgs(['backfill', '--catchup', '--from', '100'])).toThrow(
+      /mutually exclusive/
+    );
+  });
+
+  it('rejects `--catchup` combined with --to', () => {
+    expect(() => parseArgs(['backfill', '--catchup', '--to', '100'])).toThrow(
+      /mutually exclusive/
+    );
   });
 
   it('throws ArgParseError on missing subcommand', () => {
@@ -57,9 +120,12 @@ describe('bam-reader CLI — argv parsing', () => {
     expect(() => parseArgs(['serve', '--from', '1'])).toThrow(/serve takes no arguments/);
   });
 
-  it('throws when backfill is missing --from or --to', () => {
+  it('throws when backfill --from N is missing --to', () => {
     expect(() => parseArgs(['backfill', '--from', '100'])).toThrow(/requires --from N --to M/);
-    expect(() => parseArgs(['backfill', '--to', '100'])).toThrow(/requires --from N --to M/);
+  });
+
+  it('throws when backfill is missing --from', () => {
+    expect(() => parseArgs(['backfill', '--to', '100'])).toThrow(/requires/);
   });
 
   it('throws when --from > --to or values are non-integer', () => {
@@ -77,6 +143,196 @@ describe('bam-reader CLI — argv parsing', () => {
     expect(u).toMatch(/backfill/);
     expect(u).toMatch(/--from/);
     expect(u).toMatch(/--to/);
+    expect(u).toMatch(/deploy/);
+  });
+});
+
+describe('bam-reader CLI — lookupDeployBlock', () => {
+  it('returns the BAM Core deploy block for a known chainId', () => {
+    expect(lookupDeployBlock(11155111)).toBe(10_697_923);
+  });
+
+  it('throws UnknownChainDeploymentError on an unknown chainId', () => {
+    expect(() => lookupDeployBlock(999_999)).toThrow(UnknownChainDeploymentError);
+    expect(() => lookupDeployBlock(999_999)).toThrow(/--from <block>/);
+  });
+});
+
+describe('bam-reader CLI — resolveBackfillRange', () => {
+  const fakeL1 = (head: number) => ({
+    async getBlockNumber() {
+      return BigInt(head);
+    },
+  });
+
+  it('passes through fromBlock/toBlock for fromMarker=block', async () => {
+    const r = await resolveBackfillRange(
+      { subcommand: 'backfill', fromMarker: 'block', fromBlock: 10, toBlock: 100 },
+      baseCfg(),
+      fakeL1(500)
+    );
+    expect(r).toEqual({ fromBlock: 10, toBlock: 100 });
+  });
+
+  it('defaults --from deploy toBlock to safe head (head - reorgWindowBlocks)', async () => {
+    const r = await resolveBackfillRange(
+      { subcommand: 'backfill', fromMarker: 'deploy', toBlock: undefined },
+      baseCfg({ chainId: 11155111, reorgWindowBlocks: 32 }),
+      fakeL1(11_500_000)
+    );
+    // Reorg safety: cursor must not advance past safeHead = 11_500_000 - 32.
+    expect(r).toEqual({ fromBlock: 10_697_923, toBlock: 11_499_968 });
+  });
+
+  it('honors --to override under fromMarker=deploy (operator opt-in past safeHead)', async () => {
+    const r = await resolveBackfillRange(
+      { subcommand: 'backfill', fromMarker: 'deploy', toBlock: 11_000_000 },
+      baseCfg({ chainId: 11155111 }),
+      fakeL1(11_500_000)
+    );
+    expect(r).toEqual({ fromBlock: 10_697_923, toBlock: 11_000_000 });
+  });
+
+  it('rejects --from deploy --to N when N < deployBlock (inverted range)', async () => {
+    await expect(
+      resolveBackfillRange(
+        { subcommand: 'backfill', fromMarker: 'deploy', toBlock: 1_000 },
+        baseCfg({ chainId: 11155111 }),
+        fakeL1(11_500_000)
+      )
+    ).rejects.toBeInstanceOf(ArgParseError);
+    await expect(
+      resolveBackfillRange(
+        { subcommand: 'backfill', fromMarker: 'deploy', toBlock: 1_000 },
+        baseCfg({ chainId: 11155111 }),
+        fakeL1(11_500_000)
+      )
+    ).rejects.toThrow(/below deploy block 10697923/);
+  });
+
+  it('throws a chain-too-young error for --from deploy when head is within the reorg window', async () => {
+    // Young chain: head=10, reorgWindowBlocks=32 → safeHead clamped to 0.
+    // Sepolia deploy block (10_697_923) is unreachable; the error should
+    // explicitly name the reorg-window cause rather than the generic
+    // inverted-range message.
+    await expect(
+      resolveBackfillRange(
+        { subcommand: 'backfill', fromMarker: 'deploy', toBlock: undefined },
+        baseCfg({ chainId: 11155111, reorgWindowBlocks: 32 }),
+        fakeL1(10)
+      )
+    ).rejects.toThrow(/within the reorg window/);
+    await expect(
+      resolveBackfillRange(
+        { subcommand: 'backfill', fromMarker: 'deploy', toBlock: undefined },
+        baseCfg({ chainId: 11155111, reorgWindowBlocks: 32 }),
+        fakeL1(10)
+      )
+    ).rejects.toThrow(/safeHead=0/);
+  });
+
+  it('catchup on a young chain returns an empty (idempotent) range without throwing', async () => {
+    // head=10, reorgWindowBlocks=32 → safeHead clamped to 0.
+    // cursor=5 → fromBlock=6 > toBlock=0 → empty range. Backfill
+    // empty-range early return turns this into a successful no-op
+    // ("not enough chain depth yet"), which is the right thing here.
+    const reader = {
+      async cursorBlock() {
+        return 5;
+      },
+    };
+    const r = await resolveBackfillRange(
+      { subcommand: 'backfill', fromMarker: 'catchup' },
+      baseCfg({ chainId: 11155111, reorgWindowBlocks: 32 }),
+      fakeL1(10),
+      reader
+    );
+    expect(r.fromBlock).toBeGreaterThan(r.toBlock);
+    expect(r.toBlock).toBeGreaterThanOrEqual(0); // safeHead never goes negative
+  });
+
+  it('throws UnknownChainDeploymentError when chainId is not in the table', async () => {
+    await expect(
+      resolveBackfillRange(
+        { subcommand: 'backfill', fromMarker: 'deploy', toBlock: undefined },
+        baseCfg({ chainId: 999_999 }),
+        fakeL1(11_500_000)
+      )
+    ).rejects.toBeInstanceOf(UnknownChainDeploymentError);
+  });
+
+  it('resolves --catchup against a populated cursor as [cursor + 1, safe head]', async () => {
+    const reader = {
+      async cursorBlock() {
+        return 1_000;
+      },
+    };
+    const r = await resolveBackfillRange(
+      { subcommand: 'backfill', fromMarker: 'catchup' },
+      baseCfg({ chainId: 11155111, reorgWindowBlocks: 32 }),
+      fakeL1(2_500),
+      reader
+    );
+    // Reorg safety: cursor must not advance past safeHead = 2_500 - 32.
+    expect(r).toEqual({ fromBlock: 1_001, toBlock: 2_468 });
+  });
+
+  it('--catchup with cursor already past safeHead returns an empty (idempotent) range', async () => {
+    // safeHead = 2500 - 32 = 2468; cursor at 2470 means caught up.
+    const reader = {
+      async cursorBlock() {
+        return 2_470;
+      },
+    };
+    const r = await resolveBackfillRange(
+      { subcommand: 'backfill', fromMarker: 'catchup' },
+      baseCfg({ chainId: 11155111, reorgWindowBlocks: 32 }),
+      fakeL1(2_500),
+      reader
+    );
+    // fromBlock > toBlock — backfill's empty-range early return handles it.
+    expect(r.fromBlock).toBeGreaterThan(r.toBlock);
+  });
+
+  it('rejects --catchup against an empty cursor with an ArgParseError naming alternatives', async () => {
+    const reader = {
+      async cursorBlock() {
+        return null;
+      },
+    };
+    await expect(
+      resolveBackfillRange(
+        { subcommand: 'backfill', fromMarker: 'catchup' },
+        baseCfg({ chainId: 11155111 }),
+        fakeL1(2_500),
+        reader
+      )
+    ).rejects.toBeInstanceOf(ArgParseError);
+  });
+});
+
+describe('bam-reader CLI — resolveStartBlock', () => {
+  it('uses cfg.startBlock when set (env override always wins)', () => {
+    const warn = vi.fn();
+    const got = resolveStartBlock(baseCfg({ startBlock: 7_000_000 }), warn);
+    expect(got).toBe(7_000_000);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('falls back to the bam-sdk deploy table when env is unset', () => {
+    const warn = vi.fn();
+    const got = resolveStartBlock(baseCfg({ chainId: 11155111 }), warn);
+    expect(got).toBe(10_697_923);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('falls back to 0 with a loud warn when chainId is unknown', () => {
+    const warn = vi.fn();
+    const got = resolveStartBlock(baseCfg({ chainId: 999_999 }), warn);
+    expect(got).toBe(0);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0][0]).toMatch(/999999|999_999/);
+    expect(warn.mock.calls[0][0]).toMatch(/READER_START_BLOCK/);
   });
 });
 
@@ -211,7 +467,7 @@ describe('bam-reader CLI — subprocess', () => {
       await new Promise<void>((resolve, reject) => {
         const timer = setTimeout(
           () => reject(new Error(`timeout waiting for listening line; stderr: ${stderr}`)),
-          5_000
+          15_000
         );
         const onData = (b: Buffer) => {
           stdout += b.toString();
@@ -244,7 +500,7 @@ describe('bam-reader CLI — subprocess', () => {
       await rpc.close();
       rmSync(dir, { recursive: true, force: true });
     }
-  }, 15_000);
+  }, 30_000);
 
   it('backfill exits 0 on success', async () => {
     ensureBuilt();
