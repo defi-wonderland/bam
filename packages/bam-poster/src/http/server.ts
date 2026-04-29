@@ -76,6 +76,17 @@ export class HttpServer {
 
   private async dispatch(req: IncomingMessage, res: ServerResponse): Promise<void> {
     try {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Vary', 'Origin');
+      if (req.method === 'OPTIONS') {
+        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+        res.setHeader('Access-Control-Max-Age', '86400');
+        res.statusCode = 204;
+        res.end();
+        return;
+      }
+
       // Bearer-token gate. Runs before any handler so even a malformed
       // /submit can't reach the pool without auth.
       if (this.authToken !== undefined && !this.checkAuth(req)) {
