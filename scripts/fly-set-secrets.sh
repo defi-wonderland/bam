@@ -32,10 +32,13 @@ if [[ ! -f "$ENV_FILE" ]]; then
 fi
 
 # bam-poster: chain-side POSTER_* + POSTGRES_URL.
-# `|| true` so a no-match grep (env file with no POSTER_* lines) doesn't
-# abort under set -euo pipefail before POSTGRES_URL gets staged.
+# The regex requires at least one char after `=` so placeholder lines
+# like `POSTER_RPC_URL=` are skipped — Fly stores empty strings, and
+# the poster's env parser treats '' the same as missing and refuses
+# to start. `|| true` keeps a no-match grep from aborting under
+# set -euo pipefail before POSTGRES_URL gets staged.
 {
-  grep -E '^POSTER_' "$ENV_FILE" || true
+  grep -E '^POSTER_[A-Z0-9_]+=.+' "$ENV_FILE" || true
   printf 'POSTGRES_URL=%s\n' "$DSN"
 } | fly secrets import -a bam-poster --stage
 
@@ -44,7 +47,7 @@ fi
 # start when both POSTER_CHAIN_ID and READER_CHAIN_ID are present and
 # differ.
 {
-  grep -E '^READER_' "$ENV_FILE" || true
+  grep -E '^READER_[A-Z0-9_]+=.+' "$ENV_FILE" || true
   printf 'POSTGRES_URL=%s\n' "$DSN"
 } | fly secrets import -a bam-reader --stage
 
