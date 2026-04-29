@@ -53,9 +53,26 @@ export function EcdsaSection() {
   }
 
   const headlessSender = (address || null) as Address | null;
+  /**
+   * Validate the headless chainId input before using it. `Number("foo")`
+   * is `NaN`, which is still typeof `number` and would slip past loose
+   * checks. Without this, an unparseable input would silently flow into
+   * `verifyECDSA`/`signECDSAWithKey` — verify swallows every failure
+   * into `false`, so "bad input" looks identical to "invalid signature".
+   */
+  const parsedChainId = Number(chainId);
+  const headlessChainId: number | null =
+    chainId.trim() !== '' && Number.isSafeInteger(parsedChainId) && parsedChainId > 0
+      ? parsedChainId
+      : null;
+  const chainIdError =
+    headlessChainId === null && chainId.trim() !== ''
+      ? `"${chainId}" is not a positive integer`
+      : '';
+
   const useWalletForVerify = signatureSource === 'wallet' && !!wallet.address;
   const verifySender: Address | null = useWalletForVerify ? wallet.address : headlessSender;
-  const verifyChain: number | null = useWalletForVerify ? wallet.chainId : Number(chainId);
+  const verifyChain: number | null = useWalletForVerify ? wallet.chainId : headlessChainId;
 
   return (
     <Section
@@ -115,27 +132,28 @@ export function EcdsaSection() {
         <Field label="chainId (headless only — wallet path uses the connected chain)">
           <TextInput value={chainId} onChange={(e) => setChainId(e.target.value)} />
         </Field>
+        <ErrorBox value={chainIdError} />
 
         <div className="flex flex-wrap gap-2">
           <Button
-            disabled={!privateKey}
+            disabled={!privateKey || headlessChainId === null}
             onClick={() =>
               digest.run(() =>
-                computeECDSADigest(buildMessage(address as Address), Number(chainId))
+                computeECDSADigest(buildMessage(address as Address), headlessChainId!)
               )
             }
           >
             computeECDSADigest
           </Button>
           <Button
-            disabled={!privateKey}
+            disabled={!privateKey || headlessChainId === null}
             onClick={() =>
               sign.run(
                 () => {
                   const sig = signECDSAWithKey(
                     privateKey as `0x${string}`,
                     buildMessage(address as Address),
-                    Number(chainId)
+                    headlessChainId!
                   );
                   updateSignature(sig, 'headless');
                   return sig;
