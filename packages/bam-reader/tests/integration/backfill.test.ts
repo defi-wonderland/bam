@@ -53,7 +53,7 @@ function fakeL1(opts: {
       const e = opts.events.find((ev) => ev.txHash === txHash);
       return e ? e.blockNumber : null;
     },
-    async getParentBeaconBlockRoot() {
+    async getBlockHeader() {
       return null;
     },
     async getLogs(args) {
@@ -194,6 +194,8 @@ describe('backfill (integration)', () => {
               replacedByTxHash: null,
               submittedAt: 0,
               invalidatedAt: null,
+              submitter: null,
+              l1IncludedAtUnixSec: null,
               messageSnapshot: [],
             });
           });

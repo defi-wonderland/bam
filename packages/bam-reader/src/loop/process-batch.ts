@@ -55,6 +55,8 @@ const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000' as Address;
 export interface ProcessBatchOptions {
   event: BlobBatchRegisteredEvent;
   parentBeaconBlockRoot: Bytes32 | null;
+  /** L1 block timestamp (seconds) for `BatchRow.l1IncludedAtUnixSec`. */
+  l1IncludedAtUnixSec: number | null;
   store: BamStore;
   sources: { beaconUrl?: string; blobscanUrl?: string };
   chainId: number;
@@ -156,6 +158,8 @@ export async function processBatch(
     replacedByTxHash: null,
     submittedAt: null,
     invalidatedAt: null,
+    submitter: opts.event.submitter,
+    l1IncludedAtUnixSec: opts.l1IncludedAtUnixSec,
     messageSnapshot: [],
   };
 
@@ -290,9 +294,11 @@ export async function processBatch(
     messageIndexWithinBatch: v.indexWithinBatch,
   }));
 
-  // The Reader doesn't know the Poster-side ingest time; leave
-  // `submittedAt` null so the substrate's COALESCE preserves any
-  // value a Poster wrote first (or stays null in pure-Reader runs).
+  // The Reader doesn't know the Poster-side ingest time; `submittedAt`
+  // stays null and the substrate's COALESCE preserves any value the
+  // Poster wrote first. `submitter` and `l1IncludedAtUnixSec`, by
+  // contrast, are Reader-derived (event topic + block timestamp) and
+  // are populated on `baseBatch`.
   const messagesWritten = await opts.store.withTxn(async (txn) => {
     await txn.upsertBatch({
       ...baseBatch,

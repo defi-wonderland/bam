@@ -83,6 +83,7 @@ describe('processBatch', () => {
     await processBatch({
       event,
       parentBeaconBlockRoot: ('0x' + 'cc'.repeat(32)) as Bytes32,
+      l1IncludedAtUnixSec: 1_700_000_000,
       store,
       sources: { beaconUrl: 'https://beacon.example' },
       chainId: CHAIN_ID,
@@ -119,6 +120,11 @@ describe('processBatch', () => {
     // Reader-written batches leave submittedAt null so a co-located
     // Poster's value isn't clobbered.
     expect(batches[0].submittedAt).toBeNull();
+    // Reader-derived fields: submitter from event topic, inclusion time
+    // from the L1 block header threaded through liveTailTick. Lowercased
+    // by the substrate so it compares against Poster-written rows.
+    expect(batches[0].submitter).toBe(SUBMITTER.toLowerCase());
+    expect(batches[0].l1IncludedAtUnixSec).toBe(1_700_000_000);
 
     expect(events.find((e) => e.kind === 'batch_observed')).toBeTruthy();
     expect(events.filter((e) => e.kind === 'message_verified').length).toBe(2);
@@ -137,6 +143,7 @@ describe('processBatch', () => {
     await processBatch({
       event: makeEvent({}),
       parentBeaconBlockRoot: null,
+      l1IncludedAtUnixSec: null,
       store,
       sources: {},
       chainId: CHAIN_ID,
@@ -177,6 +184,7 @@ describe('processBatch', () => {
     await processBatch({
       event: makeEvent({}),
       parentBeaconBlockRoot: null,
+      l1IncludedAtUnixSec: null,
       store,
       sources: {},
       chainId: CHAIN_ID,
@@ -237,6 +245,7 @@ describe('processBatch', () => {
     await processBatch({
       event: makeEvent({}),
       parentBeaconBlockRoot: null,
+      l1IncludedAtUnixSec: null,
       store,
       sources: {},
       chainId: CHAIN_ID,
@@ -272,6 +281,7 @@ describe('processBatch', () => {
     await processBatch({
       event: makeEvent({}),
       parentBeaconBlockRoot: null,
+      l1IncludedAtUnixSec: null,
       store,
       sources: {},
       chainId: CHAIN_ID,
@@ -316,6 +326,7 @@ describe('processBatch', () => {
     await processBatch({
       event: eventA,
       parentBeaconBlockRoot: null,
+      l1IncludedAtUnixSec: null,
       store,
       sources: {},
       chainId: CHAIN_ID,
@@ -329,6 +340,7 @@ describe('processBatch', () => {
     await processBatch({
       event: eventB,
       parentBeaconBlockRoot: null,
+      l1IncludedAtUnixSec: null,
       store,
       sources: {},
       chainId: CHAIN_ID,

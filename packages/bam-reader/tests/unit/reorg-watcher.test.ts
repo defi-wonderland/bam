@@ -32,6 +32,8 @@ function makeBatch(opts: {
     replacedByTxHash: null,
     submittedAt: 0,
     invalidatedAt: null,
+    submitter: null,
+    l1IncludedAtUnixSec: null,
     messageSnapshot: [],
   };
 }

@@ -198,6 +198,7 @@ export async function buildAndSubmitWithViem(
         blobVersionedHash: versionedHash,
         blockNumber: Number(receipt.blockNumber),
         txIndex: receipt.transactionIndex,
+        submitter: opts.signer.account().address as Address,
       };
     } catch (err) {
       // Log the underlying error before classification — the classifier

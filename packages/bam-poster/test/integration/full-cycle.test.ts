@@ -33,6 +33,7 @@ const TAG = ('0x' + 'aa'.repeat(32)) as Bytes32;
 const BAM_CORE = ('0x' + '22'.repeat(20)) as Address;
 const TX_A = ('0x' + '01'.repeat(32)) as Bytes32;
 const BVH_A = ('0x' + '02'.repeat(32)) as Bytes32;
+const SUBMITTER = ('0x' + '33'.repeat(20)) as Address;
 
 const posters: InternalPoster[] = [];
 
@@ -135,7 +136,7 @@ describe('createPoster — full ingest → submit cycle', () => {
   it('ingest → listPending → tick → submitted-batches reflects inclusion', async () => {
     const ctl: RpcCtl = { reorgedTxs: new Set(), head: 110n };
     const bas = mkBuildAndSubmit([
-      { kind: 'included', txHash: TX_A, blockNumber: 100, txIndex: 0, blobVersionedHash: BVH_A },
+      { kind: 'included', txHash: TX_A, blockNumber: 100, txIndex: 0, blobVersionedHash: BVH_A, submitter: SUBMITTER },
     ]);
     const poster = await makePoster(bas.fn, mkRpc(ctl));
 
@@ -159,7 +160,7 @@ describe('createPoster — full ingest → submit cycle', () => {
   it('reorg within window → submitted row flips to reorged + invalidatedAt; messages survive', async () => {
     const ctl: RpcCtl = { reorgedTxs: new Set(), head: 100n };
     const bas = mkBuildAndSubmit([
-      { kind: 'included', txHash: TX_A, blockNumber: 100, txIndex: 0, blobVersionedHash: BVH_A },
+      { kind: 'included', txHash: TX_A, blockNumber: 100, txIndex: 0, blobVersionedHash: BVH_A, submitter: SUBMITTER },
     ]);
     const poster = await makePoster(bas.fn, mkRpc(ctl));
 
@@ -191,8 +192,8 @@ describe('createPoster — full ingest → submit cycle', () => {
     const TX_B = ('0x' + '02'.repeat(32)) as Bytes32;
     const BVH_B = ('0x' + '03'.repeat(32)) as Bytes32;
     const bas = mkBuildAndSubmit([
-      { kind: 'included', txHash: TX_A, blockNumber: 100, txIndex: 0, blobVersionedHash: BVH_A },
-      { kind: 'included', txHash: TX_B, blockNumber: 101, txIndex: 1, blobVersionedHash: BVH_B },
+      { kind: 'included', txHash: TX_A, blockNumber: 100, txIndex: 0, blobVersionedHash: BVH_A, submitter: SUBMITTER },
+      { kind: 'included', txHash: TX_B, blockNumber: 101, txIndex: 1, blobVersionedHash: BVH_B, submitter: SUBMITTER },
     ]);
     const poster = await makePoster(bas.fn, mkRpc(ctl));
 
@@ -228,7 +229,7 @@ describe('createPoster — full ingest → submit cycle', () => {
   it('health() is "ok" after a clean tick; status() reports zero pending', async () => {
     const ctl: RpcCtl = { reorgedTxs: new Set(), head: 110n };
     const bas = mkBuildAndSubmit([
-      { kind: 'included', txHash: TX_A, blockNumber: 100, txIndex: 0, blobVersionedHash: BVH_A },
+      { kind: 'included', txHash: TX_A, blockNumber: 100, txIndex: 0, blobVersionedHash: BVH_A, submitter: SUBMITTER },
     ]);
     const poster = await makePoster(bas.fn, mkRpc(ctl));
     await poster.submit(signedEnvelope(1n));

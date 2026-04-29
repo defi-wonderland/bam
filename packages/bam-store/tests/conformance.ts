@@ -74,6 +74,8 @@ function batchRow(overrides: Partial<BatchRow> = {}): BatchRow {
     replacedByTxHash: null,
     submittedAt: 1_000,
     invalidatedAt: null,
+    submitter: null,
+    l1IncludedAtUnixSec: null,
     messageSnapshot: [],
     ...overrides,
   };
@@ -388,6 +390,38 @@ export function runConformance(make: StoreFactory): void {
       const [b] = await store.withTxn((txn) => txn.listBatches({}));
       expect(b.submittedAt).toBe(1_234);
       expect(b.replacedByTxHash).toBe(TX_B);
+    });
+
+    it('upsertBatch COALESCEs submitter + l1IncludedAtUnixSec across writers and lowercases submitter', async () => {
+      // Poster-then-Reader: Poster writes `submitter` (from its
+      // signer), the Reader subsequently writes `l1IncludedAtUnixSec`
+      // (from the L1 block timestamp). Neither writer should clobber
+      // the other's column with its own null.
+      const store = await newStore();
+      const submitterMixed = '0xAbCdEf0123456789abcdef0123456789ABCDEF01' as Address;
+      await store.withTxn((txn) =>
+        txn.upsertBatch(
+          batchRow({
+            status: 'confirmed',
+            blockNumber: 10,
+            submitter: submitterMixed,
+            l1IncludedAtUnixSec: null,
+          })
+        )
+      );
+      await store.withTxn((txn) =>
+        txn.upsertBatch(
+          batchRow({
+            status: 'confirmed',
+            blockNumber: 10,
+            submitter: null,
+            l1IncludedAtUnixSec: 1_700_000_000,
+          })
+        )
+      );
+      const [b] = await store.withTxn((txn) => txn.listBatches({}));
+      expect(b.submitter).toBe(submitterMixed.toLowerCase());
+      expect(b.l1IncludedAtUnixSec).toBe(1_700_000_000);
     });
   });
 

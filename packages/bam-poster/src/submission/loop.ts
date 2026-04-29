@@ -138,6 +138,12 @@ export class SubmissionLoop {
           replacedByTxHash: null,
           submittedAt,
           invalidatedAt: null,
+          submitter: outcome.submitter,
+          // The Reader's live-tail fills `l1IncludedAtUnixSec` from the
+          // L1 block timestamp. The Poster's receipt does not carry it
+          // and a separate `getBlock` per submit would double the RPC
+          // count — let the Reader populate this column.
+          l1IncludedAtUnixSec: null,
           messageSnapshot: snapshot,
         });
 

@@ -57,13 +57,17 @@ export function createViemL1(rpcUrl: string): ViemL1Adapter {
       if (!receipt) return null;
       return Number(receipt.blockNumber);
     },
-    async getParentBeaconBlockRoot(blockNumber: number) {
-      const block = await publicClient.getBlock({
-        blockNumber: BigInt(blockNumber),
-      });
+    async getBlockHeader(blockNumber: number) {
+      const block = await publicClient
+        .getBlock({ blockNumber: BigInt(blockNumber) })
+        .catch(() => null);
+      if (!block) return null;
       const root = (block as { parentBeaconBlockRoot?: string })
         .parentBeaconBlockRoot;
-      return (root ?? null) as Bytes32 | null;
+      return {
+        parentBeaconBlockRoot: (root ?? null) as Bytes32 | null,
+        timestampUnixSec: Number(block.timestamp),
+      };
     },
     async getLogs(args) {
       const logs = await publicClient.getLogs({

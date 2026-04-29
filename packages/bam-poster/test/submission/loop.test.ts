@@ -10,6 +10,7 @@ import type { BatchPolicy, DecodedMessage, PoolView } from '../../src/types.js';
 
 const TAG = ('0x' + 'aa'.repeat(32)) as Bytes32;
 const SENDER = ('0x' + '11'.repeat(20)) as Address;
+const SUBMITTER = ('0x' + '22'.repeat(20)) as Address;
 
 function decoded(nonce: number, ingestSeq = nonce): DecodedMessage {
   const contents = new Uint8Array(40);
@@ -97,7 +98,7 @@ async function seedPending(store: BamStore, count: number): Promise<void> {
 describe('SubmissionLoop', () => {
   it('empty pool → idle, no submission', async () => {
     const h = await mkHarness({
-      outcome: { kind: 'included', txHash: '0x01' as Bytes32, blockNumber: 1, txIndex: 0, blobVersionedHash: '0x02' as Bytes32 },
+      outcome: { kind: 'included', txHash: '0x01' as Bytes32, blockNumber: 1, txIndex: 0, blobVersionedHash: '0x02' as Bytes32, submitter: SUBMITTER },
     });
     const res = await h.loop.tick();
     expect(res).toBe('idle');
@@ -112,6 +113,7 @@ describe('SubmissionLoop', () => {
         blockNumber: 100,
         txIndex: 0,
         blobVersionedHash: ('0x' + 'bb'.repeat(32)) as Bytes32,
+        submitter: SUBMITTER,
       },
       policyPicks: 2,
     });
@@ -127,6 +129,12 @@ describe('SubmissionLoop', () => {
     );
     expect(batches.length).toBe(1);
     expect(batches[0].batchContentHash).toBe('0x' + 'bb'.repeat(32));
+    // Poster propagates the signer's address to the batch row so the
+    // L1 type-3 submitter is recorded without a re-query.
+    expect(batches[0].submitter).toBe(SUBMITTER.toLowerCase());
+    // L1 inclusion time is filled in by the Reader; the Poster leaves
+    // it null on its own write.
+    expect(batches[0].l1IncludedAtUnixSec).toBeNull();
     const attached = await h.store.withTxn((txn) =>
       Promise.resolve(txn.listMessages({ batchRef: batches[0].txHash }))
     );
@@ -191,6 +199,7 @@ describe('SubmissionLoop', () => {
         blockNumber: 100,
         txIndex: 0,
         blobVersionedHash: ('0x' + 'bb'.repeat(32)) as Bytes32,
+        submitter: SUBMITTER,
       },
       policyPicks: 2,
     });
@@ -225,6 +234,8 @@ describe('SubmissionLoop', () => {
             replacedByTxHash: null,
             submittedAt: 1_500,
             invalidatedAt: null,
+            submitter: null,
+            l1IncludedAtUnixSec: null,
             messageSnapshot: [],
           });
           await txn.upsertObserved({

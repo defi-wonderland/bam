@@ -51,6 +51,7 @@ function fakeL1(opts: {
   head: number;
   events: BlobBatchRegisteredEvent[];
   parentRoots?: Map<number, Bytes32>;
+  blockTimestamps?: Map<number, number>;
   chainId?: number;
 }): LiveTailL1Client {
   const calls = { logs: 0, parentRoots: 0 };
@@ -66,9 +67,11 @@ function fakeL1(opts: {
       const e = opts.events.find((ev) => ev.txHash === txHash);
       return e ? e.blockNumber : null;
     },
-    async getParentBeaconBlockRoot(blockNumber: number) {
+    async getBlockHeader(blockNumber: number) {
       calls.parentRoots += 1;
-      return opts.parentRoots?.get(blockNumber) ?? null;
+      const root = opts.parentRoots?.get(blockNumber) ?? null;
+      const ts = opts.blockTimestamps?.get(blockNumber) ?? blockNumber;
+      return { parentBeaconBlockRoot: root, timestampUnixSec: ts };
     },
     async getLogs(args) {
       calls.logs += 1;

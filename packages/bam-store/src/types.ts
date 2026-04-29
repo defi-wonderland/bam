@@ -202,6 +202,22 @@ export interface BatchRow {
   submittedAt: number | null;
   invalidatedAt: number | null;
   /**
+   * L1 type-3 transaction `from` — the entity that paid gas to publish
+   * the blob and call `registerBlobBatch` (ERC-8180). Distinct from the
+   * per-message `author`, which signs each message inside the batch.
+   * Set by both writers (Poster from its signer; Reader from the
+   * `BlobBatchRegistered` indexed `submitter` arg).
+   */
+  submitter: Address | null;
+  /**
+   * Wall-clock of L1 block inclusion, seconds since epoch. Set by the
+   * Reader from the L1 block timestamp; Poster does not have it (the
+   * receipt does not carry block time, and a separate `getBlock` call
+   * would be a per-submit RPC for a field a co-running Reader will fill
+   * in within the next live-tail tick).
+   */
+  l1IncludedAtUnixSec: number | null;
+  /**
    * Frozen snapshot of which messages were in this batch at confirmation.
    * Empty array allowed (e.g. a Reader has observed the batch but not yet
    * decoded it). Adapters preserve a non-empty snapshot across upserts —

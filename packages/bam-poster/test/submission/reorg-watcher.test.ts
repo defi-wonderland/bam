@@ -52,6 +52,8 @@ async function seedConfirmedBatch(
       replacedByTxHash: null,
       submittedAt: args.submittedAt,
       invalidatedAt: null,
+      submitter: null,
+      l1IncludedAtUnixSec: null,
       messageSnapshot: args.messages.map((m, i) => ({
         author: m.sender,
         nonce: m.nonce,

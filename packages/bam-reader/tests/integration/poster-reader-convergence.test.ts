@@ -104,6 +104,8 @@ describe('Poster + Reader convergence', () => {
           replacedByTxHash: null,
           submittedAt: POSTER_INGESTED_AT,
           invalidatedAt: null,
+          submitter: null,
+          l1IncludedAtUnixSec: null,
           messageSnapshot: posterSnapshot,
         });
         for (const [i, sm] of [m1, m2].entries()) {
@@ -142,6 +144,7 @@ describe('Poster + Reader convergence', () => {
       await processBatch({
         event,
         parentBeaconBlockRoot: null,
+        l1IncludedAtUnixSec: null,
         store,
         sources: {},
         chainId: CHAIN_ID,
@@ -210,6 +213,7 @@ describe('Poster + Reader convergence', () => {
       await processBatch({
         event,
         parentBeaconBlockRoot: null,
+        l1IncludedAtUnixSec: null,
         store,
         sources: {},
         chainId: CHAIN_ID,
@@ -250,6 +254,8 @@ describe('Poster + Reader convergence', () => {
           replacedByTxHash: null,
           submittedAt: 999,
           invalidatedAt: null,
+          submitter: null,
+          l1IncludedAtUnixSec: null,
           messageSnapshot: posterSnapshot,
         });
       });
