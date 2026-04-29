@@ -49,10 +49,14 @@ export async function GET(): Promise<NextResponse> {
 
     const messages: ConfirmedRow[] = rows.flatMap((r) => {
       if (r.batchRef === null) return [];
-      const id = r.messageId ?? r.messageHash;
+      // Use ERC-8180 messageHash (pre-batch, stable across pending /
+      // confirmed) as the client-facing id. Replies bind
+      // parentMessageHash, so the Timeline must group on the same
+      // identifier — the batch-scoped messageId would orphan replies
+      // the moment their parent confirms.
       return [
         {
-          message_id: id,
+          message_id: r.messageHash,
           sender: r.author,
           nonce: r.nonce,
           contents: r.contents,
