@@ -163,7 +163,7 @@ export async function runCli(
 
   let cfg;
   try {
-    cfg = parseEnv();
+    cfg = parseEnv(process.env, (msg) => process.stderr.write(`${msg}\n`));
   } catch (err) {
     if (err instanceof EnvConfigError) {
       process.stderr.write(`bam-reader: ${err.message}\n`);
