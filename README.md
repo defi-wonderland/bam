@@ -11,15 +11,19 @@ Built by [Wonderland](https://wonderland.xyz).
 | Package | Description |
 |---------|-------------|
 | [`bam-sdk`](packages/bam-sdk) | TypeScript SDK — message/batch encoding, BPE compression, Zstd decompression, BLS/ECDSA signatures, KZG proofs, blob exposure. Browser entrypoint at `bam-sdk/browser`. |
+| [`bam-poster`](packages/bam-poster) | Node library + HTTP service + CLI — ingests signed messages, batches them, and submits EIP-4844 blob transactions to BAM Core |
+| [`bam-reader`](packages/bam-reader) | Node service — tails L1 for `BlobBatchRegistered`, fetches blobs (beacon → Blobscan), decodes + verifies signatures, and writes confirmed rows into `bam-store`. Exposes a read-only HTTP surface |
+| [`bam-store`](packages/bam-store) | Shared persistence substrate for the Poster and Reader — SQLite/Postgres `BatchRow` / `MessageRow` schema and adapters |
 | [`bam-cli`](packages/bam-cli) | CLI — key management, message encoding, batch operations, BLS aggregation |
-| [`bam-contracts`](packages/bam-contracts) | Solidity — BlobAuthenticatedMessagingCore, BLSRegistry, BLSExposer, verifiers (Foundry) |
+| [`bam-contracts`](packages/bam-contracts) | Solidity — BlobAuthenticatedMessagingCore, BLSRegistry, ECDSARegistry, SignatureRegistryDispatcher, BLSExposer, verifiers (Foundry) |
 
 ## Apps
 
 | App | Description |
 |-----|-------------|
-| [`message-in-a-blobble`](apps/message-in-a-blobble) | Demo — sign messages with ECDSA, batch-encode, and post as EIP-4844 blobs on Sepolia |
-| [`exposure-demo`](apps/exposure-demo) | Demo — full on-chain exposure lifecycle: BLS key registration, blob posting, KZG proof generation, and message exposure via BLSExposer |
+| [`message-in-a-blobble`](apps/message-in-a-blobble) | Demo — sign messages with ECDSA in the browser; the app proxies submission to `@bam/poster` and confirmed reads to `bam-reader` |
+| [`bam-twitter`](apps/bam-twitter) | Twitter-style demo — posts and replies sharing the same Poster + Reader as `message-in-a-blobble`; isolated by a distinct `contentTag` |
+| [`bam-sdk-test`](apps/bam-sdk-test) | Playground — surfaces the `bam-sdk/browser` API one section at a time (hex, message, ECDSA, BLS, batch, exposure, BPE, compression) |
 
 ## Getting Started
 
@@ -30,9 +34,21 @@ pnpm -r build
 pnpm -r test:run
 ```
 
+To run the demos end-to-end, bring up Postgres for `bam-store` and start the shared Poster + Reader plus both demo apps from the workspace root:
+
+```bash
+pnpm db:up   # Postgres for bam-store (Poster + Reader share it)
+pnpm dev     # @bam/poster :8787 + bam-reader :8788 + message-in-a-blobble :3000 + bam-twitter :3001
+```
+
+Or run pieces on their own with `pnpm dev:poster` / `pnpm dev:reader` / `pnpm --filter message-in-a-blobble dev` / `pnpm --filter bam-twitter dev`. See each app's README for env setup; the Poster + Reader env lives at the workspace root (`.env.local`).
+
+For deploying the Poster and Reader to fly.io, see `fly.poster.toml` / `fly.reader.toml` and `scripts/fly-set-secrets.sh`.
+
 ### Requirements
 
 - Node.js >= 20, pnpm >= 10
+- Docker (local Postgres for `bam-store`)
 - [Foundry](https://book.getfoundry.sh/getting-started/installation) (contracts)
 - C compiler (gcc/clang) for `c-kzg` native module
 
@@ -44,17 +60,30 @@ bam-sdk                              bam-contracts
 │   ├── types, constants, errors     │   ├── BlobAuthenticatedMessagingCore
 │   ├── message encoding             │   ├── SocialBlobsCore
 │   ├── batch encoding               │   ├── BLSRegistry
-│   ├── compression (bpe + zstd dec) │   └── BlobSpaceSegments
-│   └── BLS + ECDSA signatures       ├── exposers/
-├── On-chain layer                   │   └── BLSExposer
-│   ├── KZG proof generation         ├── verifiers/
-│   ├── blob parsing + exposure      │   └── SimpleBoolVerifier
-│   └── viem contract client         ├── libraries/
-├── Browser entrypoint               │   ├── BLSVerifier, KZGVerifier
-│   └── bam-sdk/browser (no c-kzg,  │   └── BLS12381, BLSDecompression
-│       no node:fs/crypto)           └── interfaces/
-└── Aggregator client                    ├── IERC_BAM_*
+│   ├── compression (bpe + zstd dec) │   ├── ECDSARegistry
+│   └── BLS + ECDSA signatures       │   ├── SignatureRegistryDispatcher
+├── On-chain layer                   │   └── BlobSpaceSegments
+│   ├── KZG proof generation         ├── exposers/
+│   ├── blob parsing + exposure      │   └── BLSExposer
+│   └── viem contract client         ├── verifiers/
+├── Browser entrypoint               │   └── SimpleBoolVerifier
+│   └── bam-sdk/browser (no c-kzg,   ├── libraries/
+│       no node:fs/crypto)           │   ├── BLSVerifier, KZGVerifier
+└── Aggregator client                │   └── BLS12381, BLSDecompression
+                                     └── interfaces/
+                                         ├── IERC_BAM_*
                                          └── IERC_BSS_*
+
+bam-poster (Node)                    bam-reader (Node)
+├── Ingest — envelope, signed-tag,   ├── Discovery — log-scan + cursor
+│   monotonicity, rate-limit         ├── Blob fetch — beacon → Blobscan
+├── Pool — bam-store (SQLite/PG)     │   with versioned-hash recompute
+├── Submission — type-3 blob tx      ├── Decode + verify — SDK or
+│   loop + reorg watcher             │   bounded eth_call to registry
+└── HTTP — /submit, /pending,        ├── Reorg watcher
+    /flush, /status, /health,        ├── Persistence — bam-store
+    /submitted-batches               └── HTTP — /messages, /batches,
+                                         /batches/:txHash, /health
 ```
 
 Contract ABIs in the SDK are auto-generated from Foundry output:
