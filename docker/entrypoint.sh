@@ -26,6 +26,15 @@ log() {
 # which would in turn defeat the whole point of this script — exiting
 # non-zero so fly/compose can restart the container.
 SHUTDOWN_GRACE_S=${SHUTDOWN_GRACE_S:-10}
+# Validate up front: with `set -euo pipefail`, a non-numeric value
+# (e.g. `30s`) would crash the supervisor mid-shutdown via the
+# arithmetic expansion below. Fall back to the default and warn.
+if ! [[ "$SHUTDOWN_GRACE_S" =~ ^[0-9]+$ ]]; then
+  printf '[bam-entrypoint] SHUTDOWN_GRACE_S=%q is not an integer; falling back to 10\n' \
+    "$SHUTDOWN_GRACE_S" >&2
+  SHUTDOWN_GRACE_S=10
+fi
+
 shutdown_children() {
   local pids=("$@")
   for pid in "${pids[@]}"; do

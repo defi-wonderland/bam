@@ -20,12 +20,14 @@ services:
     image: bam-stack:local
     container_name: bam-stack
     restart: unless-stopped
+    # `.env.local` is the operator-supplied env file (see
+    # `.env.docker.example`). The pnpm `stack:*` / `db:*` scripts
+    # `touch` it before invoking compose so a fresh checkout doesn't
+    # fail on a missing file — we deliberately use the simple list
+    # form here for compatibility with compose < v2.24 (the
+    # `{ path, required: false }` object form is newer).
     env_file:
-      # Optional: a fresh checkout without `.env.local` should still be
-      # able to `pnpm stack:up` (e.g. when the operator passes envs via
-      # the shell or `--env-file`). Compose v2.24+ honours `required: false`.
-      - path: .env.local
-        required: false
+      - .env.local
     environment:
       POSTGRES_DB: bam
       POSTGRES_USER: postgres
