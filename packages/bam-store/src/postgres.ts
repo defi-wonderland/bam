@@ -42,6 +42,15 @@ import {
  */
 export type DrizzleDb = PgDatabase<PgQueryResultHKT, Record<string, unknown>>;
 
+/**
+ * Arbitrary 64-bit key used to serialize concurrent bootstrap (DDL +
+ * singleton seed) across processes. The exact value is irrelevant —
+ * only consistency across writers attached to the same database
+ * matters. Held for the duration of the bootstrap transaction; released
+ * automatically on commit/rollback.
+ */
+const BOOTSTRAP_LOCK_KEY = 8_267_831_923_821n;
+
 function execRowCount(res: unknown): number {
   if (typeof res !== 'object' || res === null) return 0;
   const r = res as { rowCount?: number | null; affectedRows?: number | null };
@@ -209,18 +218,31 @@ export class PostgresBamStore implements BamStore {
       db = connection.db;
       cleanup = connection.cleanup ?? null;
     }
-    for (const stmt of SQL_CREATE_DDL) {
-      await db.execute(sql.raw(stmt));
-    }
-    // Singleton row pattern (id=1 with CHECK) plus ON CONFLICT means
-    // concurrent initialisations and mixed-version writers cannot grow
-    // the table beyond one row, so reads are deterministic. The
-    // version-mismatch check itself is owned by `reconcileSchemaVersion`,
-    // which runs separately.
-    await db
-      .insert(bamStoreSchema)
-      .values({ id: 1, version: SCHEMA_VERSION })
-      .onConflictDoNothing({ target: bamStoreSchema.id });
+    // Run DDL + singleton seed inside one transaction guarded by a
+    // session-level advisory lock. `CREATE TABLE IF NOT EXISTS` on its
+    // own is *not* race-safe in Postgres — two concurrent transactions
+    // can both pass the existence check and then collide on the
+    // pg_type / pg_class system-catalog unique indexes. The advisory
+    // lock serialises bootstraps across processes; the second writer
+    // waits, then re-runs the DDL against an already-populated catalog
+    // where IF NOT EXISTS short-circuits cleanly.
+    await db.transaction(async (tx) => {
+      await tx.execute(
+        sql`SELECT pg_advisory_xact_lock(${BOOTSTRAP_LOCK_KEY}::bigint)`
+      );
+      for (const stmt of SQL_CREATE_DDL) {
+        await tx.execute(sql.raw(stmt));
+      }
+      // Singleton row pattern (id=1 with CHECK) plus ON CONFLICT means
+      // concurrent initialisations and mixed-version writers cannot grow
+      // the table beyond one row, so reads are deterministic. The
+      // version-mismatch check itself is owned by `reconcileSchemaVersion`,
+      // which runs separately.
+      await tx
+        .insert(bamStoreSchema)
+        .values({ id: 1, version: SCHEMA_VERSION })
+        .onConflictDoNothing({ target: bamStoreSchema.id });
+    });
     return new PostgresBamStore(db, cleanup);
   }
 
