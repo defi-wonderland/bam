@@ -1,0 +1,38 @@
+# bam-poster — accepts /submit, signs, posts blobs to L1, persists state.
+# Build the shared image, override CMD to the poster binary.
+
+app = "bam-poster"
+primary_region = "ams"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[experimental]
+  cmd = ["node", "/app/poster/dist/esm/bin/bam-poster.js"]
+
+[env]
+  # Bind to all interfaces so Fly's proxy can forward into the container.
+  POSTER_HOST = "0.0.0.0"
+  POSTER_PORT = "8787"
+
+[http_service]
+  internal_port = 8787
+  force_https = true
+  # Keep the machine running — the poster has a background batching loop
+  # that must run between HTTP submits. Fly's auto-stop only watches
+  # incoming proxy traffic, not internal CPU.
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["app"]
+
+  [[http_service.checks]]
+    interval = "15s"
+    timeout = "5s"
+    grace_period = "10s"
+    method = "GET"
+    path = "/health"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

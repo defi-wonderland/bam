@@ -140,6 +140,17 @@ export class ReaderHttpServer {
 
   private async dispatch(req: IncomingMessage, res: ServerResponse): Promise<void> {
     try {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Vary', 'Origin');
+      if (req.method === 'OPTIONS') {
+        res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+        res.setHeader('Access-Control-Max-Age', '86400');
+        res.statusCode = 204;
+        res.end();
+        return;
+      }
+
       const url = new URL(req.url ?? '/', 'http://local');
       const matched = matchRoute(req.method, url.pathname);
       if (!matched) {

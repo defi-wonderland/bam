@@ -1,78 +1,60 @@
 # syntax=docker/dockerfile:1.7
-#
-# Fat container: Postgres + bam-poster + bam-reader in one image.
-#
-# Stages:
-#   1. builder  — node:20-bookworm-slim with build tooling for c-kzg's
-#                  native module. Installs the workspace and builds the
-#                  four packages we ship.
-#   2. runtime  — postgres:16-bookworm with Node.js 20 layered on top.
-#                  Reuses the upstream postgres docker-entrypoint.sh for
-#                  first-boot initdb; our supervisor wraps it.
 
-# ---- Builder ---------------------------------------------------------------
+# Shared image for bam-poster and bam-reader. Each fly app overrides CMD
+# to pick its service binary; the build is identical so layer caching
+# wins on the second deploy of any pair.
+
 FROM node:20-bookworm-slim AS builder
 
+# build-essential + python3 are required to compile c-kzg's native binding.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
-       build-essential \
-       python3 \
-       ca-certificates \
-       curl \
-       git \
-    && rm -rf /var/lib/apt/lists/*
+ && apt-get install -y --no-install-recommends build-essential python3 ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
 
 RUN corepack enable && corepack prepare pnpm@10.28.2 --activate
 
 WORKDIR /app
 
-COPY . .
+# Workspace + manifests first so dep install caches independently of source.
+COPY pnpm-lock.yaml pnpm-workspace.yaml package.json tsconfig.base.json ./
+COPY packages/bam-sdk/package.json packages/bam-sdk/
+COPY packages/bam-store/package.json packages/bam-store/
+COPY packages/bam-poster/package.json packages/bam-poster/
+COPY packages/bam-reader/package.json packages/bam-reader/
+COPY packages/bam-cli/package.json packages/bam-cli/
+COPY apps/bam-sdk-test/package.json apps/bam-sdk-test/
+COPY apps/message-in-a-blobble/package.json apps/message-in-a-blobble/
 
-RUN pnpm install --frozen-lockfile
+RUN pnpm install --frozen-lockfile \
+      --filter @bam/poster... --filter bam-reader...
 
-RUN pnpm \
-      --filter bam-sdk \
-      --filter bam-store \
-      --filter @bam/poster \
-      --filter bam-reader \
-      run build
+# Source for the four packages we actually build.
+COPY packages/bam-sdk packages/bam-sdk
+COPY packages/bam-store packages/bam-store
+COPY packages/bam-poster packages/bam-poster
+COPY packages/bam-reader packages/bam-reader
 
-# ---- Runtime ---------------------------------------------------------------
-FROM postgres:16-bookworm AS runtime
+# Build in dependency order.
+RUN pnpm --filter bam-sdk build \
+ && pnpm --filter bam-store build \
+ && pnpm --filter @bam/poster build \
+ && pnpm --filter bam-reader build
 
-# Pull node + ca-certs + curl in via apt (no piping a remote installer to
-# bash). The node binary itself comes from the official slim image — same
-# distro family (bookworm), so its dynamic links resolve against the
-# system libs already present in postgres:16-bookworm. curl stays so the
-# supervisor can poll /health.
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
-       curl \
-       ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
+# Produce two self-contained, prod-only deploy trees.
+RUN pnpm deploy --filter=@bam/poster --prod --legacy /out/poster \
+ && pnpm deploy --filter=bam-reader  --prod --legacy /out/reader
 
-COPY --from=node:20-bookworm-slim /usr/local/bin/node /usr/local/bin/node
+# ---------------- runtime ----------------
+FROM node:20-bookworm-slim AS runtime
 
-# Postgres bootstrap (used by upstream docker-entrypoint.sh on first boot)
-ENV POSTGRES_DB=bam \
-    POSTGRES_USER=postgres \
-    POSTGRES_PASSWORD=postgres \
-    PGDATA=/var/lib/postgresql/data
-
-# Service defaults — override at deploy time as needed.
-ENV POSTGRES_URL=postgres://postgres:postgres@127.0.0.1:5432/bam \
-    POSTER_HOST=0.0.0.0 \
-    POSTER_PORT=8787 \
-    READER_HTTP_BIND=0.0.0.0 \
-    READER_HTTP_PORT=8788 \
-    READER_DB_URL=postgres://postgres:postgres@127.0.0.1:5432/bam
-
+ENV NODE_ENV=production
 WORKDIR /app
-COPY --from=builder /app /app
 
-COPY docker/entrypoint.sh /usr/local/bin/bam-entrypoint.sh
-RUN chmod +x /usr/local/bin/bam-entrypoint.sh
+# Trim the default node user's home noise; we only need the binary to run.
+COPY --from=builder /out/poster /app/poster
+COPY --from=builder /out/reader /app/reader
 
-EXPOSE 5432 8787 8788
+USER node
 
-ENTRYPOINT ["/usr/local/bin/bam-entrypoint.sh"]
+# Default to poster; bam-reader's fly.toml overrides this with the reader bin.
+CMD ["node", "/app/poster/dist/esm/bin/bam-poster.js"]
