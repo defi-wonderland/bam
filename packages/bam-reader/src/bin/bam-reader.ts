@@ -137,13 +137,21 @@ export async function resolveBackfillRange(
   if (args.fromMarker === 'deploy') {
     const fromBlock = lookupDeployBlock(cfg.chainId);
     const head = Number(await l1.getBlockNumber());
-    const safeHead = head - cfg.reorgWindowBlocks;
+    const safeHead = Math.max(0, head - cfg.reorgWindowBlocks);
     const toBlock = args.toBlock !== undefined ? args.toBlock : safeHead;
     if (toBlock < fromBlock) {
-      const source = args.toBlock !== undefined ? `--to ${args.toBlock}` : `safe head ${safeHead}`;
+      if (args.toBlock !== undefined) {
+        throw new ArgParseError(
+          `backfill --from deploy --to ${args.toBlock}: --to is below deploy block ` +
+            `${fromBlock}; pass --to <block> >= ${fromBlock}`
+        );
+      }
+      // Implicit safeHead default. Chain is too young / within the reorg window.
       throw new ArgParseError(
-        `backfill --from deploy: resolved fromBlock=${fromBlock} but toBlock=${toBlock} ` +
-          `(${source}); pass --to <block> >= ${fromBlock}`
+        `backfill --from deploy: chain head ${head} is within the reorg window ` +
+          `(reorgWindowBlocks=${cfg.reorgWindowBlocks}, safeHead=${safeHead}); no safe ` +
+          `blocks past deploy block ${fromBlock} yet. Wait for the chain to advance, or ` +
+          `pass an explicit --to <block> >= ${fromBlock} to opt in past safeHead`
       );
     }
     return { fromBlock, toBlock };
@@ -161,7 +169,7 @@ export async function resolveBackfillRange(
       );
     }
     const head = Number(await l1.getBlockNumber());
-    const safeHead = head - cfg.reorgWindowBlocks;
+    const safeHead = Math.max(0, head - cfg.reorgWindowBlocks);
     return { fromBlock: cursor + 1, toBlock: safeHead };
   }
   // Exhaustiveness guard.

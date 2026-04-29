@@ -207,7 +207,48 @@ describe('bam-reader CLI — resolveBackfillRange', () => {
         baseCfg({ chainId: 11155111 }),
         fakeL1(11_500_000)
       )
-    ).rejects.toThrow(/fromBlock=10697923/);
+    ).rejects.toThrow(/below deploy block 10697923/);
+  });
+
+  it('throws a chain-too-young error for --from deploy when head is within the reorg window', async () => {
+    // Young chain: head=10, reorgWindowBlocks=32 → safeHead clamped to 0.
+    // Sepolia deploy block (10_697_923) is unreachable; the error should
+    // explicitly name the reorg-window cause rather than the generic
+    // inverted-range message.
+    await expect(
+      resolveBackfillRange(
+        { subcommand: 'backfill', fromMarker: 'deploy', toBlock: undefined },
+        baseCfg({ chainId: 11155111, reorgWindowBlocks: 32 }),
+        fakeL1(10)
+      )
+    ).rejects.toThrow(/within the reorg window/);
+    await expect(
+      resolveBackfillRange(
+        { subcommand: 'backfill', fromMarker: 'deploy', toBlock: undefined },
+        baseCfg({ chainId: 11155111, reorgWindowBlocks: 32 }),
+        fakeL1(10)
+      )
+    ).rejects.toThrow(/safeHead=0/);
+  });
+
+  it('catchup on a young chain returns an empty (idempotent) range without throwing', async () => {
+    // head=10, reorgWindowBlocks=32 → safeHead clamped to 0.
+    // cursor=5 → fromBlock=6 > toBlock=0 → empty range. Backfill
+    // empty-range early return turns this into a successful no-op
+    // ("not enough chain depth yet"), which is the right thing here.
+    const reader = {
+      async cursorBlock() {
+        return 5;
+      },
+    };
+    const r = await resolveBackfillRange(
+      { subcommand: 'backfill', fromMarker: 'catchup' },
+      baseCfg({ chainId: 11155111, reorgWindowBlocks: 32 }),
+      fakeL1(10),
+      reader
+    );
+    expect(r.fromBlock).toBeGreaterThan(r.toBlock);
+    expect(r.toBlock).toBeGreaterThanOrEqual(0); // safeHead never goes negative
   });
 
   it('throws UnknownChainDeploymentError when chainId is not in the table', async () => {
