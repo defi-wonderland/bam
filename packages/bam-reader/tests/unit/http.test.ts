@@ -42,7 +42,7 @@ function fakeL1(opts: { head: number }): LiveTailL1Client {
       return null;
     },
     async getBlockHeader() {
-      return null;
+      return { parentBeaconBlockRoot: null, timestampUnixSec: 0 };
     },
     async getLogs() {
       return [];

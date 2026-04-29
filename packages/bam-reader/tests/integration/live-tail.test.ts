@@ -283,6 +283,49 @@ describe('liveTailTick (integration)', () => {
     }
   });
 
+  it('propagates a getBlockHeader RPC error so the tick fails and the cursor does not advance (qodo PR #28)', async () => {
+    // Pre-fix, the viem adapter swallowed `getBlock` errors and returned
+    // null; the loop then committed the block with `l1IncludedAtUnixSec=null`
+    // and advanced the cursor. Since the Poster also writes null here, no
+    // later writer would fill in the inclusion time — a transient RPC
+    // blip became a permanent gap. The tick should now throw, the outer
+    // serveLoop catches and retries on the next poll.
+    const store = await createMemoryStore();
+    try {
+      const events = [fakeEvent({ block: 100, tx: 0, log: 0 })];
+      const baseL1 = fakeL1({ head: 130, events });
+      const failingL1: LiveTailL1Client = {
+        ...baseL1,
+        async getBlockHeader() {
+          throw new Error('eth_getBlockByNumber: connection reset');
+        },
+      };
+      const counters = emptyCounters();
+      await expect(
+        liveTailTick({
+          store,
+          l1: failingL1,
+          chainId: CHAIN_ID,
+          bamCoreAddress: BAM_CORE,
+          reorgWindowBlocks: 4,
+          startBlock: 1,
+          ethCallGasCap: 50_000_000n,
+          ethCallTimeoutMs: 5_000,
+          sources: {},
+          counters,
+          processBatchImpl: async () => {
+            throw new Error('processBatch must not be reached when the header fetch fails');
+          },
+        })
+      ).rejects.toThrow(/connection reset/);
+      // Cursor must not have advanced — the next tick will retry.
+      const cursor = await store.withTxn((txn) => txn.getCursor(CHAIN_ID));
+      expect(cursor).toBeNull();
+    } finally {
+      await store.close();
+    }
+  });
+
   it('runs the reorg watcher tick once per call', async () => {
     const store = await createMemoryStore();
     try {

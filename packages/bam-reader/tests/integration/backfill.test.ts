@@ -54,7 +54,7 @@ function fakeL1(opts: {
       return e ? e.blockNumber : null;
     },
     async getBlockHeader() {
-      return null;
+      return { parentBeaconBlockRoot: null, timestampUnixSec: 0 };
     },
     async getLogs(args) {
       const fromBlock = Number(args.fromBlock);

@@ -51,9 +51,11 @@ export interface LiveTailL1Client extends LogScanClient, BlockSource {
    *    don't expose the field).
    *  - `timestampUnixSec` — for `BatchRow.l1IncludedAtUnixSec`.
    * Consolidated so the loop pays one `getBlock` per L1 block instead
-   * of two. Returns `null` if the block isn't available at all.
+   * of two. Throws on RPC failure — the loop's tick-level retry catches
+   * it (per qodo PR #28: a silent null here would advance the cursor
+   * with no inclusion-time signal and no later writer to fill it in).
    */
-  getBlockHeader(blockNumber: number): Promise<BlockHeader | null>;
+  getBlockHeader(blockNumber: number): Promise<BlockHeader>;
   /** Used at construction-time chain-id validation (red-team C-3). */
   getChainId(): Promise<number>;
 }
@@ -153,8 +155,7 @@ export async function liveTailTick(opts: LiveTailOptions): Promise<TickResult> {
     const blockEvents = byBlock.get(blockNumber)!;
     blockEvents.sort((a, b) => a.logIndex - b.logIndex);
     const header = await opts.l1.getBlockHeader(blockNumber);
-    const parentBeaconBlockRoot = header?.parentBeaconBlockRoot ?? null;
-    const l1IncludedAtUnixSec = header?.timestampUnixSec ?? null;
+    const { parentBeaconBlockRoot, timestampUnixSec: l1IncludedAtUnixSec } = header;
     const countersBeforeBlock: ReaderCounters = { ...opts.counters };
     const processedBeforeBlock = processed;
     let maxTxIndex = 0;
