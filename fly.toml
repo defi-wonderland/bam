@@ -1,0 +1,93 @@
+# fly.io deploy config for the BAM fat container.
+#
+# Single machine running Postgres + bam-poster + bam-reader. Postgres data
+# lives on a fly volume mounted at /var/lib/postgresql/data. Only the HTTP
+# ports are exposed; Postgres stays on 127.0.0.1 inside the machine.
+#
+# Operator setup (one-time):
+#   fly apps create <app-name>
+#   fly volumes create bam_data --region <region> --size 10
+#   fly secrets set \
+#     POSTER_ALLOWED_TAGS=... \
+#     POSTER_CHAIN_ID=... \
+#     POSTER_BAM_CORE_ADDRESS=... \
+#     POSTER_RPC_URL=... \
+#     POSTER_SIGNER_PRIVATE_KEY=... \
+#     READER_CHAIN_ID=... \
+#     READER_RPC_URL=... \
+#     READER_BAM_CORE=...
+#   fly deploy
+
+app = "bam-stack"
+primary_region = "ord"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  POSTGRES_DB = "bam"
+  POSTGRES_USER = "postgres"
+  # Note: POSTGRES_PASSWORD ships with the image as the bootstrap value;
+  # rotate via `fly secrets set` if Postgres ever needs to face the network.
+  POSTGRES_URL = "postgres://postgres:postgres@127.0.0.1:5432/bam"
+  POSTER_HOST = "0.0.0.0"
+  POSTER_PORT = "8787"
+  READER_HTTP_BIND = "0.0.0.0"
+  READER_HTTP_PORT = "8788"
+  READER_DB_URL = "postgres://postgres:postgres@127.0.0.1:5432/bam"
+
+[mounts]
+  source = "bam_data"
+  destination = "/var/lib/postgresql/data"
+
+[[services]]
+  protocol = "tcp"
+  internal_port = 8787
+  processes = ["app"]
+
+  [[services.ports]]
+    port = 80
+    handlers = ["http"]
+    force_https = true
+
+  [[services.ports]]
+    port = 443
+    handlers = ["tls", "http"]
+
+  [services.concurrency]
+    type = "connections"
+    hard_limit = 200
+    soft_limit = 100
+
+  [[services.http_checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "30s"
+    method = "get"
+    path = "/health"
+
+[[services]]
+  protocol = "tcp"
+  internal_port = 8788
+  processes = ["app"]
+
+  [[services.ports]]
+    port = 8788
+    handlers = ["tls", "http"]
+
+  [services.concurrency]
+    type = "connections"
+    hard_limit = 200
+    soft_limit = 100
+
+  [[services.http_checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "30s"
+    method = "get"
+    path = "/health"
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory_mb = 1024

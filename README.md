@@ -36,6 +36,51 @@ pnpm -r test:run
 - [Foundry](https://book.getfoundry.sh/getting-started/installation) (contracts)
 - C compiler (gcc/clang) for `c-kzg` native module
 
+## Running the stack
+
+The Poster and Reader services run side-by-side with Postgres in a single
+"fat" container so demos can target one host for ingest, query, and DB
+inspection.
+
+### Local (docker-compose)
+
+```bash
+cp .env.docker.example .env.local        # fill POSTER_*/READER_* values
+pnpm stack:up                             # build + start
+pnpm stack:logs                           # tail
+pnpm stack:down                           # stop (state preserved)
+pnpm stack:reset                          # stop + drop the volume
+```
+
+Published on the loopback only:
+
+| Port | Service |
+|------|---------|
+| `127.0.0.1:5432` | Postgres (`postgres://postgres:postgres@127.0.0.1:5432/bam`) |
+| `127.0.0.1:8787` | bam-poster HTTP |
+| `127.0.0.1:8788` | bam-reader HTTP |
+
+`pnpm db:up` / `db:down` / `db:reset` remain as aliases for the same stack.
+
+### Production (fly.io)
+
+`fly.toml` deploys the same image with Postgres bound to localhost inside
+the machine — only `8787` and `8788` are exposed externally. Postgres data
+lives on a fly volume mounted at `/var/lib/postgresql/data`.
+
+```bash
+fly apps create <app-name>
+fly volumes create bam_data --region <region> --size 10
+fly secrets set POSTER_ALLOWED_TAGS=… POSTER_CHAIN_ID=… POSTER_BAM_CORE_ADDRESS=… \
+                POSTER_RPC_URL=… POSTER_SIGNER_PRIVATE_KEY=… \
+                READER_CHAIN_ID=… READER_RPC_URL=… READER_BAM_CORE=…
+fly deploy
+```
+
+The image is defined in [`Dockerfile`](Dockerfile); the supervisor that
+brings up Postgres → poster → reader lives in
+[`docker/entrypoint.sh`](docker/entrypoint.sh).
+
 ## Architecture
 
 ```
