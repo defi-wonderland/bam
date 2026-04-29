@@ -1,7 +1,7 @@
 /**
- * Typed HTTP client for the `@bam/poster` service. The demo's Next.js
- * API routes are thin proxies that call this client; the Poster's
- * response (status + body) is returned verbatim to the caller.
+ * Typed HTTP client for the `@bam/poster` service. The Next.js API
+ * routes in this app are thin proxies that call this client; the
+ * Poster's response (status + body) is returned verbatim to the caller.
  *
  * When `POSTER_URL` is not configured or the Poster is unreachable,
  * `request` surfaces a distinct `unreachable` outcome so the calling
@@ -77,7 +77,7 @@ async function rawFetch(
   const url = `${base}${path}`;
   // Compose caller's AbortSignal with a timeout signal so a slow Poster
   // doesn't hold the route handler open indefinitely. `AbortSignal.any`
-  // + `AbortSignal.timeout` are supported in every runtime the demo
+  // + `AbortSignal.timeout` are supported in every runtime this app
   // targets (Node ≥ 20, modern browsers).
   const timeoutMs = init?.timeoutMs ?? DEFAULT_POSTER_TIMEOUT_MS;
   const timeoutSignal = AbortSignal.timeout(timeoutMs);
@@ -85,9 +85,9 @@ async function rawFetch(
     ? AbortSignal.any([init.signal, timeoutSignal])
     : timeoutSignal;
   // Forward the operator's bearer token when POSTER_AUTH_TOKEN is set
-  // on the demo process (must match the token the Poster is running
-  // with). Without this, enabling auth on the Poster 401s every demo
-  // proxy call (qodo review).
+  // on this process (must match the token the Poster is running
+  // with). Without this, enabling auth on the Poster 401s every
+  // proxy call.
   const headers: Record<string, string> = {};
   const token = process.env.POSTER_AUTH_TOKEN;
   if (token && token.length > 0) {

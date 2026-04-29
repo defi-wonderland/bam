@@ -1,13 +1,13 @@
 /**
  * Typed HTTP client for the `bam-reader` service. Mirrors
- * `poster-client.ts` so the demo's confirmed-read API routes look
+ * `poster-client.ts` so this app's confirmed-read API routes look
  * identical in shape to its submission proxies — same error wire,
  * same timeout, same env-var contract.
  *
  * When `READER_URL` is missing or the Reader is unreachable, the
  * caller-facing route returns a stable 500 / 502 with a documented
  * `error` code rather than leaking a fetch error. The Reader itself
- * defaults to binding `127.0.0.1:8788`; the demo's default
+ * defaults to binding `127.0.0.1:8788`; this app's default
  * `READER_URL` matches.
  */
 
