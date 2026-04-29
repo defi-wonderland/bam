@@ -78,11 +78,19 @@ export function useInjectedWallet(): WalletState {
       const accounts = (await window.ethereum.request({
         method: 'eth_requestAccounts',
       })) as string[];
+      if (!Array.isArray(accounts) || accounts.length === 0) {
+        setError('Wallet returned no accounts.');
+        return;
+      }
       const chainHex = (await window.ethereum.request({
         method: 'eth_chainId',
       })) as string;
-      const acct = accounts[0] as Address;
       const id = parseInt(chainHex, 16);
+      if (!Number.isFinite(id)) {
+        setError(`Wallet returned an unparseable chainId: ${chainHex}`);
+        return;
+      }
+      const acct = accounts[0] as Address;
       setAddress(acct);
       setChainId(id);
       setClient(buildClient(acct, id));

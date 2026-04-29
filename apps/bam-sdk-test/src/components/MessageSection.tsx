@@ -52,7 +52,16 @@ export function MessageSection() {
       </Field>
 
       <div className="flex flex-wrap gap-2">
-        <Button onClick={() => encode.run(() => buildContents())}>encodeContents</Button>
+        <Button
+          onClick={() =>
+            encode.run(
+              () => buildContents(),
+              (b) => `${bytesToHex(b)}  (${b.length} bytes)`
+            )
+          }
+        >
+          encodeContents
+        </Button>
         <Button
           onClick={() =>
             split.run(
