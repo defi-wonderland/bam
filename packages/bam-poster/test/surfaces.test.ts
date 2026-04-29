@@ -72,6 +72,8 @@ async function seedBatch(
       replacedByTxHash: null,
       submittedAt: 2_000,
       invalidatedAt: opts.invalidatedAt ?? null,
+      submitter: null,
+      l1IncludedAtUnixSec: null,
       messageSnapshot: msgs.map((m, i) => ({
         author: SENDER,
         nonce: BigInt(m.nonce),
@@ -189,6 +191,8 @@ describe('listSubmittedBatches', () => {
         replacedByTxHash: null,
         submittedAt: 2_000,
         invalidatedAt: null,
+        submitter: null,
+        l1IncludedAtUnixSec: null,
         messageSnapshot: [],
       });
     });
@@ -240,6 +244,8 @@ describe('listSubmittedBatches', () => {
         replacedByTxHash: null,
         submittedAt: null,
         invalidatedAt: null,
+        submitter: null,
+        l1IncludedAtUnixSec: null,
         messageSnapshot: [],
       });
     });

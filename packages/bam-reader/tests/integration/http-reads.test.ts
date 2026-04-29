@@ -62,8 +62,8 @@ function fakeL1(): LiveTailL1Client {
     async getTransactionBlock() {
       return null;
     },
-    async getParentBeaconBlockRoot() {
-      return null;
+    async getBlockHeader() {
+      return { parentBeaconBlockRoot: null, timestampUnixSec: 0 };
     },
     async getLogs() {
       return [];
@@ -93,6 +93,8 @@ function batchRow(over: Partial<BatchRow> = {}): BatchRow {
     replacedByTxHash: null,
     submittedAt: 1_000,
     invalidatedAt: null,
+    submitter: null,
+    l1IncludedAtUnixSec: null,
     messageSnapshot: [snapshotEntry()],
     ...over,
   };

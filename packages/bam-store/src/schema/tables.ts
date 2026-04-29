@@ -96,6 +96,8 @@ export const batches = pgTable(
     submittedAt: bigint('submitted_at', { mode: 'number' }),
     invalidatedAt: bigint('invalidated_at', { mode: 'number' }),
     messageSnapshot: text('message_snapshot').notNull().default('[]'),
+    submitter: text('submitter'),
+    l1IncludedAtUnixSec: bigint('l1_included_at_unix_sec', { mode: 'number' }),
   },
   (t) => ({
     tagBlock: index('idx_batches_tag_block').on(t.contentTag, t.blockNumber),

@@ -133,13 +133,14 @@ export async function backfill(opts: BackfillOptions): Promise<BackfillCounters>
     for (const blockNumber of sortedBlocks) {
       const blockEvents = byBlock.get(blockNumber)!;
       blockEvents.sort((a, b) => a.logIndex - b.logIndex);
-      const parentBeaconBlockRoot =
-        await opts.l1.getParentBeaconBlockRoot(blockNumber);
+      const header = await opts.l1.getBlockHeader(blockNumber);
+      const { parentBeaconBlockRoot, timestampUnixSec: l1IncludedAtUnixSec } = header;
       let maxTxIndex = 0;
       for (const event of blockEvents) {
         const result: ProcessBatchResult = await proc({
           event,
           parentBeaconBlockRoot,
+          l1IncludedAtUnixSec,
           store: opts.store,
           sources: opts.sources,
           chainId: opts.chainId,

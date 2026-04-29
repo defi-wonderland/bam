@@ -61,8 +61,8 @@ function fakeL1(opts: { head: number; events: BlobBatchRegisteredEvent[] }): Liv
       const e = opts.events.find((ev) => ev.txHash === txHash);
       return e ? e.blockNumber : null;
     },
-    async getParentBeaconBlockRoot() {
-      return null;
+    async getBlockHeader() {
+      return { parentBeaconBlockRoot: null, timestampUnixSec: 0 };
     },
     async getLogs(args) {
       const fromBlock = Number(args.fromBlock);
@@ -132,6 +132,8 @@ describe('crash-injection mid-block', () => {
               replacedByTxHash: null,
               submittedAt: null,
               invalidatedAt: null,
+              submitter: null,
+              l1IncludedAtUnixSec: null,
               messageSnapshot: [],
             });
             // …then crash before setCursor runs.
@@ -182,6 +184,8 @@ describe('crash-injection mid-block', () => {
                 replacedByTxHash: null,
                 submittedAt: null,
                 invalidatedAt: null,
+                submitter: null,
+                l1IncludedAtUnixSec: null,
                 messageSnapshot: [],
               });
             });
@@ -234,6 +238,8 @@ describe('crash-injection mid-block', () => {
               replacedByTxHash: null,
               submittedAt: null,
               invalidatedAt: null,
+              submitter: null,
+              l1IncludedAtUnixSec: null,
               messageSnapshot: [],
             });
           });

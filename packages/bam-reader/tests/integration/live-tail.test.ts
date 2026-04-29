@@ -51,6 +51,7 @@ function fakeL1(opts: {
   head: number;
   events: BlobBatchRegisteredEvent[];
   parentRoots?: Map<number, Bytes32>;
+  blockTimestamps?: Map<number, number>;
   chainId?: number;
 }): LiveTailL1Client {
   const calls = { logs: 0, parentRoots: 0 };
@@ -66,9 +67,11 @@ function fakeL1(opts: {
       const e = opts.events.find((ev) => ev.txHash === txHash);
       return e ? e.blockNumber : null;
     },
-    async getParentBeaconBlockRoot(blockNumber: number) {
+    async getBlockHeader(blockNumber: number) {
       calls.parentRoots += 1;
-      return opts.parentRoots?.get(blockNumber) ?? null;
+      const root = opts.parentRoots?.get(blockNumber) ?? null;
+      const ts = opts.blockTimestamps?.get(blockNumber) ?? blockNumber;
+      return { parentBeaconBlockRoot: root, timestampUnixSec: ts };
     },
     async getLogs(args) {
       calls.logs += 1;
@@ -275,6 +278,49 @@ describe('liveTailTick (integration)', () => {
       });
       expect(counters.decoded).toBe(1);
       expect(counters.undecodable).toBe(0);
+    } finally {
+      await store.close();
+    }
+  });
+
+  it('propagates a getBlockHeader RPC error so the tick fails and the cursor does not advance (qodo PR #28)', async () => {
+    // Pre-fix, the viem adapter swallowed `getBlock` errors and returned
+    // null; the loop then committed the block with `l1IncludedAtUnixSec=null`
+    // and advanced the cursor. Since the Poster also writes null here, no
+    // later writer would fill in the inclusion time — a transient RPC
+    // blip became a permanent gap. The tick should now throw, the outer
+    // serveLoop catches and retries on the next poll.
+    const store = await createMemoryStore();
+    try {
+      const events = [fakeEvent({ block: 100, tx: 0, log: 0 })];
+      const baseL1 = fakeL1({ head: 130, events });
+      const failingL1: LiveTailL1Client = {
+        ...baseL1,
+        async getBlockHeader() {
+          throw new Error('eth_getBlockByNumber: connection reset');
+        },
+      };
+      const counters = emptyCounters();
+      await expect(
+        liveTailTick({
+          store,
+          l1: failingL1,
+          chainId: CHAIN_ID,
+          bamCoreAddress: BAM_CORE,
+          reorgWindowBlocks: 4,
+          startBlock: 1,
+          ethCallGasCap: 50_000_000n,
+          ethCallTimeoutMs: 5_000,
+          sources: {},
+          counters,
+          processBatchImpl: async () => {
+            throw new Error('processBatch must not be reached when the header fetch fails');
+          },
+        })
+      ).rejects.toThrow(/connection reset/);
+      // Cursor must not have advanced — the next tick will retry.
+      const cursor = await store.withTxn((txn) => txn.getCursor(CHAIN_ID));
+      expect(cursor).toBeNull();
     } finally {
       await store.close();
     }

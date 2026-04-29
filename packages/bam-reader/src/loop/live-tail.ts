@@ -44,10 +44,25 @@ import type { VerifyReadContractClient } from '../verify/on-chain-registry.js';
 import type { FetchLike } from '../blob-fetch/beacon.js';
 
 export interface LiveTailL1Client extends LogScanClient, BlockSource {
-  /** Returns the parent_beacon_block_root for `blockNumber`, or `null` if unavailable. */
-  getParentBeaconBlockRoot(blockNumber: number): Promise<Bytes32 | null>;
+  /**
+   * Fetch the L1 block header fields the Reader needs in one shot:
+   *  - `parentBeaconBlockRoot` — for the EIP-4788 lookup that
+   *    parents blob fetches (null on pre-Cancun blocks or RPCs that
+   *    don't expose the field).
+   *  - `timestampUnixSec` — for `BatchRow.l1IncludedAtUnixSec`.
+   * Consolidated so the loop pays one `getBlock` per L1 block instead
+   * of two. Throws on RPC failure — the loop's tick-level retry catches
+   * it (per qodo PR #28: a silent null here would advance the cursor
+   * with no inclusion-time signal and no later writer to fill it in).
+   */
+  getBlockHeader(blockNumber: number): Promise<BlockHeader>;
   /** Used at construction-time chain-id validation (red-team C-3). */
   getChainId(): Promise<number>;
+}
+
+export interface BlockHeader {
+  parentBeaconBlockRoot: Bytes32 | null;
+  timestampUnixSec: number;
 }
 
 export interface LiveTailOptions {
@@ -139,13 +154,16 @@ export async function liveTailTick(opts: LiveTailOptions): Promise<TickResult> {
     if (blockedByTransient) break;
     const blockEvents = byBlock.get(blockNumber)!;
     blockEvents.sort((a, b) => a.logIndex - b.logIndex);
-    const parentBeaconBlockRoot = await opts.l1.getParentBeaconBlockRoot(blockNumber);
+    const header = await opts.l1.getBlockHeader(blockNumber);
+    const { parentBeaconBlockRoot, timestampUnixSec: l1IncludedAtUnixSec } = header;
     const countersBeforeBlock: ReaderCounters = { ...opts.counters };
     const processedBeforeBlock = processed;
     let maxTxIndex = 0;
     let blockHasTransient = false;
     for (const event of blockEvents) {
-      const result: ProcessBatchResult = await proc(buildProcessOpts(opts, event, parentBeaconBlockRoot));
+      const result: ProcessBatchResult = await proc(
+        buildProcessOpts(opts, event, parentBeaconBlockRoot, l1IncludedAtUnixSec)
+      );
       if (result.txIndex > maxTxIndex) maxTxIndex = result.txIndex;
       processed += 1;
       // Live-tail has no retention threshold to consult: every
@@ -223,11 +241,13 @@ export async function liveTailTick(opts: LiveTailOptions): Promise<TickResult> {
 function buildProcessOpts(
   opts: LiveTailOptions,
   event: BlobBatchRegisteredEvent,
-  parentBeaconBlockRoot: Bytes32 | null
+  parentBeaconBlockRoot: Bytes32 | null,
+  l1IncludedAtUnixSec: number | null
 ): ProcessBatchOptions {
   return {
     event,
     parentBeaconBlockRoot,
+    l1IncludedAtUnixSec,
     store: opts.store,
     sources: opts.sources,
     chainId: opts.chainId,

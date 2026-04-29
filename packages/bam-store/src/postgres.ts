@@ -100,6 +100,8 @@ interface RawBatch {
   submittedAt: number | null;
   invalidatedAt: number | null;
   messageSnapshot: string;
+  submitter: string | null;
+  l1IncludedAtUnixSec: number | null;
 }
 
 function mapMessage(raw: RawMessage): MessageRow {
@@ -134,6 +136,8 @@ function mapBatch(raw: RawBatch): BatchRow {
     replacedByTxHash: raw.replacedByTxHash as Bytes32 | null,
     submittedAt: raw.submittedAt,
     invalidatedAt: raw.invalidatedAt,
+    submitter: raw.submitter as Address | null,
+    l1IncludedAtUnixSec: raw.l1IncludedAtUnixSec,
     messageSnapshot: decodeMessageSnapshot(raw.messageSnapshot),
   };
 }
@@ -551,28 +555,36 @@ function makeTxn(tx: DrizzleDb): StoreTxn {
     // ── unified-schema batch CRUD ────────────────────────────────────
     async upsertBatch(row: BatchRow): Promise<void> {
       const snapshotJson = encodeMessageSnapshot(row.messageSnapshot);
+      // Lowercase `submitter` so reader-observed (event topic) and
+      // Poster-written (signer.account().address) writers compare and
+      // index against the same canonical form.
+      const submitter = row.submitter ? row.submitter.toLowerCase() : null;
       await tx.execute(sql`
         INSERT INTO batches
           (tx_hash, chain_id, content_tag, blob_versioned_hash,
            batch_content_hash, block_number, tx_index, status,
-           replaced_by_tx_hash, submitted_at, invalidated_at, message_snapshot)
+           replaced_by_tx_hash, submitted_at, invalidated_at, message_snapshot,
+           submitter, l1_included_at_unix_sec)
         VALUES (${row.txHash}, ${row.chainId}, ${row.contentTag},
                 ${row.blobVersionedHash}, ${row.batchContentHash},
                 ${row.blockNumber}, ${row.txIndex}, ${row.status},
                 ${row.replacedByTxHash}, ${row.submittedAt},
-                ${row.invalidatedAt}, ${snapshotJson})
+                ${row.invalidatedAt}, ${snapshotJson},
+                ${submitter}, ${row.l1IncludedAtUnixSec})
         ON CONFLICT (tx_hash) DO UPDATE SET
-          chain_id            = EXCLUDED.chain_id,
-          content_tag         = EXCLUDED.content_tag,
-          blob_versioned_hash = EXCLUDED.blob_versioned_hash,
-          batch_content_hash  = EXCLUDED.batch_content_hash,
-          block_number        = EXCLUDED.block_number,
-          tx_index            = EXCLUDED.tx_index,
-          status              = EXCLUDED.status,
-          replaced_by_tx_hash = COALESCE(EXCLUDED.replaced_by_tx_hash, batches.replaced_by_tx_hash),
-          submitted_at        = COALESCE(EXCLUDED.submitted_at, batches.submitted_at),
-          invalidated_at      = EXCLUDED.invalidated_at,
-          message_snapshot    = CASE
+          chain_id                = EXCLUDED.chain_id,
+          content_tag             = EXCLUDED.content_tag,
+          blob_versioned_hash     = EXCLUDED.blob_versioned_hash,
+          batch_content_hash      = EXCLUDED.batch_content_hash,
+          block_number            = EXCLUDED.block_number,
+          tx_index                = EXCLUDED.tx_index,
+          status                  = EXCLUDED.status,
+          replaced_by_tx_hash     = COALESCE(EXCLUDED.replaced_by_tx_hash, batches.replaced_by_tx_hash),
+          submitted_at            = COALESCE(EXCLUDED.submitted_at, batches.submitted_at),
+          invalidated_at          = EXCLUDED.invalidated_at,
+          submitter               = COALESCE(EXCLUDED.submitter, batches.submitter),
+          l1_included_at_unix_sec = COALESCE(EXCLUDED.l1_included_at_unix_sec, batches.l1_included_at_unix_sec),
+          message_snapshot        = CASE
             WHEN EXCLUDED.message_snapshot = '[]' THEN batches.message_snapshot
             ELSE EXCLUDED.message_snapshot
           END

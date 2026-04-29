@@ -20,6 +20,8 @@ interface ReaderBatch {
   txHash: string;
   blockNumber: number | null;
   blobVersionedHash: string;
+  submitter: string | null;
+  l1IncludedAtUnixSec: number | null;
   messageSnapshot: SnapshotEntry[];
 }
 
@@ -137,6 +139,8 @@ export async function GET(
       txHash: batch.txHash,
       blockNumber: batch.blockNumber ?? 0,
       blobVersionedHashes: [batch.blobVersionedHash],
+      submitter: batch.submitter,
+      l1IncludedAtUnixSec: batch.l1IncludedAtUnixSec,
       messageCount: messages.length,
       messages,
     });

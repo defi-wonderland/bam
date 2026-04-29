@@ -41,8 +41,8 @@ function fakeL1(opts: { head: number }): LiveTailL1Client {
     async getTransactionBlock() {
       return null;
     },
-    async getParentBeaconBlockRoot() {
-      return null;
+    async getBlockHeader() {
+      return { parentBeaconBlockRoot: null, timestampUnixSec: 0 };
     },
     async getLogs() {
       return [];
@@ -160,6 +160,8 @@ describe('ReaderHttpServer', () => {
       replacedByTxHash: null,
       submittedAt: 1_000,
       invalidatedAt: null,
+      submitter: null,
+      l1IncludedAtUnixSec: null,
       messageSnapshot: [snapshotEntry()],
       ...over,
     };

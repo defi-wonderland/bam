@@ -57,13 +57,22 @@ export function createViemL1(rpcUrl: string): ViemL1Adapter {
       if (!receipt) return null;
       return Number(receipt.blockNumber);
     },
-    async getParentBeaconBlockRoot(blockNumber: number) {
+    async getBlockHeader(blockNumber: number) {
+      // Let RPC errors propagate — the live-tail / backfill loops are
+      // already wrapped in tick-level try/catch that retries on the
+      // next poll interval. Swallowing errors here would advance the
+      // cursor with `l1IncludedAtUnixSec=null`, leaving a permanent
+      // gap on a transient RPC blip (qodo PR #28). Same posture as
+      // every other method on this adapter.
       const block = await publicClient.getBlock({
         blockNumber: BigInt(blockNumber),
       });
       const root = (block as { parentBeaconBlockRoot?: string })
         .parentBeaconBlockRoot;
-      return (root ?? null) as Bytes32 | null;
+      return {
+        parentBeaconBlockRoot: (root ?? null) as Bytes32 | null,
+        timestampUnixSec: Number(block.timestamp),
+      };
     },
     async getLogs(args) {
       const logs = await publicClient.getLogs({

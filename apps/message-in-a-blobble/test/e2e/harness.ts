@@ -55,6 +55,8 @@ export async function startHarness(): Promise<Harness> {
       txHash,
       blobVersionedHash: (`0x${'fe'.repeat(32)}`) as Bytes32,
       blockNumber,
+      txIndex: 0,
+      submitter: ('0x' + 'cd'.repeat(20)) as Address,
     };
   };
 

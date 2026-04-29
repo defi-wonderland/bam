@@ -5,12 +5,16 @@ import { listBatches, readerErrorToResponse } from '@/lib/reader-client';
 
 interface Blobble {
   versionedHash: string;
-  // Seconds-since-epoch from the batch's `submittedAt`, when the
-  // Poster (or a Poster+Reader co-deploy) writes one. In Reader-only
-  // deploys (the demo's case) the Reader doesn't set `submittedAt`,
-  // so the field is null and the UI renders the L1 block number
-  // instead of synthesising a misleading 1970-01-01 timestamp.
+  /**
+   * Seconds-since-epoch. Prefers `l1IncludedAtUnixSec` (L1 block
+   * timestamp — what the original demo displayed before 005). Falls
+   * back to the Poster's `submittedAt` (best-effort wall clock; can
+   * drift from L1 inclusion time by minutes). Null only if neither
+   * is set, which the UI renders as the L1 block number.
+   */
   timestamp: number | null;
+  /** L1 type-3 transaction `from` (the entity that paid gas to publish the blob). */
+  submitter: string | null;
   txHash: string;
   blockNumber: number;
 }
@@ -21,6 +25,8 @@ interface ReaderBatchRow {
   blobVersionedHash: string;
   blockNumber: number | null;
   submittedAt: number | null;
+  l1IncludedAtUnixSec: number | null;
+  submitter: string | null;
   messageSnapshot: Array<{ author: string }>;
 }
 
@@ -46,7 +52,12 @@ export async function GET(): Promise<NextResponse> {
     const blobbles: Blobble[] = rows.map((r) => ({
       versionedHash: r.blobVersionedHash,
       timestamp:
-        r.submittedAt !== null ? Math.floor(r.submittedAt / 1000) : null,
+        r.l1IncludedAtUnixSec !== null
+          ? r.l1IncludedAtUnixSec
+          : r.submittedAt !== null
+            ? Math.floor(r.submittedAt / 1000)
+            : null,
+      submitter: r.submitter,
       txHash: r.txHash,
       blockNumber: r.blockNumber ?? 0,
     }));

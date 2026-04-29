@@ -22,6 +22,8 @@ function readerBatch(over: Record<string, unknown> = {}): Record<string, unknown
     replacedByTxHash: null,
     submittedAt: 1_700_000_000_000,
     invalidatedAt: null,
+    submitter: null,
+    l1IncludedAtUnixSec: null,
     messageSnapshot: [],
     ...over,
   };
@@ -74,14 +76,59 @@ describe('GET /api/blobbles — Reader proxy', () => {
     expect(first.timestamp).toBe(Math.floor(1_700_000_000_000 / 1000));
   });
 
-  it('renders timestamp as null when submittedAt is null (Reader-only deploy)', async () => {
-    // Pure-Reader deploys leave `submittedAt` null since the Poster
-    // is the only writer that sets it. The demo must surface the
-    // nullness instead of substituting `0` and rendering 1970-01-01.
+  it('prefers l1IncludedAtUnixSec over submittedAt (restores L1-block-timestamp semantic)', async () => {
+    // Pre-005 the demo displayed the L1 block timestamp; after 005 it
+    // started displaying the Poster's `submittedAt` (which can drift
+    // by minutes). The Reader now records `l1IncludedAtUnixSec` from
+    // the L1 block header — the demo prefers that field when present.
     fetchMock.mockResolvedValueOnce(
       new Response(
         JSON.stringify({
-          batches: [readerBatch({ txHash: TX_A, blockNumber: 100, submittedAt: null })],
+          batches: [
+            readerBatch({
+              txHash: TX_A,
+              blockNumber: 100,
+              submittedAt: 1_700_000_005_000,   // ms — Poster wall clock
+              l1IncludedAtUnixSec: 1_700_000_000, // s — L1 block time
+            }),
+          ],
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } }
+      )
+    );
+    const { GET } = await import('../../src/app/api/blobbles/route');
+    const res = await GET();
+    const body = (await res.json()) as { blobbles: Array<{ timestamp: number | null }> };
+    expect(body.blobbles[0].timestamp).toBe(1_700_000_000);
+  });
+
+  it('falls back to submittedAt/1000 when l1IncludedAtUnixSec is null', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          batches: [
+            readerBatch({
+              txHash: TX_A,
+              blockNumber: 100,
+              submittedAt: 1_700_000_000_000,
+              l1IncludedAtUnixSec: null,
+            }),
+          ],
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } }
+      )
+    );
+    const { GET } = await import('../../src/app/api/blobbles/route');
+    const res = await GET();
+    const body = (await res.json()) as { blobbles: Array<{ timestamp: number | null }> };
+    expect(body.blobbles[0].timestamp).toBe(1_700_000_000);
+  });
+
+  it('renders timestamp as null when both fields are null (Reader-only deploy, no inclusion time yet)', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          batches: [readerBatch({ txHash: TX_A, blockNumber: 100, submittedAt: null, l1IncludedAtUnixSec: null })],
         }),
         { status: 200, headers: { 'content-type': 'application/json' } }
       )
@@ -90,6 +137,22 @@ describe('GET /api/blobbles — Reader proxy', () => {
     const res = await GET();
     const body = (await res.json()) as { blobbles: Array<{ timestamp: number | null }> };
     expect(body.blobbles[0].timestamp).toBeNull();
+  });
+
+  it('surfaces submitter from the Reader response', async () => {
+    const submitter = '0x' + '99'.repeat(20);
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          batches: [readerBatch({ txHash: TX_A, blockNumber: 100, submitter })],
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } }
+      )
+    );
+    const { GET } = await import('../../src/app/api/blobbles/route');
+    const res = await GET();
+    const body = (await res.json()) as { blobbles: Array<{ submitter: string | null }> };
+    expect(body.blobbles[0].submitter).toBe(submitter);
   });
 
   it('returns 502 reader_unreachable when fetch fails', async () => {
