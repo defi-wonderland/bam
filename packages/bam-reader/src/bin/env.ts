@@ -147,14 +147,36 @@ export function parseEnv(
   //      connection string.
   //   3. Fallback: `memory:` — in-process PGLite, non-durable.
   //      Operators wanting durability set the env var explicitly.
-  const dbUrl =
-    optionalString(env, 'READER_DB_URL') ??
-    optionalString(env, 'POSTGRES_URL') ??
-    MEMORY_DB_URL;
-  if (dbUrl === MEMORY_DB_URL) {
+  const readerDbUrl = optionalString(env, 'READER_DB_URL');
+  const postgresUrl = optionalString(env, 'POSTGRES_URL');
+  let dbUrl: string;
+  let dbUrlSource: string;
+  if (readerDbUrl !== undefined) {
+    dbUrl = readerDbUrl;
+    dbUrlSource = 'READER_DB_URL';
+  } else if (postgresUrl !== undefined) {
+    dbUrl = postgresUrl;
+    dbUrlSource = 'POSTGRES_URL';
+  } else {
+    dbUrl = MEMORY_DB_URL;
+    dbUrlSource = '(default)';
     warn?.(
       'bam-reader: neither READER_DB_URL nor POSTGRES_URL set; defaulting to in-process PGLite (memory:). ' +
         'Confirmed rows are non-durable across restarts.'
+    );
+  }
+  // Validate scheme up front so a bad value fails as `EnvConfigError`
+  // (clean exit code 2 + clear source attribution) rather than later as
+  // a generic Error from the store factory that names the wrong env var.
+  if (
+    dbUrl !== 'memory:' &&
+    dbUrl !== 'memory' &&
+    !dbUrl.startsWith('postgres:') &&
+    !dbUrl.startsWith('postgresql:')
+  ) {
+    throw new EnvConfigError(
+      `${dbUrlSource}=${dbUrl}: unsupported DSN scheme. ` +
+        `Use a postgres:// URL, or memory: for in-process PGLite.`
     );
   }
 

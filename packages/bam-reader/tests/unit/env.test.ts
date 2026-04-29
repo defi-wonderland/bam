@@ -11,7 +11,7 @@ const VALID = {
   READER_CHAIN_ID: '11155111',
   READER_RPC_URL: 'https://rpc.example.test',
   READER_BAM_CORE: '0x000000000000000000000000000000000000c07e',
-  READER_DB_URL: 'sqlite:./reader.db',
+  READER_DB_URL: 'postgres://example.test/bam',
 };
 
 describe('parseEnv', () => {
@@ -20,7 +20,7 @@ describe('parseEnv', () => {
     expect(cfg.chainId).toBe(11155111);
     expect(cfg.rpcUrl).toBe('https://rpc.example.test');
     expect(cfg.bamCoreAddress).toBe('0x000000000000000000000000000000000000c07e');
-    expect(cfg.dbUrl).toBe('sqlite:./reader.db');
+    expect(cfg.dbUrl).toBe('postgres://example.test/bam');
     expect(cfg.httpBind).toBe('127.0.0.1');
     expect(cfg.httpPort).toBe(8788);
     expect(cfg.reorgWindowBlocks).toBe(32);
@@ -95,7 +95,7 @@ describe('parseEnv', () => {
     it('uses READER_DB_URL when set; never warns', () => {
       const warn = vi.fn();
       const cfg = parseEnv(VALID, warn);
-      expect(cfg.dbUrl).toBe('sqlite:./reader.db');
+      expect(cfg.dbUrl).toBe('postgres://example.test/bam');
       expect(warn).not.toHaveBeenCalled();
     });
 
@@ -114,7 +114,7 @@ describe('parseEnv', () => {
         ...VALID,
         POSTGRES_URL: 'postgres://example/bam',
       });
-      expect(cfg.dbUrl).toBe('sqlite:./reader.db');
+      expect(cfg.dbUrl).toBe('postgres://example.test/bam');
     });
 
     it('defaults to memory: and emits a warning when neither is set', () => {
@@ -136,6 +136,42 @@ describe('parseEnv', () => {
       );
       expect(cfg.dbUrl).toBe('memory:');
       expect(warn).toHaveBeenCalledTimes(1);
+    });
+
+    it('accepts the bare "memory" form (no trailing colon)', () => {
+      const cfg = parseEnv({ ...withoutDbUrl(), READER_DB_URL: 'memory' });
+      expect(cfg.dbUrl).toBe('memory');
+    });
+
+    it('accepts a postgresql:// prefix as well as postgres://', () => {
+      const cfg = parseEnv({
+        ...withoutDbUrl(),
+        READER_DB_URL: 'postgresql://example/bam',
+      });
+      expect(cfg.dbUrl).toBe('postgresql://example/bam');
+    });
+
+    it('rejects an unsupported scheme on READER_DB_URL with EnvConfigError', () => {
+      // Pre-feature-007 a bad scheme would throw a generic Error from
+      // the store factory at construction time; promote to
+      // EnvConfigError so the CLI exits with the documented config-
+      // error code and a clear message.
+      expect(() =>
+        parseEnv({ ...withoutDbUrl(), READER_DB_URL: 'sqlite:./reader.db' })
+      ).toThrow(EnvConfigError);
+      expect(() =>
+        parseEnv({ ...withoutDbUrl(), READER_DB_URL: 'sqlite:./reader.db' })
+      ).toThrow(/READER_DB_URL=sqlite:\.\/reader\.db/);
+    });
+
+    it('rejects an unsupported scheme on POSTGRES_URL and names POSTGRES_URL as the source', () => {
+      // qodo PR #29: when the value comes from POSTGRES_URL but the
+      // error message says "READER_DB_URL", the operator looks in the
+      // wrong env var. Source attribution must follow the resolution
+      // chain.
+      expect(() =>
+        parseEnv({ ...withoutDbUrl(), POSTGRES_URL: 'mysql://example/bam' })
+      ).toThrow(/POSTGRES_URL=mysql:\/\/example\/bam/);
     });
   });
 
