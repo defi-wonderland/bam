@@ -172,6 +172,38 @@ describe('fetchFromBlobscan', () => {
     ).rejects.toBeInstanceOf(VersionedHashMismatch);
   });
 
+  it.each([
+    ['IPv4 literal',     'http://169.254.169.254/latest/meta-data/'],
+    ['IPv4 RFC1918',     'http://10.0.0.5/blob.bin'],
+    ['IPv6 literal',     'http://[::1]/blob.bin'],
+    ['localhost',        'http://localhost:5432/blob.bin'],
+    ['.internal suffix', 'https://blobs.svc.internal/x/y/z.bin'],
+    ['.local suffix',    'https://nas.local/blob.bin'],
+  ])('refuses to fetch v2 storage URL with %s', async (_label, badUrl) => {
+    const fetchImpl = mockFetch(
+      new Map<string, MockResponse>([
+        [
+          blobsUrl(fixtureA.versionedHash),
+          {
+            ok: true,
+            status: 200,
+            body: {
+              versionedHash: fixtureA.versionedHash,
+              dataStorageReferences: [{ storage: 'google', url: badUrl }],
+            },
+          },
+        ],
+      ])
+    );
+    await expect(
+      fetchFromBlobscan({
+        baseUrl: BLOBSCAN_URL,
+        versionedHash: fixtureA.versionedHash,
+        fetchImpl,
+      })
+    ).rejects.toThrow(/refusing/);
+  });
+
   it('throws VersionedHashMismatch when Blobscan serves wrong bytes for the requested hash', async () => {
     // request fixtureA but server returns fixtureB's bytes
     const fetchImpl = mockFetch(

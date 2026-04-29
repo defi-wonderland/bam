@@ -10,6 +10,8 @@
  * rejected the same way as a wrong-hash beacon sidecar.
  */
 
+import { isIP } from 'node:net';
+
 import type { Bytes32 } from 'bam-sdk';
 
 import { assertVersionedHashMatches } from './versioned-hash.js';
@@ -46,9 +48,13 @@ function hexToBytes(hex: string): Uint8Array {
 /**
  * Blobscan v2 (current at time of writing) returns metadata only and
  * points at one or more public storage URLs (`dataStorageReferences[].url`)
- * that serve the raw blob bytes. The Reader still hash-verifies the
- * fetched bytes against the requested versioned hash, so an attacker
- * substituting a malicious URL can only deny service, not forge content.
+ * that serve the raw blob bytes. The Reader hash-verifies the fetched
+ * bytes against the requested versioned hash, so a malicious URL cannot
+ * forge content. The hash check does NOT prevent the *outbound request*
+ * itself from hitting an internal target, so URLs are passed through
+ * `assertPublicHttpUrl` before fetch — see that function for the
+ * remaining residual risk (DNS rebinding) and the recommended
+ * network-level mitigation.
  */
 function extractStorageUrls(data: unknown): string[] {
   if (!data || typeof data !== 'object') return [];
@@ -63,6 +69,45 @@ function extractStorageUrls(data: unknown): string[] {
     }
   }
   return out;
+}
+
+/**
+ * Reject storage URLs whose host is an IP literal or an obvious internal
+ * name. Defends against a compromised Blobscan response steering the
+ * reader's outbound HTTP at internal targets such as cloud metadata
+ * services (169.254.169.254) or RFC1918 networks.
+ *
+ * Residual risk: DNS rebinding — a public hostname that resolves to a
+ * private IP at request time — is not detected here. Production deploys
+ * should layer egress-firewall rules on top.
+ */
+function assertPublicHttpUrl(url: string): void {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new Error(`refusing invalid storage URL: ${url}`);
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new Error(`refusing storage URL with non-http(s) scheme: ${parsed.protocol}`);
+  }
+  // Node's URL.hostname keeps the brackets on IPv6 literals
+  // (e.g. "[::1]"), so strip them before handing to isIP().
+  const host = parsed.hostname.toLowerCase();
+  const ipCandidate =
+    host.startsWith('[') && host.endsWith(']') ? host.slice(1, -1) : host;
+  if (isIP(ipCandidate) !== 0) {
+    throw new Error(`refusing IP-literal storage URL host: ${host}`);
+  }
+  if (
+    host === 'localhost' ||
+    host === 'localhost.localdomain' ||
+    host.endsWith('.local') ||
+    host.endsWith('.internal') ||
+    host.endsWith('.lan')
+  ) {
+    throw new Error(`refusing internal storage URL host: ${host}`);
+  }
 }
 
 function extractBlobHex(data: unknown): string | null {
@@ -124,6 +169,7 @@ export async function fetchFromBlobscan(
 
   // v2 path: metadata-only response; follow the first storage URL.
   for (const url of extractStorageUrls(data)) {
+    assertPublicHttpUrl(url);
     const bin = await fetchImpl(url, {
       headers: { Accept: 'application/octet-stream' },
     });
