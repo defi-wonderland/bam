@@ -40,7 +40,12 @@ import {
   ECDSA_REGISTRY_ABI,
 } from './abis.js';
 
-export { BAM_CORE_ABI, BAM_DECODER_ABI } from './abis.js';
+export {
+  BAM_CORE_ABI,
+  BAM_DECODER_ABI,
+  ECDSA_REGISTRY_ABI,
+  SIGNATURE_REGISTRY_DISPATCHER_ABI,
+} from './abis.js';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Client Options & Types
