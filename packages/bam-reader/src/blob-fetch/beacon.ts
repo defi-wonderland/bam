@@ -21,10 +21,16 @@ import { assertVersionedHashMatches } from './versioned-hash.js';
 
 export type FetchLike = (
   input: string,
-  init?: { headers?: Record<string, string> }
+  init?: {
+    headers?: Record<string, string>;
+    /** Set to 'error' to fail-loud on any redirect (used by the SSRF guard). */
+    redirect?: 'follow' | 'manual' | 'error';
+  }
 ) => Promise<{
   ok: boolean;
   status: number;
+  /** Response headers (when the underlying fetch impl provides them). */
+  headers?: { get(name: string): string | null };
   json: () => Promise<unknown>;
   arrayBuffer?: () => Promise<ArrayBuffer>;
 }>;

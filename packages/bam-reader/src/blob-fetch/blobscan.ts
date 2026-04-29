@@ -25,6 +25,14 @@ export interface BlobscanFetchOptions {
   fetchImpl?: FetchLike;
 }
 
+/**
+ * EIP-4844 blob size: 4096 field elements × 32 bytes. A storage URL
+ * should serve exactly this many bytes; a much larger response is a
+ * sign of a misbehaving or hostile upstream and is rejected before
+ * the body is buffered.
+ */
+const MAX_BLOB_BYTES = 131072;
+
 function trimSlash(s: string): string {
   return s.replace(/\/$/, '');
 }
@@ -91,9 +99,11 @@ function assertPublicHttpUrl(url: string): void {
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
     throw new Error(`refusing storage URL with non-http(s) scheme: ${parsed.protocol}`);
   }
-  // Node's URL.hostname keeps the brackets on IPv6 literals
+  // Strip the FQDN trailing root dot (e.g. "localhost." resolves the same
+  // as "localhost" but would bypass an endsWith('.local') check).
+  // Node's URL.hostname also keeps the brackets on IPv6 literals
   // (e.g. "[::1]"), so strip them before handing to isIP().
-  const host = parsed.hostname.toLowerCase();
+  const host = parsed.hostname.toLowerCase().replace(/\.$/, '');
   const ipCandidate =
     host.startsWith('[') && host.endsWith(']') ? host.slice(1, -1) : host;
   if (isIP(ipCandidate) !== 0) {
@@ -168,15 +178,39 @@ export async function fetchFromBlobscan(
   }
 
   // v2 path: metadata-only response; follow the first storage URL.
+  // Redirects are disabled — a public hostname that 302s to an internal
+  // target would otherwise bypass assertPublicHttpUrl.
   for (const url of extractStorageUrls(data)) {
     assertPublicHttpUrl(url);
-    const bin = await fetchImpl(url, {
-      headers: { Accept: 'application/octet-stream' },
-    });
+    let bin;
+    try {
+      bin = await fetchImpl(url, {
+        headers: { Accept: 'application/octet-stream' },
+        redirect: 'error',
+      });
+    } catch (err) {
+      throw new Error(
+        `storage URL fetch failed (redirects disabled): ${url}: ${(err as Error).message}`
+      );
+    }
     if (!bin.ok) continue;
     if (typeof bin.arrayBuffer !== 'function') {
       throw new Error(
         'fetchImpl response missing arrayBuffer(); cannot read v2 blobscan storage URL'
+      );
+    }
+    // Bound the response before buffering. Hash check runs after the
+    // full body is read, so an unbounded body could OOM the reader.
+    const lenHeader = bin.headers?.get('content-length');
+    if (lenHeader == null) {
+      throw new Error(
+        `refusing storage response without Content-Length: ${url}`
+      );
+    }
+    const len = Number(lenHeader);
+    if (!Number.isFinite(len) || len < 0 || len > MAX_BLOB_BYTES) {
+      throw new Error(
+        `refusing storage response with implausible Content-Length=${lenHeader}: ${url}`
       );
     }
     const buf = await bin.arrayBuffer();
