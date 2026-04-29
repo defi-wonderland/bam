@@ -18,7 +18,6 @@ packages/bam-contracts/broadcast
 # Local env
 .env
 .env.*
-!.env.docker.example
 
 # SQLite (from local poster runs)
 **/*.db
