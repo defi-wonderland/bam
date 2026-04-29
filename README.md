@@ -124,6 +124,45 @@ import { getDeployment } from 'bam-sdk';
 const sepolia = getDeployment(11155111);
 ```
 
+## Reader operator knobs
+
+The `bam-reader` service ingests historical L1 events and serves
+confirmed reads. Most operators don't need to touch any of the env
+vars below — the defaults work against the public Sepolia provider
+the demo uses. Reach for these when an operator scenario requires it:
+
+- `READER_START_BLOCK` — first-tick block for live-tail when no
+  cursor row exists yet. **Defaults to** the BAM Core deploy block
+  for the configured chainId (resolved via `bam-sdk`'s
+  deployment table). When unset *and* the chainId isn't in the
+  table (anvil/hardhat dev chains), the Reader scans from `0` and
+  emits a stderr warning naming the chainId.
+- `READER_LOG_SCAN_CHUNK_BLOCKS` — `eth_getLogs` chunk size, in
+  blocks. **Default: `2000`.** Raise on a private RPC with a
+  higher cap so a backfill finishes in fewer round-trips; lower
+  on a flaky provider. Adaptive halving handles "range too large"
+  / "result too large" automatically — operators on public RPCs
+  (Alchemy, Infura) generally don't need to tune this by hand.
+- `READER_BACKFILL_PROGRESS_INTERVAL_MS` — minimum wallclock
+  interval between `backfill_progress` events. **Default:
+  `10_000`** (10 seconds).
+- `READER_BACKFILL_PROGRESS_EVERY_CHUNKS` — alternative cadence
+  trigger; emits a progress event every N chunks. **Default:
+  `5`.** Whichever threshold fires first wins.
+
+The CLI accepts four backfill forms:
+
+```bash
+bam-reader backfill --from <block> --to <block>   # explicit range
+bam-reader backfill --from deploy [--to <block>]  # from the BAM Core deploy block
+bam-reader backfill --catchup                     # [cursor + 1, head]
+bam-reader serve                                  # long-running live-tail daemon
+```
+
+`--from deploy` and `--catchup` are mutually exclusive with each
+other and with `--from N --to M`. When `--to` is omitted,
+`--from deploy` and `--catchup` default to current head.
+
 ## Specs
 
 - [ERC-8180: Blob Authenticated Messaging](docs/specs/erc-8180.md)

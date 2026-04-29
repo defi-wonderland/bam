@@ -43,7 +43,17 @@ export interface BackfillOptions {
   contentTags?: Bytes32[];
   fromBlock: number;
   toBlock: number;
-  /** Per `eth_getLogs` chunk. Default 2000 blocks. */
+  /**
+   * Default per-`eth_getLogs` chunk size. Operator-facing knob is
+   * `READER_LOG_SCAN_CHUNK_BLOCKS` (parsed into `ReaderConfig`).
+   * `chunkSize` (legacy in-process override) wins when both are set.
+   */
+  logScanChunkBlocks: number;
+  /** Backfill progress: minimum interval between events, ms. */
+  progressIntervalMs: number;
+  /** Backfill progress: minimum chunks between events. */
+  progressEveryChunks: number;
+  /** Legacy in-process override for chunk size. Wins over `logScanChunkBlocks`. */
   chunkSize?: number;
   retentionThresholdBlocks?: number;
   ethCallGasCap: bigint;
@@ -93,9 +103,12 @@ export async function backfill(opts: BackfillOptions): Promise<BackfillCounters>
       transientUnreachable: 0,
     };
   }
-  const chunkSize = Math.max(1, opts.chunkSize ?? 2000);
+  const chunkSize = Math.max(1, opts.chunkSize ?? opts.logScanChunkBlocks);
   const retentionThreshold =
     opts.retentionThresholdBlocks ?? DEFAULT_RETENTION_THRESHOLD_BLOCKS;
+  const progressIntervalMs = Math.max(1, opts.progressIntervalMs);
+  const progressEveryChunks = Math.max(1, opts.progressEveryChunks);
+  const nowMs: () => number = opts.now ?? Date.now;
   const head = Number(await opts.l1.getBlockNumber());
   // Clamp `toBlock` against current head so the cursor never advances
   // ahead of the chain — a future cursor would silently skip blocks
@@ -116,6 +129,22 @@ export async function backfill(opts: BackfillOptions): Promise<BackfillCounters>
   let processed = 0;
   let permanentUnreachable = 0;
   let transientUnreachable = 0;
+  let lastEmittedAt = nowMs();
+  let chunksSinceLastEmit = 0;
+  let lastChunkTo = opts.fromBlock;
+
+  const emitProgress = (): void => {
+    opts.logger?.({
+      kind: 'backfill_progress',
+      fromBlock: opts.fromBlock,
+      toBlock: effectiveToBlock,
+      currentBlock: lastChunkTo,
+      scanned,
+      processed,
+    });
+    lastEmittedAt = nowMs();
+    chunksSinceLastEmit = 0;
+  };
 
   for (let chunkFrom = opts.fromBlock; chunkFrom <= effectiveToBlock; chunkFrom += chunkSize) {
     const chunkTo = Math.min(chunkFrom + chunkSize - 1, effectiveToBlock);
@@ -192,7 +221,18 @@ export async function backfill(opts: BackfillOptions): Promise<BackfillCounters>
         now: opts.now,
       });
     }
+    lastChunkTo = chunkTo;
+    chunksSinceLastEmit += 1;
+    if (
+      nowMs() - lastEmittedAt >= progressIntervalMs ||
+      chunksSinceLastEmit >= progressEveryChunks
+    ) {
+      emitProgress();
+    }
   }
+  // Closing event: always emit one progress event at completion so
+  // consumers see a final snapshot regardless of cadence config.
+  emitProgress();
 
   return { scanned, processed, permanentUnreachable, transientUnreachable };
 }

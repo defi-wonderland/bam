@@ -21,11 +21,39 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { config as dotenvConfig } from 'dotenv';
 
-import { ChainIdMismatch } from '../errors.js';
+import { getDeployment } from 'bam-sdk';
+
+import { ChainIdMismatch, UnknownChainDeploymentError } from '../errors.js';
 import { EnvConfigError, parseEnv } from './env.js';
-import { createReader } from '../factory.js';
+import { createReader, type Reader } from '../factory.js';
 import { ReaderHttpServer } from '../http/server.js';
+import type { LiveTailL1Client } from '../loop/live-tail.js';
+import type { ReaderConfig } from '../types.js';
 import { createViemL1 } from './viem-l1.js';
+
+/**
+ * Resolve the live-tail's first-tick block for `cfg`:
+ *   1. `cfg.startBlock` (env-set) — operator override always wins.
+ *   2. `bam-sdk` deploy table for `cfg.chainId`'s BAM Core deploy block.
+ *   3. `0` with a stderr warning naming the chainId and pointing at
+ *      `READER_START_BLOCK`. Keeps anvil/hardhat zero-config; loud
+ *      enough that "I'm on a real chain without the table populated"
+ *      is impossible to miss.
+ */
+export function resolveStartBlock(
+  cfg: ReaderConfig,
+  warn: (msg: string) => void
+): number {
+  if (cfg.startBlock !== undefined) return cfg.startBlock;
+  const fromTable = getDeployment(cfg.chainId)?.contracts
+    .BlobAuthenticatedMessagingCore?.deployBlock;
+  if (fromTable !== undefined) return fromTable;
+  warn(
+    `bam-reader: no deploy block known for chainId ${cfg.chainId}; ` +
+      `defaulting startBlock to 0. Set READER_START_BLOCK to override.`
+  );
+  return 0;
+}
 
 /**
  * Resolve + load a dotenv file so users don't have to `export` each
@@ -63,11 +91,85 @@ function loadDotenv(): void {
   }
 }
 
-export interface ParsedArgs {
-  subcommand: 'serve' | 'backfill';
-  fromBlock?: number;
-  toBlock?: number;
+/**
+ * Look up the BAM Core deploy block for `chainId` from the bam-sdk
+ * deploy table. Throws `UnknownChainDeploymentError` when the chainId
+ * isn't in the table — the bin maps this to exit code 4 with a
+ * message naming the explicit `--from N` form.
+ */
+export function lookupDeployBlock(chainId: number): number {
+  const block = getDeployment(chainId)?.contracts
+    .BlobAuthenticatedMessagingCore?.deployBlock;
+  if (block === undefined) {
+    throw new UnknownChainDeploymentError(
+      `no deploy block known for chainId ${chainId}; pass an explicit ` +
+        `--from <block> --to <block> instead`
+    );
+  }
+  return block;
 }
+
+/**
+ * Resolve a `backfill` ParsedArgs into concrete `[fromBlock, toBlock]`
+ * bounds. Shared between `--from deploy` (T010) and `--catchup` (T012)
+ * — the catchup branch lands once `Reader.cursorBlock()` exists.
+ *
+ * Throws `UnknownChainDeploymentError` on `--from deploy` against an
+ * unknown chainId; the bin maps this to exit code 4.
+ */
+export async function resolveBackfillRange(
+  args: ParsedArgs & { subcommand: 'backfill' },
+  cfg: ReaderConfig,
+  l1: Pick<LiveTailL1Client, 'getBlockNumber'>,
+  reader?: Pick<Reader, 'cursorBlock'>
+): Promise<{ fromBlock: number; toBlock: number }> {
+  if (args.fromMarker === 'block') {
+    return { fromBlock: args.fromBlock!, toBlock: args.toBlock! };
+  }
+  if (args.fromMarker === 'deploy') {
+    const fromBlock = lookupDeployBlock(cfg.chainId);
+    const toBlock =
+      args.toBlock !== undefined ? args.toBlock : Number(await l1.getBlockNumber());
+    return { fromBlock, toBlock };
+  }
+  if (args.fromMarker === 'catchup') {
+    if (reader === undefined) {
+      throw new Error('catchup resolver needs a Reader handle');
+    }
+    const cursor = await reader.cursorBlock();
+    if (cursor === null) {
+      throw new ArgParseError(
+        '--catchup requested but no cursor row exists yet; run ' +
+          '`backfill --from <block> --to <block>` or ' +
+          '`backfill --from deploy` first'
+      );
+    }
+    const head = Number(await l1.getBlockNumber());
+    return { fromBlock: cursor + 1, toBlock: head };
+  }
+  // Exhaustiveness guard.
+  const _exhaustive: never = args.fromMarker;
+  throw new Error(`unhandled fromMarker: ${String(_exhaustive)}`);
+}
+
+export type ParsedArgs =
+  | { subcommand: 'serve' }
+  | {
+      subcommand: 'backfill';
+      /**
+       * `'block'` — operator passed `--from N --to M` (both required).
+       * `'deploy'` — operator passed `--from deploy [--to N]` (resolved
+       *   at runtime against the bam-sdk deploy table).
+       * `'catchup'` — operator passed `--catchup` (resolved against the
+       *   stored cursor; `[cursor + 1, head]`). Mutually exclusive with
+       *   `--from` and `--to`.
+       */
+      fromMarker: 'block' | 'deploy' | 'catchup';
+      /** Set when `fromMarker === 'block'`. */
+      fromBlock?: number;
+      /** Set when `fromMarker === 'block'` or operator override under `'deploy'`. */
+      toBlock?: number;
+    };
 
 /**
  * `JSON.stringify` replacer that stringifies bigints to decimal.
@@ -108,30 +210,59 @@ export function parseArgs(argv: string[]): ParsedArgs {
     return { subcommand: 'serve' };
   }
   // backfill --from N --to M
-  let from: number | undefined;
-  let to: number | undefined;
+  // backfill --from deploy [--to M]
+  // backfill --catchup (mutually exclusive with --from / --to)
+  let fromRaw: string | undefined;
+  let toRaw: string | undefined;
+  let catchup = false;
   for (let i = 1; i < argv.length; i++) {
     const flag = argv[i];
     const next = argv[i + 1];
     if (flag === '--from') {
-      if (next === undefined) throw new ArgParseError('--from requires a block number');
-      from = Number(next);
+      if (next === undefined) throw new ArgParseError('--from requires a block number or `deploy`');
+      fromRaw = next;
       i += 1;
     } else if (flag === '--to') {
       if (next === undefined) throw new ArgParseError('--to requires a block number');
-      to = Number(next);
+      toRaw = next;
       i += 1;
+    } else if (flag === '--catchup') {
+      catchup = true;
     } else {
       throw new ArgParseError(`unknown flag: ${flag}`);
     }
   }
-  if (from === undefined || to === undefined) {
+  if (catchup) {
+    if (fromRaw !== undefined || toRaw !== undefined) {
+      throw new ArgParseError('--catchup is mutually exclusive with --from / --to');
+    }
+    return { subcommand: 'backfill', fromMarker: 'catchup' };
+  }
+  if (fromRaw === undefined) {
+    throw new ArgParseError(
+      'backfill requires --from N --to M, --from deploy [--to N], or --catchup'
+    );
+  }
+  if (fromRaw === 'deploy') {
+    let toBlock: number | undefined;
+    if (toRaw !== undefined) {
+      const t = Number(toRaw);
+      if (!Number.isInteger(t) || t < 0) {
+        throw new ArgParseError('--to must be a non-negative integer');
+      }
+      toBlock = t;
+    }
+    return { subcommand: 'backfill', fromMarker: 'deploy', toBlock };
+  }
+  if (toRaw === undefined) {
     throw new ArgParseError('backfill requires --from N --to M');
   }
+  const from = Number(fromRaw);
+  const to = Number(toRaw);
   if (!Number.isInteger(from) || !Number.isInteger(to) || from < 0 || to < from) {
     throw new ArgParseError('--from and --to must be non-negative integers with from ≤ to');
   }
-  return { subcommand: 'backfill', fromBlock: from, toBlock: to };
+  return { subcommand: 'backfill', fromMarker: 'block', fromBlock: from, toBlock: to };
 }
 
 export function usage(): string {
@@ -139,6 +270,8 @@ export function usage(): string {
     'usage:',
     '  bam-reader serve',
     '  bam-reader backfill --from <block> --to <block>',
+    '  bam-reader backfill --from deploy [--to <block>]',
+    '  bam-reader backfill --catchup',
   ].join('\n');
 }
 
@@ -174,12 +307,17 @@ export async function runCli(
 
   const adapter = createViemL1(cfg.rpcUrl);
 
+  const resolvedStartBlock = resolveStartBlock(cfg, (msg) =>
+    process.stderr.write(`${msg}\n`)
+  );
+
   let reader;
   try {
     reader = await createReader(cfg, {
       l1: adapter.l1,
       decodePublicClient: adapter.decodePublicClient,
       verifyPublicClient: adapter.verifyPublicClient,
+      startBlock: resolvedStartBlock,
       logger: (event) => {
         // ReaderEvent.message_conflict carries `nonce: bigint`; without
         // the replacer, JSON.stringify throws synchronously and the
@@ -201,7 +339,31 @@ export async function runCli(
 
   if (args.subcommand === 'backfill') {
     try {
-      const result = await reader.backfill(args.fromBlock!, args.toBlock!);
+      let fromBlock: number;
+      let toBlock: number;
+      try {
+        ({ fromBlock, toBlock } = await resolveBackfillRange(
+          args,
+          cfg,
+          adapter.l1,
+          reader
+        ));
+      } catch (err) {
+        if (
+          err instanceof UnknownChainDeploymentError ||
+          err instanceof ArgParseError
+        ) {
+          process.stderr.write(`bam-reader: ${err.message}\n`);
+          try {
+            await reader.close();
+          } catch {
+            /* ignore */
+          }
+          process.exit(4);
+        }
+        throw err;
+      }
+      const result = await reader.backfill(fromBlock, toBlock);
       process.stdout.write(
         `[bam-reader] backfill complete: ${JSON.stringify(result, jsonReplacer)}\n`
       );

@@ -204,6 +204,28 @@ export function parseEnv(
     { min: 1 }
   );
 
+  const startBlock = env.READER_START_BLOCK
+    ? parseInteger(env.READER_START_BLOCK, 'READER_START_BLOCK', { min: 0 })
+    : undefined;
+
+  const logScanChunkBlocks = parseInteger(
+    env.READER_LOG_SCAN_CHUNK_BLOCKS ?? '2000',
+    'READER_LOG_SCAN_CHUNK_BLOCKS',
+    { min: 64, max: 100_000 }
+  );
+
+  const backfillProgressIntervalMs = parseInteger(
+    env.READER_BACKFILL_PROGRESS_INTERVAL_MS ?? '10000',
+    'READER_BACKFILL_PROGRESS_INTERVAL_MS',
+    { min: 1 }
+  );
+
+  const backfillProgressEveryChunks = parseInteger(
+    env.READER_BACKFILL_PROGRESS_EVERY_CHUNKS ?? '5',
+    'READER_BACKFILL_PROGRESS_EVERY_CHUNKS',
+    { min: 1 }
+  );
+
   return {
     chainId,
     rpcUrl,
@@ -217,6 +239,10 @@ export function parseEnv(
     httpPort,
     ethCallGasCap,
     ethCallTimeoutMs,
+    startBlock,
+    logScanChunkBlocks,
+    backfillProgressIntervalMs,
+    backfillProgressEveryChunks,
   };
 }
 

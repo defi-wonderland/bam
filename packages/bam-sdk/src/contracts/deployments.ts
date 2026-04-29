@@ -3,6 +3,8 @@
 
 export interface DeployedContract {
   address: `0x${string}`;
+  /** Block number at which the contract was deployed. Optional. */
+  deployBlock?: number;
 }
 
 export interface ChainDeployment {
@@ -20,7 +22,7 @@ const DEPLOYMENTS: Record<number, ChainDeployment> = {
       SimpleBoolVerifier: { address: '0xdec5faa3e32d6296e53bae7e359e059b58a482f4' },
       BLSRegistry: { address: '0x15866bf5a8724f2aa9fe75e262d8f00ba2818e25' },
       BLSExposer: { address: '0x443029b4b96fbf2d8feba77d828a394d19615a48' },
-      BlobAuthenticatedMessagingCore: { address: '0x9C4b230066a6808D83F5FBa0c040E0Df2Fcc7314' },
+      BlobAuthenticatedMessagingCore: { address: '0x9C4b230066a6808D83F5FBa0c040E0Df2Fcc7314', deployBlock: 10697923 },
       SignatureRegistryDispatcher: { address: '0x3431A94c9132b8a1b0c4aE8a80E7Ef0F0EC630Cf' },
       ECDSARegistry: { address: '0xF4Ce909305a112C2CBEC6b339a42f34bA8bf3381' },
     },
