@@ -161,7 +161,7 @@ describe('parseEnv', () => {
       ).toThrow(EnvConfigError);
       expect(() =>
         parseEnv({ ...withoutDbUrl(), READER_DB_URL: 'sqlite:./reader.db' })
-      ).toThrow(/READER_DB_URL=sqlite:\.\/reader\.db/);
+      ).toThrow(/READER_DB_URL has unsupported DSN scheme "sqlite"/);
     });
 
     it('rejects an unsupported scheme on POSTGRES_URL and names POSTGRES_URL as the source', () => {
@@ -171,7 +171,42 @@ describe('parseEnv', () => {
       // chain.
       expect(() =>
         parseEnv({ ...withoutDbUrl(), POSTGRES_URL: 'mysql://example/bam' })
-      ).toThrow(/POSTGRES_URL=mysql:\/\/example\/bam/);
+      ).toThrow(/POSTGRES_URL has unsupported DSN scheme "mysql"/);
+    });
+
+    it('does not leak DSN credentials in the error message (qodo PR #29 follow-up)', () => {
+      // A misconfigured DSN must not echo embedded credentials to
+      // stderr/logs. The error names the source env var and the
+      // scheme; the userinfo, host, path, and query are dropped.
+      const leakyDsn = 'mysql://admin:hunter2@db.internal:3306/bam';
+      let caught: unknown = null;
+      try {
+        parseEnv({ ...withoutDbUrl(), POSTGRES_URL: leakyDsn });
+      } catch (err) {
+        caught = err;
+      }
+      expect(caught).toBeInstanceOf(EnvConfigError);
+      const msg = (caught as Error).message;
+      expect(msg).toContain('POSTGRES_URL');
+      expect(msg).toContain('mysql');
+      expect(msg).not.toContain('hunter2');
+      expect(msg).not.toContain('admin');
+      expect(msg).not.toContain('db.internal');
+    });
+
+    it('handles a value with no colon at all without echoing it', () => {
+      // If an operator accidentally pastes a bare secret into
+      // POSTGRES_URL (no scheme), the error must not echo the value.
+      const bareSecret = 'pleasedontleakthisstring';
+      let caught: unknown = null;
+      try {
+        parseEnv({ ...withoutDbUrl(), POSTGRES_URL: bareSecret });
+      } catch (err) {
+        caught = err;
+      }
+      expect(caught).toBeInstanceOf(EnvConfigError);
+      expect((caught as Error).message).not.toContain(bareSecret);
+      expect((caught as Error).message).toContain('(no scheme)');
     });
   });
 

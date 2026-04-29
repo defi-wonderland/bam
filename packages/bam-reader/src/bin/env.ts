@@ -174,8 +174,16 @@ export function parseEnv(
     !dbUrl.startsWith('postgres:') &&
     !dbUrl.startsWith('postgresql:')
   ) {
+    // Echo only the scheme — the rest of the DSN may contain
+    // credentials (e.g. `postgres://user:pass@host/db`), and the CLI
+    // surfaces this message verbatim to stderr/logs (qodo PR #29
+    // follow-up). Cap the scheme too so a value that has no colon
+    // can't leak its full content via this path.
+    const colonIdx = dbUrl.indexOf(':');
+    const scheme =
+      colonIdx > 0 ? dbUrl.slice(0, Math.min(colonIdx, 32)) : '(no scheme)';
     throw new EnvConfigError(
-      `${dbUrlSource}=${dbUrl}: unsupported DSN scheme. ` +
+      `${dbUrlSource} has unsupported DSN scheme "${scheme}". ` +
         `Use a postgres:// URL, or memory: for in-process PGLite.`
     );
   }
