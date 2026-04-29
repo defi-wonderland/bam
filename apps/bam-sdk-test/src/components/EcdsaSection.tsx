@@ -23,6 +23,17 @@ export function EcdsaSection() {
   const [appText, setAppText] = useState(DEMO_MESSAGE_TEXT);
   const [chainId, setChainId] = useState(String(DEMO_CHAIN_ID));
   const [signature, setSignature] = useState('');
+  /**
+   * Tracks which signing path produced the current signature so verify
+   * can route to the matching sender/chain. `null` means the signature
+   * was pasted/edited by hand — fall back to the headless inputs.
+   */
+  const [signatureSource, setSignatureSource] = useState<'headless' | 'wallet' | null>(null);
+
+  function updateSignature(value: string, source: 'headless' | 'wallet' | null) {
+    setSignature(value);
+    setSignatureSource(source);
+  }
 
   const wallet = useInjectedWallet();
   const connect = useAction<void>();
@@ -41,12 +52,10 @@ export function EcdsaSection() {
     };
   }
 
-  const headlessSender = address as Address | '';
-  const walletChain = wallet.chainId;
-  const verifySender = (signature && wallet.address ? wallet.address : (headlessSender || null)) as
-    | Address
-    | null;
-  const verifyChain = (signature && wallet.address ? walletChain : Number(chainId)) ?? null;
+  const headlessSender = (address || null) as Address | null;
+  const useWalletForVerify = signatureSource === 'wallet' && !!wallet.address;
+  const verifySender: Address | null = useWalletForVerify ? wallet.address : headlessSender;
+  const verifyChain: number | null = useWalletForVerify ? wallet.chainId : Number(chainId);
 
   return (
     <Section
@@ -128,7 +137,7 @@ export function EcdsaSection() {
                     buildMessage(address as Address),
                     Number(chainId)
                   );
-                  setSignature(sig);
+                  updateSignature(sig, 'headless');
                   return sig;
                 },
                 (sig) => `${sig}  (${(sig.length - 2) / 2} bytes)`
@@ -186,7 +195,7 @@ export function EcdsaSection() {
               walletSign.run(
                 async () => {
                   const sig = await signECDSA(wallet.client!, buildMessage(wallet.address!));
-                  setSignature(sig);
+                  updateSignature(sig, 'wallet');
                   return sig;
                 },
                 (sig) => `${sig}  (${(sig.length - 2) / 2} bytes)`
@@ -207,13 +216,16 @@ export function EcdsaSection() {
           verifyECDSA
         </div>
         <Field label="signature (65 bytes, r ‖ s ‖ v) — populated by either sign button">
-          <TextInput value={signature} onChange={(e) => setSignature(e.target.value)} />
+          <TextInput
+            value={signature}
+            onChange={(e) => updateSignature(e.target.value, null)}
+          />
         </Field>
         <p className="text-xs text-neutral-500 dark:text-neutral-400">
-          Verifies against{' '}
-          <code>{verifySender ?? '(no sender)'}</code> on chain {String(verifyChain ?? '?')}.
-          Sender + chain are taken from the wallet when one is connected and a wallet
-          signature is in the box; otherwise from the headless inputs above.
+          Verifies against <code>{verifySender ?? '(no sender)'}</code> on chain{' '}
+          {String(verifyChain ?? '?')}. Routing follows the path that produced the current
+          signature ({signatureSource ?? 'manual / headless fallback'}); editing the box by
+          hand falls back to the headless inputs.
         </p>
         <Button
           disabled={!signature || !verifySender || verifyChain == null}
