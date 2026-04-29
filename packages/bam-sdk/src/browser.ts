@@ -135,6 +135,18 @@ export {
 
 export type { ZstdDictionary } from './compression.js';
 
+// BPE codec (pure TypeScript, browser-safe)
+export {
+  bpeDecode,
+  bpeEncode,
+  buildDictionary as buildBPEDictionary,
+  deserializeDictionary as deserializeBPEDictionary,
+  serializeDictionary as serializeBPEDictionary,
+  BPE_SERIALIZED_SIZE,
+} from './bpe.js';
+
+export type { BPEDictionary } from './bpe.js';
+
 // Signature functions
 export {
   aggregateBLS,
