@@ -21,7 +21,11 @@ services:
     container_name: bam-stack
     restart: unless-stopped
     env_file:
-      - .env.local
+      # Optional: a fresh checkout without `.env.local` should still be
+      # able to `pnpm stack:up` (e.g. when the operator passes envs via
+      # the shell or `--env-file`). Compose v2.24+ honours `required: false`.
+      - path: .env.local
+        required: false
     environment:
       POSTGRES_DB: bam
       POSTGRES_USER: postgres

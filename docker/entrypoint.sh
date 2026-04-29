@@ -20,6 +20,32 @@ log() {
   printf '[bam-entrypoint] %s\n' "$*"
 }
 
+# Bounded SIGTERM → SIGKILL shutdown for the listed PIDs. We're PID 1 in
+# the container, and an unbounded `wait` would hang the supervisor if any
+# child ignored SIGTERM (or got stuck in an uninterruptible syscall),
+# which would in turn defeat the whole point of this script — exiting
+# non-zero so fly/compose can restart the container.
+SHUTDOWN_GRACE_S=${SHUTDOWN_GRACE_S:-10}
+shutdown_children() {
+  local pids=("$@")
+  for pid in "${pids[@]}"; do
+    kill -TERM "$pid" 2>/dev/null || true
+  done
+  local deadline=$((SECONDS + SHUTDOWN_GRACE_S))
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    local alive=0
+    for pid in "${pids[@]}"; do
+      if kill -0 "$pid" 2>/dev/null; then alive=1; fi
+    done
+    [ "$alive" -eq 0 ] && return 0
+    sleep 0.5
+  done
+  log "children still alive after ${SHUTDOWN_GRACE_S}s SIGTERM grace; SIGKILL"
+  for pid in "${pids[@]}"; do
+    kill -KILL "$pid" 2>/dev/null || true
+  done
+}
+
 log "starting postgres (data dir: ${PGDATA:-/var/lib/postgresql/data})"
 docker-entrypoint.sh postgres &
 PG_PID=$!
@@ -39,8 +65,7 @@ done
 
 if ! pg_isready -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" -d "$PG_DB" >/dev/null 2>&1; then
   log "postgres did not become ready in time; aborting"
-  kill -TERM "$PG_PID" 2>/dev/null || true
-  wait "$PG_PID" 2>/dev/null || true
+  shutdown_children "$PG_PID"
   exit 1
 fi
 log "postgres is ready"
@@ -62,8 +87,8 @@ for _ in $(seq 1 60); do
   fi
   if ! kill -0 "$POSTER_PID" 2>/dev/null; then
     log "bam-poster exited before becoming ready"
-    wait "$POSTER_PID" || true
-    kill -TERM "$PG_PID" 2>/dev/null || true
+    wait "$POSTER_PID" 2>/dev/null || true
+    shutdown_children "$PG_PID"
     exit 1
   fi
   sleep 1
@@ -71,8 +96,7 @@ done
 
 if ! curl -fsS -o /dev/null "http://127.0.0.1:${POSTER_PORT_LOCAL}/health"; then
   log "bam-poster did not become ready in time; aborting"
-  kill -TERM "$POSTER_PID" "$PG_PID" 2>/dev/null || true
-  wait 2>/dev/null || true
+  shutdown_children "$POSTER_PID" "$PG_PID"
   exit 1
 fi
 log "bam-poster is ready"
@@ -85,10 +109,7 @@ CHILDREN=("$PG_PID" "$POSTER_PID" "$READER_PID")
 
 shutdown() {
   log "received shutdown signal, terminating children"
-  for pid in "${CHILDREN[@]}"; do
-    kill -TERM "$pid" 2>/dev/null || true
-  done
-  wait 2>/dev/null || true
+  shutdown_children "${CHILDREN[@]}"
   exit 0
 }
 trap shutdown SIGTERM SIGINT
@@ -99,10 +120,7 @@ wait -n "${CHILDREN[@]}"
 EXIT_CODE=$?
 set -e
 log "child process exited (code ${EXIT_CODE}); shutting down container"
-for pid in "${CHILDREN[@]}"; do
-  kill -TERM "$pid" 2>/dev/null || true
-done
-wait 2>/dev/null || true
+shutdown_children "${CHILDREN[@]}"
 # Reaching this branch means a supervised child exited unexpectedly
 # (intentional shutdown is handled by the SIGTERM/SIGINT trap, which
 # exits 0 directly). If the child exited with status 0 — e.g. one of
