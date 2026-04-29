@@ -1,9 +1,8 @@
 # bam-sdk-test
 
-A simple playground for the [`bam-sdk`](../../packages/bam-sdk) browser entrypoint, in the
-spirit of MetaMask's [test-dapp](https://metamask.github.io/test-dapp/). Each section
-surfaces one family of SDK functions with prefilled demo data — generate keys, sign,
-verify, encode batches, run BPE, etc.
+A simple playground for the [`bam-sdk`](../../packages/bam-sdk) browser entrypoint. Each
+section surfaces one family of SDK functions with prefilled demo data — generate keys,
+sign, verify, encode batches, run BPE, etc.
 
 ## Run
 
