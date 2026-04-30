@@ -104,6 +104,7 @@ export async function runCli(): Promise<void> {
     chainId: env.chainId,
     bamCoreAddress: env.bamCoreAddress,
     signer,
+    batchEncoding: env.batchEncoding,
     decoderAddress: env.decoderAddress,
     signatureRegistryAddress: env.signatureRegistryAddress,
   });

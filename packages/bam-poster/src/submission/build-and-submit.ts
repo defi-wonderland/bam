@@ -4,6 +4,7 @@ import {
   commitToBlob,
   createBlob,
   encodeBatch,
+  encodeBatchABI,
   loadTrustedSetup,
   type Address,
   type BAMMessage,
@@ -39,7 +40,18 @@ export interface BuildAndSubmitOptions {
   chainId: number;
   bamCoreAddress: Address;
   signer: Signer;
-  decoderAddress?: Address;
+  /**
+   * Wire format for the on-chain payload. `binary` uses the packed
+   * codec decoded by the JS reader; `abi` uses the v1 ABI shape decoded
+   * by the on-chain `ABIDecoder` named in `decoderAddress`.
+   */
+  batchEncoding: 'binary' | 'abi';
+  /**
+   * Always set: `zeroAddress` for `batchEncoding === 'binary'`,
+   * the registry-resolved decoder for `'abi'`. Callers no longer
+   * fall back via `?? zeroAddress` — env parsing resolves it.
+   */
+  decoderAddress: Address;
   signatureRegistryAddress?: Address;
   maxFeePerBlobGasGwei?: string;
   /** Test injection: override the transport adapter (default uses viem). */
@@ -127,9 +139,10 @@ export function classifySubmissionError(err: unknown): SubmitOutcome {
 export async function buildAndSubmitWithViem(
   opts: BuildAndSubmitOptions
 ): Promise<BuildAndSubmitBundle> {
-  const decoder = (opts.decoderAddress ?? zeroAddress);
-  const sigRegistry = (opts.signatureRegistryAddress ?? zeroAddress);
+  const decoder = opts.decoderAddress;
+  const sigRegistry = opts.signatureRegistryAddress ?? zeroAddress;
   const gwei = opts.maxFeePerBlobGasGwei ?? '30';
+  const batchEncoding = opts.batchEncoding;
 
   const transport = opts.transport ?? viemTransport(opts);
 
@@ -168,8 +181,11 @@ export async function buildAndSubmitWithViem(
         contents: m.contents,
       }));
       const signatures = messages.map((m) => m.signature);
-      const batch = encodeBatch(bamMsgs, signatures);
-      const blob = createBlob(batch.data);
+      const batchBytes =
+        batchEncoding === 'abi'
+          ? encodeBatchABI(bamMsgs, signatures)
+          : encodeBatch(bamMsgs, signatures).data;
+      const blob = createBlob(batchBytes);
       const { versionedHash } = commitToBlob(blob);
       const data = encodeFunctionData({
         abi: BAM_CORE_ABI,
