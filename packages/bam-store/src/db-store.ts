@@ -45,8 +45,17 @@ export async function createPostgresStoreFromUrl(
   // listener Node treats it as unhandled and exits the process — see
   // https://node-postgres.com/apis/pool#error. The pool replaces the
   // dead client on the next checkout, so swallowing here is safe.
-  pool.on('error', (err) => {
-    process.stderr.write(`[bam-store] idle pg client error: ${err.message}\n`);
+  pool.on('error', (err: unknown) => {
+    // The handler itself must never throw — if it does, Node re-raises
+    // and we're back to the crash this fix is meant to prevent. Format
+    // defensively and swallow stderr write failures (e.g. EPIPE).
+    try {
+      const detail =
+        err instanceof Error ? (err.stack ?? err.message) : String(err);
+      process.stderr.write(`[bam-store] idle pg client error: ${detail}\n`);
+    } catch {
+      // Nothing useful to do — keeping the process alive is the goal.
+    }
   });
   const db = drizzlePg(pool);
   const init: PostgresBamStoreInit = {
