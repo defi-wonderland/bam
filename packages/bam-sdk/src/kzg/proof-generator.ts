@@ -23,18 +23,24 @@ import type {
   VersionedHash,
 } from './types.js';
 import type { Bytes32 } from '../types.js';
+import {
+  BYTES_PER_BLOB,
+  BYTES_PER_FIELD_ELEMENT,
+  FIELD_ELEMENTS_PER_BLOB,
+  USABLE_BYTES_PER_BLOB,
+  USABLE_BYTES_PER_FIELD_ELEMENT,
+} from '../blob/constants.js';
+import { assembleMultiSegmentBlob } from '../blob/multi-segment.js';
 
-/** Number of field elements per blob */
-const FIELD_ELEMENTS_PER_BLOB = 4096;
+/** Zero contentTag used for the implicit single-segment in `createBlob`. */
+const ZERO_TAG: Bytes32 =
+  '0x0000000000000000000000000000000000000000000000000000000000000000' as Bytes32;
 
-/** Bytes per field element */
-const BYTES_PER_FIELD_ELEMENT = 32;
+/** Local alias preserved for module-internal readability. */
+const USABLE_BYTES_PER_FE = USABLE_BYTES_PER_FIELD_ELEMENT;
 
-/** Usable bytes per field element (byte 0 must be < 0x80) */
-const USABLE_BYTES_PER_FE = 31;
-
-/** Total blob size in bytes */
-const BLOB_SIZE = FIELD_ELEMENTS_PER_BLOB * BYTES_PER_FIELD_ELEMENT;
+/** Local alias preserved for compatibility with existing call sites. */
+const BLOB_SIZE = BYTES_PER_BLOB;
 
 /** Versioned hash prefix for KZG commitments */
 const VERSIONED_HASH_PREFIX = 0x01;
@@ -93,31 +99,24 @@ export function computeVersionedHash(commitment: G1Point): VersionedHash {
 }
 
 /**
- * Create a blob from data, padding as needed
+ * Create a blob from data, padding as needed.
+ *
+ * One-segment shortcut over `assembleMultiSegmentBlob` so the single-tag
+ * and multi-tag producer paths share one implementation. Output is
+ * byte-identical to the previous standalone implementation.
+ *
  * @param data Data to put in the blob (max ~127KB usable)
  * @returns Padded blob data
  */
 export function createBlob(data: Uint8Array): Blob {
-  const maxUsableBytes = FIELD_ELEMENTS_PER_BLOB * USABLE_BYTES_PER_FE;
+  const maxUsableBytes = USABLE_BYTES_PER_BLOB;
   if (data.length > maxUsableBytes) {
     throw new Error(`Data too large for blob: ${data.length} > ${maxUsableBytes}`);
   }
 
-  const blob = new Uint8Array(BLOB_SIZE);
-
-  // Pack data into field elements
-  // Each FE uses bytes 1-31 (byte 0 must be < 0x80, we use 0x00)
-  let srcOffset = 0;
-  for (let fe = 0; fe < FIELD_ELEMENTS_PER_BLOB && srcOffset < data.length; fe++) {
-    const feOffset = fe * BYTES_PER_FIELD_ELEMENT;
-    const bytesToCopy = Math.min(USABLE_BYTES_PER_FE, data.length - srcOffset);
-
-    // Byte 0 of each FE is 0x00 (already zeroed)
-    // Copy data to bytes 1-31
-    blob.set(data.slice(srcOffset, srcOffset + bytesToCopy), feOffset + 1);
-    srcOffset += bytesToCopy;
-  }
-
+  const { blob } = assembleMultiSegmentBlob([
+    { contentTag: ZERO_TAG, payload: data },
+  ]);
   return blob;
 }
 
@@ -325,12 +324,16 @@ export function toHex(bytes: Uint8Array): Bytes32 {
 }
 
 /**
- * Constants for external use
+ * Constants for external use.
+ *
+ * Sourced from `src/blob/constants.ts` (the single SDK source of truth);
+ * kept as a stable named-export alias so existing consumers continue to
+ * work.
  */
 export const KZG_CONSTANTS = {
   FIELD_ELEMENTS_PER_BLOB,
   BYTES_PER_FIELD_ELEMENT,
-  USABLE_BYTES_PER_FE,
-  BLOB_SIZE,
-  MAX_USABLE_BYTES: FIELD_ELEMENTS_PER_BLOB * USABLE_BYTES_PER_FE,
+  USABLE_BYTES_PER_FE: USABLE_BYTES_PER_FIELD_ELEMENT,
+  BLOB_SIZE: BYTES_PER_BLOB,
+  MAX_USABLE_BYTES: USABLE_BYTES_PER_BLOB,
 } as const;

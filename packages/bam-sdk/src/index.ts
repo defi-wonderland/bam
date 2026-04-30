@@ -193,6 +193,24 @@ export type { AggregatorClientOptions } from './aggregator-client.js';
 // KZG proof generation
 export * from './kzg/index.js';
 
+// Blob layout — single source of truth for FE constants and multi-segment helpers
+export {
+  BYTES_PER_BLOB,
+  BYTES_PER_FIELD_ELEMENT,
+  FIELD_ELEMENTS_PER_BLOB,
+  USABLE_BYTES_PER_BLOB,
+  USABLE_BYTES_PER_FIELD_ELEMENT,
+} from './blob/constants.js';
+
+export { assembleMultiSegmentBlob } from './blob/multi-segment.js';
+export type {
+  AssembledMultiSegmentBlob,
+  AssembledSegment,
+  MultiSegmentInput,
+} from './blob/multi-segment.js';
+
+export { extractSegmentBytes } from './blob/extract.js';
+
 // Exposure (blob parsing and transaction building)
 export * from './exposure/index.js';
 
