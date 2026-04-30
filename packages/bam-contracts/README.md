@@ -142,7 +142,7 @@ forge fmt
 
 | Contract | Address |
 |----------|---------|
-| BlobAuthenticatedMessagingCore | `0x9C4b230066a6808D83F5FBa0c040E0Df2Fcc7314` |
+| BlobAuthenticatedMessagingCore | `0xAC01D2d2E8016a14eb2b4bd318ae221f866B9725` |
 | SocialBlobsCore (legacy) | `0x11a825a0774d0471292eab4706743bffcdd5d137` |
 | BLSRegistry | `0x15866bf5a8724f2aa9fe75e262d8f00ba2818e25` |
 | ECDSARegistry | `0xF4Ce909305a112C2CBEC6b339a42f34bA8bf3381` |
