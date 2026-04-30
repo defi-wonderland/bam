@@ -82,7 +82,7 @@ describe.skipIf(!SHOULD_RUN)('E2E — contract round trip (anvil)', () => {
     const signer = new LocalEcdsaSigner(
       '0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d'
     );
-    const { buildAndSubmit, rpc } = await buildAndSubmitWithViem({
+    const { buildAndSubmitMulti, rpc } = await buildAndSubmitWithViem({
       rpcUrl: RPC_URL,
       chainId: CHAIN_ID,
       bamCoreAddress: BAM_CORE,
@@ -97,14 +97,14 @@ describe.skipIf(!SHOULD_RUN)('E2E — contract round trip (anvil)', () => {
         batchPolicy: defaultBatchPolicy({ forceFlush: true }),
         now: () => new Date(),
       },
-      { buildAndSubmit, rpc }
+      { buildAndSubmitMulti, rpc }
     )) as InternalPoster;
     posters.push(poster);
 
     const submit = await poster.submit(signedEnvelope(1n));
     expect(submit.accepted).toBe(true);
 
-    await poster._tickTag(TAG);
+    await poster._tickAggregator();
     const batches = await poster.listSubmittedBatches({ contentTag: TAG });
     expect(batches.length).toBe(1);
     expect(batches[0].status).toBe('included');

@@ -237,7 +237,15 @@ export async function createReader(
     },
 
     async getBatch(txHash) {
-      return store.withTxn((txn) => txn.getBatchByTxHash(config.chainId, txHash));
+      // Composite-key world: a packed transaction can produce N rows under
+      // one `txHash`. The single-row HTTP `/batches/:txHash` endpoint
+      // returns the first row in deterministic `contentTag` order, which
+      // matches pre-packing behavior for single-tag deployments. Multi-tag
+      // consumers should query through `/batches?contentTag=…` instead.
+      const rows = await store.withTxn((txn) =>
+        txn.getBatchesByTxHash(config.chainId, txHash)
+      );
+      return rows[0] ?? null;
     },
 
     async cursorBlock() {

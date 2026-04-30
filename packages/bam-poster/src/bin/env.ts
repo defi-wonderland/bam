@@ -26,6 +26,12 @@ export interface ParsedEnv {
   signatureRegistryAddress?: Address;
   /** Optional bearer-token auth for the HTTP surface. */
   authToken?: string;
+  /**
+   * Operator-visible packing-loss-streak warning threshold (T023).
+   * Default 10. Detection-only; tags whose streak crosses this
+   * threshold are flagged in `/health` with `warn: true`.
+   */
+  packingLossStreakWarnThreshold: number;
 }
 
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
@@ -94,6 +100,19 @@ export function parseEnv(env: NodeJS.ProcessEnv = process.env): ParsedEnv {
     throw new EnvConfigError('POSTER_PORT must be a valid port number');
   }
 
+  const packingLossStreakWarnThresholdStr =
+    env.POSTER_PACKING_LOSS_STREAK_WARN_THRESHOLD;
+  let packingLossStreakWarnThreshold = 10;
+  if (packingLossStreakWarnThresholdStr !== undefined && packingLossStreakWarnThresholdStr !== '') {
+    const n = Number(packingLossStreakWarnThresholdStr);
+    if (!Number.isInteger(n) || n < 1) {
+      throw new EnvConfigError(
+        'POSTER_PACKING_LOSS_STREAK_WARN_THRESHOLD must be a positive integer'
+      );
+    }
+    packingLossStreakWarnThreshold = n;
+  }
+
   return {
     // Canonicalize casing here so the store adapters, scheduler map,
     // and allowlist comparisons all see one representation.
@@ -111,5 +130,6 @@ export function parseEnv(env: NodeJS.ProcessEnv = process.env): ParsedEnv {
     authToken: env.POSTER_AUTH_TOKEN && env.POSTER_AUTH_TOKEN.length > 0
       ? env.POSTER_AUTH_TOKEN
       : undefined,
+    packingLossStreakWarnThreshold,
   };
 }

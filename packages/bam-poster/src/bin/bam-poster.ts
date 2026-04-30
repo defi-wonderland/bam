@@ -94,10 +94,11 @@ export async function runCli(): Promise<void> {
     store = await createMemoryStore();
   }
 
-  // Real on-chain submission via viem — the default `buildAndSubmit`
-  // consults `config.rpcUrl`, builds a blob tx, waits for inclusion,
-  // and returns the receipt. Not wired by `createPoster` itself because
-  // it pulls in the KZG trusted setup at runtime.
+  // Real on-chain submission via viem — `buildAndSubmitMulti`
+  // consults `config.rpcUrl`, builds a packed type-3 tx calling
+  // `registerBlobBatches`, waits for inclusion, and returns the
+  // receipt. Not wired by `createPoster` itself because it pulls in
+  // the KZG trusted setup at runtime.
   const { buildAndSubmitWithViem } = await import('../submission/build-and-submit.js');
   const viemPieces = await buildAndSubmitWithViem({
     rpcUrl: env.rpcUrl,
@@ -118,9 +119,10 @@ export async function runCli(): Promise<void> {
         signer,
         store,
         reorgWindowBlocks: env.reorgWindowBlocks,
+        packingLossStreakWarnThreshold: env.packingLossStreakWarnThreshold,
       },
       {
-        buildAndSubmit: viemPieces.buildAndSubmit,
+        buildAndSubmitMulti: viemPieces.buildAndSubmitMulti,
         rpc: viemPieces.rpc,
       }
     );

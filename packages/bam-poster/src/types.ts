@@ -175,6 +175,28 @@ export interface Health {
   state: HealthState;
   reason?: string;
   since?: Date;
+  /**
+   * Aggregator-level fields (006-blob-packing-multi-tag, T023). Set
+   * only when the Poster is running with the cross-tag aggregator
+   * wired (i.e. `extras.buildAndSubmitMulti` was supplied).
+   */
+  lastPackedTxHash?: Bytes32 | null;
+  lastPackedTagCount?: number;
+  permanentlyStopped?: boolean;
+  /**
+   * Per-tag packing-loss-streak snapshot. One entry per allowlisted
+   * tag. `warn` flips to `true` once the streak hits the operator-
+   * configured threshold (`POSTER_PACKING_LOSS_STREAK_WARN_THRESHOLD`).
+   */
+  tags?: HealthTagEntry[];
+}
+
+export interface HealthTagEntry {
+  contentTag: Bytes32;
+  pendingCount: number;
+  packingLossStreak: number;
+  lastIncludedAt: number | null;
+  warn: boolean;
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -254,6 +276,37 @@ export interface PosterConfig {
   idlePollMs?: number;
   reorgPollMs?: number;
   logger?: PosterLogger;
+  /**
+   * Maximum number of per-tag entries the cross-tag aggregator
+   * (006-blob-packing-multi-tag) packs into one transaction.
+   * Construction-time constant; not a runtime toggle. Default `8`.
+   * Setting to `1` short-circuits the aggregator to single-tag mode.
+   * Only applies when `extras.buildAndSubmitMulti` is supplied.
+   */
+  maxTagsPerPack?: number;
+  /**
+   * Operator-visible packing-loss-streak warning threshold. The
+   * `/health` surface flags any tag whose `packingLossStreak >=`
+   * this value as `warn: true`. Detection-only — no behavior
+   * change at the threshold. Default `10`.
+   */
+  packingLossStreakWarnThreshold?: number;
+  /**
+   * Aggregator capacity overrides. Test-only — production callers
+   * leave these unset and the aggregator uses the SDK's
+   * `FIELD_ELEMENTS_PER_BLOB` and `USABLE_BYTES_PER_BLOB` defaults.
+   */
+  aggregatorCapacityFEs?: number;
+  aggregatorCapacityBytes?: number;
+  /**
+   * Aggregator encoder override. Test-only — used to pin the
+   * planner's FE math without depending on encoded-batch overhead
+   * arithmetic. Production callers leave it unset.
+   */
+  aggregatorEncodeBatch?: (
+    msgs: import('bam-sdk').BAMMessage[],
+    signatures: Uint8Array[]
+  ) => { data: Uint8Array };
 }
 
 // ═══════════════════════════════════════════════════════════════════════

@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   BLOB_BATCH_REGISTERED_EVENT,
+  BLOB_SEGMENT_DECLARED_EVENT,
   MIN_CHUNK_BLOCKS,
   scanLogs,
   type LogScanClient,
@@ -51,9 +52,27 @@ function fakeLog(opts: {
   };
 }
 
+interface FakeSegmentLog {
+  blockNumber: bigint;
+  transactionIndex: bigint;
+  logIndex: bigint;
+  transactionHash: Bytes32;
+  args: {
+    versionedHash: Bytes32;
+    declarer: Address;
+    startFE: number;
+    endFE: number;
+    contentTag: Bytes32;
+  };
+}
+
 function fakeClient(
-  rows: FakeLog[]
-): LogScanClient & { lastArgs?: unknown; calls: Array<{ from: number; to: number }> } {
+  rows: FakeLog[],
+  segmentRows: FakeSegmentLog[] = []
+): LogScanClient & {
+  lastArgs?: unknown;
+  calls: Array<{ from: number; to: number }>;
+} {
   const client = {
     lastArgs: undefined as unknown,
     calls: [] as Array<{ from: number; to: number }>,
@@ -63,20 +82,29 @@ function fakeClient(
       const toBlock = Number(args.toBlock);
       this.calls.push({ from: fromBlock, to: toBlock });
       const wantedTags = (args.args?.contentTag ?? []) as Bytes32[];
-      return rows
-        .filter(
-          (r) =>
-            Number(r.blockNumber) >= fromBlock &&
-            Number(r.blockNumber) <= toBlock &&
-            (wantedTags.length === 0 || wantedTags.includes(r.args.contentTag))
-        )
-        .map((r) => ({
-          blockNumber: r.blockNumber,
-          transactionIndex: r.transactionIndex,
-          logIndex: r.logIndex,
-          transactionHash: r.transactionHash,
-          args: r.args,
-        }));
+      const inRange = <T extends { blockNumber: bigint; args: { contentTag: Bytes32 } }>(
+        r: T
+      ): boolean =>
+        Number(r.blockNumber) >= fromBlock &&
+        Number(r.blockNumber) <= toBlock &&
+        (wantedTags.length === 0 || wantedTags.includes(r.args.contentTag));
+      const batchOut = rows.filter(inRange).map((r) => ({
+        eventName: 'BlobBatchRegistered' as const,
+        blockNumber: r.blockNumber,
+        transactionIndex: r.transactionIndex,
+        logIndex: r.logIndex,
+        transactionHash: r.transactionHash,
+        args: r.args,
+      }));
+      const segmentOut = segmentRows.filter(inRange).map((r) => ({
+        eventName: 'BlobSegmentDeclared' as const,
+        blockNumber: r.blockNumber,
+        transactionIndex: r.transactionIndex,
+        logIndex: r.logIndex,
+        transactionHash: r.transactionHash,
+        args: r.args,
+      }));
+      return [...batchOut, ...segmentOut];
     },
   };
   return client;
@@ -151,7 +179,7 @@ describe('scanLogs', () => {
     ).toBeUndefined();
   });
 
-  it('forwards the canonical event shape on the publicClient call', async () => {
+  it('forwards both event ABIs on the publicClient call (one combined eth_getLogs)', async () => {
     const client = fakeClient([]);
     await scanLogs({
       publicClient: client,
@@ -161,7 +189,10 @@ describe('scanLogs', () => {
     });
     const args = client.lastArgs as Record<string, unknown>;
     expect(args.address).toBe(BAM_CORE);
-    expect(args.event).toBe(BLOB_BATCH_REGISTERED_EVENT);
+    expect(args.events).toEqual([
+      BLOB_BATCH_REGISTERED_EVENT,
+      BLOB_SEGMENT_DECLARED_EVENT,
+    ]);
     expect(args.fromBlock).toBe(0n);
     expect(args.toBlock).toBe(0n);
   });
@@ -251,6 +282,8 @@ describe('scanLogs', () => {
         toBlock: 10_000,
       })
     ).rejects.toThrow(/connection reset/);
+    // No halving: the scanner fires one combined `getLogs` per range
+    // and propagates the first non-family error directly.
     expect(calls).toBe(1);
   });
 
@@ -303,7 +336,350 @@ describe('scanLogs', () => {
         toBlock: 10_000,
       })
     ).rejects.toThrow(/exceeds the gas limit/);
+    // No halving: exactly one combined `getLogs` call before the throw.
     expect(calls).toBe(1);
+  });
+
+  it('joins BlobSegmentDeclared events onto BlobBatchRegistered by (txHash, contentTag)', async () => {
+    // Packed tx: one txHash, two per-tag entries with non-overlapping ranges.
+    const PACKED_TX = ('0x' + 'cc'.repeat(32)) as Bytes32;
+    const PACKED_BLOCK = 200;
+    const VH = ('0x01' + 'cc'.repeat(31)) as Bytes32;
+    const batchRows: FakeLog[] = [
+      {
+        blockNumber: BigInt(PACKED_BLOCK),
+        transactionIndex: 0n,
+        logIndex: 1n, // segment events come first per the contract
+        transactionHash: PACKED_TX,
+        args: {
+          versionedHash: VH,
+          submitter: SUBMITTER,
+          contentTag: TAG_A,
+          decoder: '0x0000000000000000000000000000000000000000' as Address,
+          signatureRegistry: '0x0000000000000000000000000000000000000000' as Address,
+        },
+      },
+      {
+        blockNumber: BigInt(PACKED_BLOCK),
+        transactionIndex: 0n,
+        logIndex: 3n,
+        transactionHash: PACKED_TX,
+        args: {
+          versionedHash: VH,
+          submitter: SUBMITTER,
+          contentTag: TAG_B,
+          decoder: '0x0000000000000000000000000000000000000000' as Address,
+          signatureRegistry: '0x0000000000000000000000000000000000000000' as Address,
+        },
+      },
+    ];
+    const segmentRows: FakeSegmentLog[] = [
+      {
+        blockNumber: BigInt(PACKED_BLOCK),
+        transactionIndex: 0n,
+        logIndex: 0n,
+        transactionHash: PACKED_TX,
+        args: {
+          versionedHash: VH,
+          declarer: SUBMITTER,
+          startFE: 0,
+          endFE: 100,
+          contentTag: TAG_A,
+        },
+      },
+      {
+        blockNumber: BigInt(PACKED_BLOCK),
+        transactionIndex: 0n,
+        logIndex: 2n,
+        transactionHash: PACKED_TX,
+        args: {
+          versionedHash: VH,
+          declarer: SUBMITTER,
+          startFE: 100,
+          endFE: 250,
+          contentTag: TAG_B,
+        },
+      },
+    ];
+    const out = await scanLogs({
+      publicClient: fakeClient(batchRows, segmentRows),
+      bamCoreAddress: BAM_CORE,
+      fromBlock: 100,
+      toBlock: 300,
+    });
+    expect(out).toHaveLength(2);
+    const a = out.find((e) => e.contentTag === TAG_A)!;
+    const b = out.find((e) => e.contentTag === TAG_B)!;
+    expect(a.startFE).toBe(0);
+    expect(a.endFE).toBe(100);
+    expect(b.startFE).toBe(100);
+    expect(b.endFE).toBe(250);
+  });
+
+  it('positional pairing: rogue leading BSD does not steal the legit pair', async () => {
+    // Hostile scenario: the same tx contains a bare `declareBlobSegment`
+    // call (rogue BSD, logIndex=0) followed by a real
+    // `registerBlobBatch` (legitimate BSD→BBR pair, logIndex=1,2). A
+    // content-keyed last-wins join would attribute the rogue range to
+    // the BBR. Positional LIFO pairing claims the legit BSD first;
+    // the rogue BSD is left unconsumed and ignored.
+    const TX = ('0x' + 'dd'.repeat(32)) as Bytes32;
+    const VH = ('0x01' + 'dd'.repeat(31)) as Bytes32;
+    const batchRows: FakeLog[] = [
+      {
+        blockNumber: 100n,
+        transactionIndex: 0n,
+        logIndex: 2n,
+        transactionHash: TX,
+        args: {
+          versionedHash: VH,
+          submitter: SUBMITTER,
+          contentTag: TAG_A,
+          decoder: '0x0000000000000000000000000000000000000000' as Address,
+          signatureRegistry: '0x0000000000000000000000000000000000000000' as Address,
+        },
+      },
+    ];
+    const segmentRows: FakeSegmentLog[] = [
+      {
+        blockNumber: 100n,
+        transactionIndex: 0n,
+        logIndex: 0n, // rogue, emitted FIRST in tx
+        transactionHash: TX,
+        args: {
+          versionedHash: VH,
+          declarer: SUBMITTER,
+          startFE: 200,
+          endFE: 300,
+          contentTag: TAG_A,
+        },
+      },
+      {
+        blockNumber: 100n,
+        transactionIndex: 0n,
+        logIndex: 1n, // legit, emitted right before BBR
+        transactionHash: TX,
+        args: {
+          versionedHash: VH,
+          declarer: SUBMITTER,
+          startFE: 0,
+          endFE: 100,
+          contentTag: TAG_A,
+        },
+      },
+    ];
+    const out = await scanLogs({
+      publicClient: fakeClient(batchRows, segmentRows),
+      bamCoreAddress: BAM_CORE,
+      fromBlock: 0,
+      toBlock: 200,
+    });
+    expect(out).toHaveLength(1);
+    // BBR pairs with the most-recent matching BSD (logIndex=1, range
+    // 0..100), NOT the rogue BSD (logIndex=0, range 200..300).
+    expect(out[0].startFE).toBe(0);
+    expect(out[0].endFE).toBe(100);
+  });
+
+  it('positional pairing: same tag duplicated in one packed call → each BBR claims its own BSD', async () => {
+    // registerBlobBatches([{tagA, 0..100}, {tagA, 100..250}]) emits:
+    //   logIndex=0: BSD_A1 (0..100)
+    //   logIndex=1: BBR_A1
+    //   logIndex=2: BSD_A2 (100..250)
+    //   logIndex=3: BBR_A2
+    // Both BBRs share (txHash, contentTag); LIFO pairing claims the
+    // matching BSD by recency.
+    const TX = ('0x' + 'ee'.repeat(32)) as Bytes32;
+    const VH = ('0x01' + 'ee'.repeat(31)) as Bytes32;
+    const batchRows: FakeLog[] = [
+      {
+        blockNumber: 100n,
+        transactionIndex: 0n,
+        logIndex: 1n,
+        transactionHash: TX,
+        args: {
+          versionedHash: VH,
+          submitter: SUBMITTER,
+          contentTag: TAG_A,
+          decoder: '0x0000000000000000000000000000000000000000' as Address,
+          signatureRegistry: '0x0000000000000000000000000000000000000000' as Address,
+        },
+      },
+      {
+        blockNumber: 100n,
+        transactionIndex: 0n,
+        logIndex: 3n,
+        transactionHash: TX,
+        args: {
+          versionedHash: VH,
+          submitter: SUBMITTER,
+          contentTag: TAG_A,
+          decoder: '0x0000000000000000000000000000000000000000' as Address,
+          signatureRegistry: '0x0000000000000000000000000000000000000000' as Address,
+        },
+      },
+    ];
+    const segmentRows: FakeSegmentLog[] = [
+      {
+        blockNumber: 100n,
+        transactionIndex: 0n,
+        logIndex: 0n,
+        transactionHash: TX,
+        args: {
+          versionedHash: VH,
+          declarer: SUBMITTER,
+          startFE: 0,
+          endFE: 100,
+          contentTag: TAG_A,
+        },
+      },
+      {
+        blockNumber: 100n,
+        transactionIndex: 0n,
+        logIndex: 2n,
+        transactionHash: TX,
+        args: {
+          versionedHash: VH,
+          declarer: SUBMITTER,
+          startFE: 100,
+          endFE: 250,
+          contentTag: TAG_A,
+        },
+      },
+    ];
+    const out = await scanLogs({
+      publicClient: fakeClient(batchRows, segmentRows),
+      bamCoreAddress: BAM_CORE,
+      fromBlock: 0,
+      toBlock: 200,
+    });
+    expect(out).toHaveLength(2);
+    // First BBR (logIndex=1) gets BSD at logIndex=0 (range 0..100).
+    // Second BBR (logIndex=3) gets BSD at logIndex=2 (range 100..250).
+    const sorted = [...out].sort((a, b) => a.logIndex - b.logIndex);
+    expect(sorted[0].startFE).toBe(0);
+    expect(sorted[0].endFE).toBe(100);
+    expect(sorted[1].startFE).toBe(100);
+    expect(sorted[1].endFE).toBe(250);
+  });
+
+  it('positional pairing: trailing rogue BSD with no matching BBR is ignored', async () => {
+    const TX = ('0x' + 'ff'.repeat(32)) as Bytes32;
+    const VH = ('0x01' + 'ff'.repeat(31)) as Bytes32;
+    const batchRows: FakeLog[] = [
+      {
+        blockNumber: 100n,
+        transactionIndex: 0n,
+        logIndex: 1n,
+        transactionHash: TX,
+        args: {
+          versionedHash: VH,
+          submitter: SUBMITTER,
+          contentTag: TAG_A,
+          decoder: '0x0000000000000000000000000000000000000000' as Address,
+          signatureRegistry: '0x0000000000000000000000000000000000000000' as Address,
+        },
+      },
+    ];
+    const segmentRows: FakeSegmentLog[] = [
+      {
+        blockNumber: 100n,
+        transactionIndex: 0n,
+        logIndex: 0n,
+        transactionHash: TX,
+        args: {
+          versionedHash: VH,
+          declarer: SUBMITTER,
+          startFE: 0,
+          endFE: 100,
+          contentTag: TAG_A,
+        },
+      },
+      {
+        blockNumber: 100n,
+        transactionIndex: 0n,
+        logIndex: 2n, // trailing rogue, after the BBR
+        transactionHash: TX,
+        args: {
+          versionedHash: VH,
+          declarer: SUBMITTER,
+          startFE: 500,
+          endFE: 700,
+          contentTag: TAG_A,
+        },
+      },
+    ];
+    const out = await scanLogs({
+      publicClient: fakeClient(batchRows, segmentRows),
+      bamCoreAddress: BAM_CORE,
+      fromBlock: 0,
+      toBlock: 200,
+    });
+    expect(out).toHaveLength(1);
+    expect(out[0].startFE).toBe(0);
+    expect(out[0].endFE).toBe(100);
+  });
+
+  it('positional pairing: BSDs in tx X never pair with BBRs in tx Y', async () => {
+    const TX_X = ('0x' + 'aa'.repeat(32)) as Bytes32;
+    const TX_Y = ('0x' + 'bb'.repeat(32)) as Bytes32;
+    const VH = ('0x01' + 'cc'.repeat(31)) as Bytes32;
+    // BBR in tx_Y but its only matching BSD is in tx_X.
+    const batchRows: FakeLog[] = [
+      {
+        blockNumber: 100n,
+        transactionIndex: 1n,
+        logIndex: 0n,
+        transactionHash: TX_Y,
+        args: {
+          versionedHash: VH,
+          submitter: SUBMITTER,
+          contentTag: TAG_A,
+          decoder: '0x0000000000000000000000000000000000000000' as Address,
+          signatureRegistry: '0x0000000000000000000000000000000000000000' as Address,
+        },
+      },
+    ];
+    const segmentRows: FakeSegmentLog[] = [
+      {
+        blockNumber: 100n,
+        transactionIndex: 0n,
+        logIndex: 0n,
+        transactionHash: TX_X,
+        args: {
+          versionedHash: VH,
+          declarer: SUBMITTER,
+          startFE: 0,
+          endFE: 100,
+          contentTag: TAG_A,
+        },
+      },
+    ];
+    const out = await scanLogs({
+      publicClient: fakeClient(batchRows, segmentRows),
+      bamCoreAddress: BAM_CORE,
+      fromBlock: 0,
+      toBlock: 200,
+    });
+    expect(out).toHaveLength(1);
+    // No matching BSD inside TX_Y → fall back to full-blob default.
+    expect(out[0].startFE).toBe(0);
+    expect(out[0].endFE).toBe(4096);
+  });
+
+  it('falls back to full-blob range when no matching segment event is observed', async () => {
+    // Pre-feature on-chain history: BBR present, no BSD. Reader must
+    // still return the event with the legacy full-blob default range
+    // so single-segment decode keeps working.
+    const out = await scanLogs({
+      publicClient: fakeClient([fakeLog({ block: 50, tx: 0, log: 0, tag: TAG_A })]),
+      bamCoreAddress: BAM_CORE,
+      fromBlock: 0,
+      toBlock: 100,
+    });
+    expect(out).toHaveLength(1);
+    expect(out[0].startFE).toBe(0);
+    expect(out[0].endFE).toBe(4096);
   });
 
   it('pages a multi-chunk range and returns the union in canonical order', async () => {

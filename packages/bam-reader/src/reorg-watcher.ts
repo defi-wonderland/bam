@@ -11,6 +11,15 @@
  *     `markReorged` (confirmed → reorged on every attached message)
  *     is the watcher's only effect.
  *
+ * **Composite-key world (006-blob-packing-multi-tag).** A packed L1
+ * transaction can produce N `BatchRow`s under one `txHash` (one per
+ * `contentTag`). `markReorged(txHash, …)` widens to mark every per-tag
+ * row at that `txHash` reorged in a single store transaction; the
+ * cascade extends to every attached message under any of those rows.
+ * The watcher's per-batch loop may call `markReorged` more than once
+ * per packed `txHash` (once per per-tag candidate), which is idempotent
+ * by construction and converges to the same end state.
+ *
  * Window default of 32 blocks (~6 minutes on mainnet) matches the
  * Poster's. Deeper reorgs are documented as out-of-scope (operator
  * re-runs backfill).
@@ -82,7 +91,7 @@ export class ReaderReorgWatcher {
       }
       reorgedCount += 1;
       await this.opts.store.withTxn(async (txn) => {
-        await txn.markReorged(batch.txHash, now().getTime());
+        await txn.markReorged(this.opts.chainId, batch.txHash, now().getTime());
       });
     }
 

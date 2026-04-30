@@ -485,18 +485,35 @@ function makeTxn(tx: DrizzleDb): StoreTxn {
       `);
     },
 
-    async markReorged(txHash: Bytes32, invalidatedAt: number): Promise<void> {
+    async markReorged(
+      chainId: number,
+      txHash: Bytes32,
+      invalidatedAt: number
+    ): Promise<void> {
+      // A packed transaction produces N rows under the same
+      // `(chain_id, tx_hash)` (one per `content_tag`); a single
+      // statement transitions all of them.
       const res = await tx
         .update(batchesT)
         .set({ status: 'reorged', invalidatedAt })
-        .where(eq(batchesT.txHash, txHash));
+        .where(and(eq(batchesT.chainId, chainId), eq(batchesT.txHash, txHash)));
       if (execRowCount(res) === 0) {
-        throw new Error(`markReorged: no batch for tx_hash=${txHash}`);
+        throw new Error(
+          `markReorged: no batch for chain_id=${chainId} tx_hash=${txHash}`
+        );
       }
-      await tx
-        .update(messagesT)
-        .set({ status: 'reorged' })
-        .where(and(eq(messagesT.batchRef, txHash), eq(messagesT.status, 'confirmed')));
+      // The `messages` table has no `chain_id` column (PK is
+      // `(author, nonce)`). Scope the cascade to the chain via an
+      // EXISTS join on `batches`, which we just transitioned.
+      await tx.execute(sql`
+        UPDATE messages SET status = 'reorged'
+        WHERE batch_ref = ${txHash}
+          AND status = 'confirmed'
+          AND EXISTS (
+            SELECT 1 FROM batches
+            WHERE chain_id = ${chainId} AND tx_hash = ${txHash}
+          )
+      `);
     },
 
     // ── unified-schema reads ─────────────────────────────────────────
@@ -571,9 +588,7 @@ function makeTxn(tx: DrizzleDb): StoreTxn {
                 ${row.replacedByTxHash}, ${row.submittedAt},
                 ${row.invalidatedAt}, ${snapshotJson},
                 ${submitter}, ${row.l1IncludedAtUnixSec})
-        ON CONFLICT (tx_hash) DO UPDATE SET
-          chain_id                = EXCLUDED.chain_id,
-          content_tag             = EXCLUDED.content_tag,
+        ON CONFLICT (chain_id, tx_hash, content_tag) DO UPDATE SET
           blob_versioned_hash     = EXCLUDED.blob_versioned_hash,
           batch_content_hash      = EXCLUDED.batch_content_hash,
           block_number            = EXCLUDED.block_number,
@@ -612,15 +627,34 @@ function makeTxn(tx: DrizzleDb): StoreTxn {
       }
     },
 
-    async getBatchByTxHash(
+    async getBatch(
       chainId: number,
-      txHash: Bytes32
+      txHash: Bytes32,
+      contentTag: Bytes32
     ): Promise<BatchRow | null> {
       const rows = await tx
         .select()
         .from(batchesT)
-        .where(and(eq(batchesT.chainId, chainId), eq(batchesT.txHash, txHash)));
+        .where(
+          and(
+            eq(batchesT.chainId, chainId),
+            eq(batchesT.txHash, txHash),
+            eq(batchesT.contentTag, contentTag)
+          )
+        );
       return rows[0] ? mapBatch(rows[0] as unknown as RawBatch) : null;
+    },
+
+    async getBatchesByTxHash(
+      chainId: number,
+      txHash: Bytes32
+    ): Promise<BatchRow[]> {
+      const rows = await tx
+        .select()
+        .from(batchesT)
+        .where(and(eq(batchesT.chainId, chainId), eq(batchesT.txHash, txHash)))
+        .orderBy(asc(batchesT.contentTag));
+      return rows.map((r) => mapBatch(r as unknown as RawBatch));
     },
 
     async listBatches(query: BatchesQuery): Promise<BatchRow[]> {

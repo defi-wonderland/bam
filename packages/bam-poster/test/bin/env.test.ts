@@ -96,4 +96,27 @@ describe('parseEnv', () => {
     expect(() => parseEnv({ ...BASE, POSTER_PORT: '-1' })).toThrow(EnvConfigError);
     expect(() => parseEnv({ ...BASE, POSTER_PORT: '99999' })).toThrow(EnvConfigError);
   });
+
+  it('defaults POSTER_PACKING_LOSS_STREAK_WARN_THRESHOLD to 10', () => {
+    expect(parseEnv(BASE).packingLossStreakWarnThreshold).toBe(10);
+  });
+
+  it('honors POSTER_PACKING_LOSS_STREAK_WARN_THRESHOLD when set', () => {
+    expect(
+      parseEnv({ ...BASE, POSTER_PACKING_LOSS_STREAK_WARN_THRESHOLD: '25' })
+        .packingLossStreakWarnThreshold
+    ).toBe(25);
+  });
+
+  it('throws on a non-positive POSTER_PACKING_LOSS_STREAK_WARN_THRESHOLD', () => {
+    expect(() =>
+      parseEnv({ ...BASE, POSTER_PACKING_LOSS_STREAK_WARN_THRESHOLD: '0' })
+    ).toThrow(EnvConfigError);
+    expect(() =>
+      parseEnv({ ...BASE, POSTER_PACKING_LOSS_STREAK_WARN_THRESHOLD: '-1' })
+    ).toThrow(EnvConfigError);
+    expect(() =>
+      parseEnv({ ...BASE, POSTER_PACKING_LOSS_STREAK_WARN_THRESHOLD: 'abc' })
+    ).toThrow(EnvConfigError);
+  });
 });

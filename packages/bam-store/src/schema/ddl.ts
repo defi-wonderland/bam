@@ -47,7 +47,7 @@ export const SQL_CREATE_DDL: readonly string[] = [
   `CREATE INDEX IF NOT EXISTS idx_messages_message_hash
     ON messages (message_hash)`,
   `CREATE TABLE IF NOT EXISTS batches (
-    tx_hash                  TEXT PRIMARY KEY,
+    tx_hash                  TEXT NOT NULL,
     chain_id                 BIGINT NOT NULL,
     content_tag              TEXT NOT NULL,
     blob_versioned_hash      TEXT NOT NULL,
@@ -60,7 +60,8 @@ export const SQL_CREATE_DDL: readonly string[] = [
     invalidated_at           BIGINT,
     message_snapshot         TEXT NOT NULL DEFAULT '[]',
     submitter                TEXT,
-    l1_included_at_unix_sec  BIGINT
+    l1_included_at_unix_sec  BIGINT,
+    PRIMARY KEY (chain_id, tx_hash, content_tag)
   )`,
   `CREATE INDEX IF NOT EXISTS idx_batches_tag_block
     ON batches (content_tag, block_number)`,

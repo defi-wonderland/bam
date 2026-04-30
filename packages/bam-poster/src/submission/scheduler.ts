@@ -4,8 +4,8 @@
  * permanently (e.g. a submission loop that flipped to `unhealthy`).
  *
  * Exists so the Poster's `start()` spawns real autonomous work rather
- * than relying on an external driver poking `_tickTag`. Tests that
- * want deterministic stepping never call `start()` and use the
+ * than relying on an external driver poking `_tickAggregator`. Tests
+ * that want deterministic stepping never call `start()` and use the
  * `InternalPoster` hooks directly.
  */
 export class WorkerTimer {

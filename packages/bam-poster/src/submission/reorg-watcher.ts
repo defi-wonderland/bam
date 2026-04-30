@@ -96,10 +96,18 @@ export class ReorgWatcher {
   private async reorgBatch(batch: BatchRow): Promise<void> {
     await this.opts.store.withTxn(async (txn) => {
       const invalidatedAt = this.opts.now().getTime();
-      // Fetch the attached messages BEFORE markReorged so we have the
-      // payloads in a stable order for re-enqueue.
-      const attached = await txn.listMessages({ batchRef: batch.txHash });
-      await txn.markReorged(batch.txHash, invalidatedAt);
+      // Composite-key world: a packed `txHash` can host multiple per-tag
+      // batches that share `batch_ref`. Scope the message fetch by
+      // `contentTag` so the per-batch reorg snapshot maps to *this*
+      // batch's messages, not all per-tag batches in the packed tx.
+      // `markReorged(txHash, …)` widens to "every per-tag row at this
+      // txHash" which is idempotent across the per-batch loop here —
+      // calling it once per per-tag batch leaves the same end state.
+      const attached = await txn.listMessages({
+        batchRef: batch.txHash,
+        contentTag: batch.contentTag,
+      });
+      await txn.markReorged(this.opts.chainId, batch.txHash, invalidatedAt);
 
       // Re-enqueue in original-ingest order, with NEW ingest_seq
       // values at the tail of the tag queue.

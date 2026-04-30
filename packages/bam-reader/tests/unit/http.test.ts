@@ -99,6 +99,7 @@ describe('ReaderHttpServer', () => {
         skippedVerify: 0,
         skippedConflict: 0,
         undecodable: 0,
+        skippedRange: 0,
       },
     });
   });

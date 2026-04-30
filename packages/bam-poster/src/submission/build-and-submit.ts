@@ -1,15 +1,15 @@
 import { createRequire } from 'node:module';
 
 import {
+  assembleMultiSegmentBlob,
   commitToBlob,
-  createBlob,
-  encodeBatch,
   loadTrustedSetup,
   type Address,
-  type BAMMessage,
   type Bytes32,
 } from 'bam-sdk';
 import { BAM_CORE_ABI } from 'bam-sdk';
+import { validatePackPlanInvariants } from './pack.js';
+import { verifyPackedBlobRoundTrips, PackSelfCheckMismatch } from './self-check.js';
 import {
   createPublicClient,
   createWalletClient,
@@ -32,7 +32,10 @@ import type { BlockSource } from './reorg-watcher.js';
 import type { ReconcileRpcClient } from '../startup/reconcile.js';
 import type { Signer } from '../types.js';
 import type { StatusRpcReader } from '../surfaces/status.js';
-import type { BuildAndSubmit, SubmitOutcome } from './types.js';
+import type {
+  BuildAndSubmitMulti,
+  PackedSubmitIncludedEntry,
+} from './types.js';
 
 export interface BuildAndSubmitOptions {
   rpcUrl: string;
@@ -75,7 +78,8 @@ export interface BuildAndSubmitTransport {
 }
 
 export interface BuildAndSubmitBundle {
-  buildAndSubmit: BuildAndSubmit;
+  /** Multi-tag (packed) submission. Calls `registerBlobBatches`. */
+  buildAndSubmitMulti: BuildAndSubmitMulti;
   rpc: ReconcileRpcClient & StatusRpcReader & BlockSource;
 }
 
@@ -104,7 +108,11 @@ const PERMANENT_ERROR_PATTERNS: readonly RegExp[] = [
   /out of gas/i,
 ];
 
-export function classifySubmissionError(err: unknown): SubmitOutcome {
+export function classifySubmissionError(
+  err: unknown
+):
+  | { kind: 'retryable'; detail: string }
+  | { kind: 'permanent'; detail: string } {
   const msg = err instanceof Error ? err.message : String(err);
   for (const pattern of PERMANENT_ERROR_PATTERNS) {
     if (pattern.test(msg)) {
@@ -117,7 +125,7 @@ export function classifySubmissionError(err: unknown): SubmitOutcome {
 /**
  * Real on-chain submitter + RPC reader bundle. Produces the Node-only
  * pieces the factory needs to submit a blob-carrying type-3 transaction
- * via `registerBlobBatch` on the BAM Core contract, and to reconcile
+ * via `registerBlobBatches` on the BAM Core contract, and to reconcile
  * chain-id + contract bytecode at startup.
  *
  * KZG trusted-setup loading happens lazily on the first submission so
@@ -153,61 +161,122 @@ export async function buildAndSubmitWithViem(
     return kzgForViem;
   });
 
-  const buildAndSubmit: BuildAndSubmit = async ({ contentTag, messages }) => {
+  const buildAndSubmitMulti: BuildAndSubmitMulti = async ({ pack }) => {
+    if (pack.plan.included.length === 0) {
+      return { kind: 'permanent', detail: 'empty_pack' };
+    }
+    const log =
+      opts.logger ?? ((_level, msg) => process.stderr.write(`[bam-poster] ${msg}\n`));
+
+    // Pre-broadcast: every failure here is a producer-side bug
+    // (plan-invariant violation, FE-alignment mismatch, content
+    // round-trip mismatch). Treat as permanent so the aggregator halts
+    // for operator inspection rather than retrying a known-bad plan.
+    let blob: Uint8Array;
+    let versionedHash: Bytes32;
+    let data: `0x${string}`;
+    let kzg: Kzg;
     try {
-      // Load the KZG trusted setup before `commitToBlob` — the default
-      // loader in `ensureKzg` calls bam-sdk's `loadTrustedSetup()`,
-      // which primes the native c-kzg state that `commitToBlob` then
-      // reads. Without this running first, `commitToBlob` throws
-      // "KZG trusted setup not loaded. Call loadTrustedSetup() first."
-      const kzg = await ensureKzg();
+      kzg = await ensureKzg();
 
-      const bamMsgs: BAMMessage[] = messages.map((m) => ({
-        sender: m.sender,
-        nonce: m.nonce,
-        contents: m.contents,
+      // 1. Validate the plan's structural invariants (overlap, OOB,
+      //    inverted ranges). Aggregator-level bug → permanent failure.
+      validatePackPlanInvariants(pack.plan);
+
+      // 2. Assemble the multi-segment blob from the plan's payload bytes.
+      const segments = pack.plan.included.map((seg) => ({
+        contentTag: seg.contentTag,
+        payload: seg.payloadBytes,
       }));
-      const signatures = messages.map((m) => m.signature);
-      const batch = encodeBatch(bamMsgs, signatures);
-      const blob = createBlob(batch.data);
-      const { versionedHash } = commitToBlob(blob);
-      const data = encodeFunctionData({
-        abi: BAM_CORE_ABI,
-        functionName: 'registerBlobBatch',
-        args: [0n, 0, 4096, contentTag, decoder, sigRegistry],
-      });
+      const assembledOut = assembleMultiSegmentBlob(segments);
+      blob = assembledOut.blob;
+      const assembled = assembledOut.segments;
 
-      // Send the EXACT blob we committed to. bam-sdk's `createBlob`
-      // and viem's `toBlobs` pack bytes into field elements
-      // differently (viem adds a terminator byte; the SDK leaves
-      // trailing FEs zero). If we let viem re-encode, the on-chain
-      // versioned hash wouldn't match the `versionedHash` we stored
-      // and returned to callers. Pass the SDK-encoded blob directly.
-      const txHash = (await transport.sendBlobTransaction({
+      // Defense in depth: the aggregator's plan and the SDK's
+      // FE-alignment math are computed independently. They MUST agree.
+      for (let i = 0; i < pack.plan.included.length; i++) {
+        const planEntry = pack.plan.included[i]!;
+        const asm = assembled[i]!;
+        if (planEntry.startFE !== asm.startFE || planEntry.endFE !== asm.endFE) {
+          throw new PackSelfCheckMismatch(
+            planEntry.contentTag,
+            `plan-vs-assembly-mismatch:plan=(${planEntry.startFE},${planEntry.endFE}) ` +
+              `asm=(${asm.startFE},${asm.endFE})`
+          );
+        }
+      }
+
+      // 3. Producer-side runtime self-check (T020): decode every per-tag
+      //    slice through the same SDK path the Reader will use; refuse
+      //    to broadcast on any mismatch.
+      verifyPackedBlobRoundTrips(blob, pack.plan, pack.includedSelections);
+
+      // 4. Compute the versioned hash for the assembled blob.
+      versionedHash = commitToBlob(blob).versionedHash;
+
+      // 5. Encode the call: registerBlobBatches([{...}, ...]). All
+      //    entries reference blobIndex=0 (the single blob in this tx).
+      const calls = pack.plan.included.map((seg) => ({
+        blobIndex: 0n,
+        startFE: seg.startFE,
+        endFE: seg.endFE,
+        contentTag: seg.contentTag,
+        decoder,
+        signatureRegistry: sigRegistry,
+      }));
+      data = encodeFunctionData({
+        abi: BAM_CORE_ABI,
+        functionName: 'registerBlobBatches',
+        args: [calls],
+      });
+    } catch (err) {
+      const detail = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+      if (err instanceof PackSelfCheckMismatch) {
+        log(
+          'error',
+          `pack self-check mismatch (PERMANENT) tag=${err.contentTag} reason=${err.reason}`
+        );
+        return { kind: 'permanent', detail: `self_check:${err.reason}` };
+      }
+      log('error', `pre-broadcast plan validation failed (PERMANENT): ${detail}`);
+      return { kind: 'permanent', detail: `pre_broadcast:${detail}` };
+    }
+
+    // Broadcast: errors here are typically RPC-side and follow the
+    // existing retryable/permanent classifier shared with the
+    // single-tag path.
+    try {
+      const txHash = await transport.sendBlobTransaction({
         to: opts.bamCoreAddress,
         data,
         blobs: [blob],
         maxFeePerBlobGas: parseGwei(gwei),
         kzg,
-      }));
+      });
       const receipt = await transport.waitForReceipt(txHash);
+
+      const entries: PackedSubmitIncludedEntry[] = pack.plan.included.map((seg) => {
+        const selection = pack.includedSelections.get(seg.contentTag)!;
+        return {
+          contentTag: seg.contentTag,
+          startFE: seg.startFE,
+          endFE: seg.endFE,
+          messages: selection.messages,
+        };
+      });
 
       return {
         kind: 'included',
         txHash,
-        blobVersionedHash: versionedHash,
         blockNumber: Number(receipt.blockNumber),
         txIndex: receipt.transactionIndex,
+        blobVersionedHash: versionedHash,
         submitter: opts.signer.account().address as Address,
+        entries,
       };
     } catch (err) {
-      // Log the underlying error before classification — the classifier
-      // throws away the message, and without this the health surface
-      // reports "tag has failed N times" with no way to see why.
-      const detail =
-        err instanceof Error ? `${err.name}: ${err.message}` : String(err);
-      const log = opts.logger ?? ((_level, msg) => process.stderr.write(`[bam-poster] ${msg}\n`));
-      log('error', `submission failed for tag ${contentTag}: ${detail}`);
+      const detail = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+      log('error', `packed submission broadcast failed: ${detail}`);
       return classifySubmissionError(err);
     }
   };
@@ -231,7 +300,7 @@ export async function buildAndSubmitWithViem(
     },
   };
 
-  return { buildAndSubmit, rpc };
+  return { buildAndSubmitMulti, rpc };
 }
 
 function viemTransport(opts: BuildAndSubmitOptions): BuildAndSubmitTransport {
