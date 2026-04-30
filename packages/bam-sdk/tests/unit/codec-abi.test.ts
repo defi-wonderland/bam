@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { encodeAbiParameters } from 'viem';
 
@@ -7,7 +8,7 @@ import type { Address, BAMMessage } from '../../src/types.js';
 import { decodeBatchABI, encodeBatchABI } from '../../src/codec/abi.js';
 
 const SIGNATURE_BYTES = 65;
-const FIXTURES_DIR = join(__dirname, '..', 'vectors', 'codec-abi');
+const FIXTURES_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'vectors', 'codec-abi');
 
 interface Fixture {
   name: string;
