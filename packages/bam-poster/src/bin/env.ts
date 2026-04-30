@@ -1,4 +1,6 @@
 import type { Address, Bytes32 } from 'bam-sdk';
+import { getDeployment } from 'bam-sdk';
+import { zeroAddress } from 'viem';
 
 import { clampReorgWindow } from '../submission/reorg-watcher.js';
 import { canonicalTag } from '../util/canonical.js';
@@ -12,6 +14,8 @@ export class EnvConfigError extends Error {
   readonly code = 'env_config_error';
 }
 
+export type BatchEncoding = 'binary' | 'abi';
+
 export interface ParsedEnv {
   allowlistedTags: Bytes32[];
   chainId: number;
@@ -22,7 +26,18 @@ export interface ParsedEnv {
   host: string;
   port: number;
   postgresUrl?: string;
-  decoderAddress?: Address;
+  /**
+   * Wire format for the on-chain batch payload.
+   * - `binary` (default): packed binary codec, decoded in the Reader's JS.
+   * - `abi`: ERC-8180 v1 ABI shape, decoded by the on-chain `ABIDecoder`.
+   */
+  batchEncoding: BatchEncoding;
+  /**
+   * Always set: `zeroAddress` for `batchEncoding === 'binary'`,
+   * the registry-resolved `ABIDecoder` for `'abi'`. Callers no longer
+   * need to default this with `?? zeroAddress`.
+   */
+  decoderAddress: Address;
   signatureRegistryAddress?: Address;
   /** Optional bearer-token auth for the HTTP surface. */
   authToken?: string;
@@ -73,8 +88,42 @@ export function parseEnv(env: NodeJS.ProcessEnv = process.env): ParsedEnv {
     throw new EnvConfigError('POSTER_BAM_CORE_ADDRESS must be a 20-byte hex address');
   }
 
-  const decoderAddress = optionalAddressEnv(env, 'POSTER_DECODER_ADDRESS');
   const signatureRegistryAddress = optionalAddressEnv(env, 'POSTER_SIGNATURE_REGISTRY');
+
+  // POSTER_BATCH_ENCODING controls the wire format for posted batches.
+  // Empty string is rejected (C-7) — use unset to take the default.
+  // Any non-canonical value (including `ABI`) is rejected — no aliasing.
+  const rawBatchEncoding = env.POSTER_BATCH_ENCODING;
+  let batchEncoding: BatchEncoding;
+  if (rawBatchEncoding === undefined) {
+    batchEncoding = 'binary';
+  } else if (rawBatchEncoding === '') {
+    throw new EnvConfigError(
+      'POSTER_BATCH_ENCODING is set to an empty string; unset it or use {binary|abi}'
+    );
+  } else if (rawBatchEncoding === 'binary' || rawBatchEncoding === 'abi') {
+    batchEncoding = rawBatchEncoding;
+  } else {
+    throw new EnvConfigError(
+      `POSTER_BATCH_ENCODING must be \"binary\" or \"abi\" (got \"${rawBatchEncoding}\")`
+    );
+  }
+
+  let decoderAddress: Address;
+  if (batchEncoding === 'binary') {
+    decoderAddress = zeroAddress;
+  } else {
+    // 'abi' — resolve from the deployments registry; fail closed when missing.
+    const deployment = getDeployment(chainId);
+    const entry = deployment?.contracts.ABIDecoder;
+    if (!entry) {
+      throw new EnvConfigError(
+        `POSTER_BATCH_ENCODING=abi requires an ABIDecoder entry for chainId ${chainId} ` +
+          `in packages/bam-contracts/deployments/${chainId}.json (none found)`
+      );
+    }
+    decoderAddress = entry.address as Address;
+  }
 
   const rpcUrl = requireEnv(env, 'POSTER_RPC_URL');
 
@@ -106,6 +155,7 @@ export function parseEnv(env: NodeJS.ProcessEnv = process.env): ParsedEnv {
     host,
     port,
     postgresUrl: env.POSTGRES_URL,
+    batchEncoding,
     decoderAddress,
     signatureRegistryAddress,
     authToken: env.POSTER_AUTH_TOKEN && env.POSTER_AUTH_TOKEN.length > 0

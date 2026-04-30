@@ -122,6 +122,12 @@ export {
 } from './batch.js';
 export type { EncodedBatch } from './batch.js';
 
+// ERC-8180 v1 ABI batch codec — reference shape for the on-chain ABIDecoder.
+export {
+  decodeBatchABI,
+  encodeBatchABI,
+} from './codec/abi.js';
+
 // Compression functions
 export {
   compress,

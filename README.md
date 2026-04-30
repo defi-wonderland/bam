@@ -108,6 +108,26 @@ import { getDeployment } from 'bam-sdk';
 const sepolia = getDeployment(11155111);
 ```
 
+## Poster operator knobs
+
+The `@bam/poster` service ingests application messages, packs them
+into blobs, and submits them to L1 via `registerBlobBatch`. Most of
+its env surface is required (chain ID, RPC URL, signer key — see
+`packages/bam-poster/README.md` for the full list); a single optional
+knob controls the wire format:
+
+- `POSTER_BATCH_ENCODING` — `{binary|abi}`. **Default: `binary`.**
+  Selects the wire format embedded in the blob and the `decoder` field
+  on the emitted `BlobBatchRegistered` event. `binary` uses BAM's
+  packed v2 codec, decoded in the Reader's JS (zero-address decoder).
+  `abi` uses the ERC-8180 v1 ABI shape, decoded on-chain by the
+  `ABIDecoder` registered in
+  `packages/bam-contracts/deployments/<chainId>.json` — the Poster
+  resolves the address at boot and fails closed with a stable
+  `EnvConfigError` if no entry exists for the configured chainId.
+  Casing is exact (`binary` / `abi`, no aliases); empty string is
+  rejected.
+
 ## Reader operator knobs
 
 The `bam-reader` service ingests historical L1 events and serves
