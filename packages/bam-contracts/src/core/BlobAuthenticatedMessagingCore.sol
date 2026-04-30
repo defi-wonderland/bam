@@ -11,6 +11,9 @@ import { IERC_BAM_Core } from "../interfaces/IERC_BAM_Core.sol";
 contract BlobAuthenticatedMessagingCore is IERC_BAM_Core {
     uint16 internal constant MAX_FIELD_ELEMENTS = 4096;
 
+    /// @notice Reverts when `registerBlobBatches` is called with an empty `calls` array.
+    error EmptyBatchArray();
+
     /// @inheritdoc IERC_BAM_Core
     function registerBlobBatch(
         uint256 blobIndex,
@@ -23,6 +26,23 @@ contract BlobAuthenticatedMessagingCore is IERC_BAM_Core {
         versionedHash = declareBlobSegment(blobIndex, startFE, endFE, contentTag);
 
         emit BlobBatchRegistered(versionedHash, msg.sender, contentTag, decoder, signatureRegistry);
+    }
+
+    /// @inheritdoc IERC_BAM_Core
+    function registerBlobBatches(BlobBatchCall[] calldata calls)
+        external
+        returns (bytes32[] memory versionedHashes)
+    {
+        uint256 len = calls.length;
+        if (len == 0) revert EmptyBatchArray();
+
+        versionedHashes = new bytes32[](len);
+        for (uint256 i = 0; i < len; i++) {
+            BlobBatchCall calldata c = calls[i];
+            bytes32 versionedHash = declareBlobSegment(c.blobIndex, c.startFE, c.endFE, c.contentTag);
+            versionedHashes[i] = versionedHash;
+            emit BlobBatchRegistered(versionedHash, msg.sender, c.contentTag, c.decoder, c.signatureRegistry);
+        }
     }
 
     /// @inheritdoc IERC_BAM_Core

@@ -214,6 +214,57 @@ export const BAM_CORE_ABI = [
   },
   {
     "type": "function",
+    "name": "registerBlobBatches",
+    "inputs": [
+      {
+        "name": "calls",
+        "type": "tuple[]",
+        "internalType": "struct IERC_BAM_Core.BlobBatchCall[]",
+        "components": [
+          {
+            "name": "blobIndex",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "startFE",
+            "type": "uint16",
+            "internalType": "uint16"
+          },
+          {
+            "name": "endFE",
+            "type": "uint16",
+            "internalType": "uint16"
+          },
+          {
+            "name": "contentTag",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "decoder",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "signatureRegistry",
+            "type": "address",
+            "internalType": "address"
+          }
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "name": "versionedHashes",
+        "type": "bytes32[]",
+        "internalType": "bytes32[]"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "registerCalldataBatch",
     "inputs": [
       {
@@ -356,6 +407,11 @@ export const BAM_CORE_ABI = [
       }
     ],
     "anonymous": false
+  },
+  {
+    "type": "error",
+    "name": "EmptyBatchArray",
+    "inputs": []
   },
   {
     "type": "error",

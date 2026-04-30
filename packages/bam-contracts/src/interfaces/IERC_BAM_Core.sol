@@ -81,4 +81,26 @@ interface IERC_BAM_Core is IERC_BSS {
         address decoder,
         address signatureRegistry
     ) external returns (bytes32 contentHash);
+
+    /// @notice One entry in a `registerBlobBatches` batch call.
+    /// @dev Mirrors `registerBlobBatch`'s arguments one-to-one.
+    struct BlobBatchCall {
+        uint256 blobIndex;
+        uint16 startFE;
+        uint16 endFE;
+        bytes32 contentTag;
+        address decoder;
+        address signatureRegistry;
+    }
+
+    /// @notice Register multiple blob batches atomically in a single transaction.
+    /// @dev Emits one `BlobBatchRegistered` event per entry. Each entry is processed
+    ///      with the same `BLOBHASH(blobIndex)` read and `declareBlobSegment` invariants
+    ///      as `registerBlobBatch`. Reverts on empty `calls`. One bad entry reverts the
+    ///      whole transaction.
+    /// @param calls            Array of `BlobBatchCall` entries to register.
+    /// @return versionedHashes The EIP-4844 versioned hash of each entry's blob, in order.
+    function registerBlobBatches(BlobBatchCall[] calldata calls)
+        external
+        returns (bytes32[] memory versionedHashes);
 }
