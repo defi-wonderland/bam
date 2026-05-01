@@ -21,6 +21,7 @@ interface StubOverrides {
   submittedBatches?: SubmittedBatch[];
   status?: Status;
   health?: Health;
+  getNextNonce?: (sender: Address) => Promise<bigint>;
 }
 
 function stubPoster(o: StubOverrides = {}): Poster {
@@ -36,6 +37,9 @@ function stubPoster(o: StubOverrides = {}): Poster {
     },
     async listSubmittedBatches() {
       return o.submittedBatches ?? [];
+    },
+    async getNextNonce(sender) {
+      return o.getNextNonce?.(sender) ?? Promise.resolve(0n);
     },
     async status() {
       return (
@@ -189,6 +193,75 @@ describe('HttpServer — GET surfaces', () => {
     });
     const res = await fetch(`${baseUrl}/health`);
     expect(res.status).toBe(503);
+  });
+});
+
+describe('HttpServer — /nonce/:sender', () => {
+  const SENDER = ('0x' + 'a1'.repeat(20)) as Address;
+
+  it('returns nextNonce as a string for a known sender', async () => {
+    const { baseUrl } = await newServer({
+      poster: stubPoster({
+        async getNextNonce(s) {
+          expect(s).toBe(SENDER);
+          return 42n;
+        },
+      }),
+    });
+    const res = await fetch(`${baseUrl}/nonce/${SENDER}`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { nextNonce: string };
+    expect(body.nextNonce).toBe('42');
+  });
+
+  it('returns "0" for a sender with no prior nonce', async () => {
+    const { baseUrl } = await newServer({ poster: stubPoster() });
+    const res = await fetch(`${baseUrl}/nonce/${SENDER}`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { nextNonce: string };
+    expect(body.nextNonce).toBe('0');
+  });
+
+  it('lower-cases sender before delegating', async () => {
+    const upper = ('0x' + 'AB'.repeat(20)) as Address;
+    let observed: Address | null = null;
+    const { baseUrl } = await newServer({
+      poster: stubPoster({
+        async getNextNonce(s) {
+          observed = s;
+          return 1n;
+        },
+      }),
+    });
+    const res = await fetch(`${baseUrl}/nonce/${upper}`);
+    expect(res.status).toBe(200);
+    expect(observed).toBe(upper.toLowerCase());
+  });
+
+  it('rejects malformed addresses with 400', async () => {
+    const { baseUrl } = await newServer({ poster: stubPoster() });
+    for (const bad of ['notanaddr', '0xshort', '0x' + 'gg'.repeat(20)]) {
+      const res = await fetch(`${baseUrl}/nonce/${bad}`);
+      expect(res.status).toBe(400);
+    }
+  });
+
+  it('rejects an empty trailing segment with 400', async () => {
+    const { baseUrl } = await newServer({ poster: stubPoster() });
+    const res = await fetch(`${baseUrl}/nonce/`);
+    expect(res.status).toBe(400);
+  });
+
+  it('a bare /nonce (no path-param) is a 404', async () => {
+    const { baseUrl } = await newServer({ poster: stubPoster() });
+    const res = await fetch(`${baseUrl}/nonce`);
+    expect(res.status).toBe(404);
+  });
+
+  it('extra path segments after the address are rejected', async () => {
+    const { baseUrl } = await newServer({ poster: stubPoster() });
+    const res = await fetch(`${baseUrl}/nonce/${SENDER}/foo`);
+    expect(res.status).toBe(400);
   });
 });
 
