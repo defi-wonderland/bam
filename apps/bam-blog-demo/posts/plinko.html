@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Plinko PIR tutorial</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <main>
+      <p class="back"><a href="/">← all posts</a></p>
+      <article>
+        <header>
+          <h1>Plinko PIR tutorial</h1>
+          <p class="date">2025-11-25</p>
+        </header>
+        <div class="prose">
+          <p>
+            One underrated form of privacy, that is not well satisfied by
+            ZK-SNARKs, traditional versions of FHE or other commonly talked
+            about methods, is <strong>private reads</strong>. Users want to
+            learn things from a large database, without revealing what
+            they're reading.
+          </p>
+          <p>
+            There is a category of privacy protocols that are directly
+            designed to solve this problem, called private information
+            retrieval (PIR). A server has a database D. A client has an
+            index <em>i</em>. The client sends the server a query, the
+            server replies back with an answer that allows the client to
+            reconstruct D[<em>i</em>], all without the server learning
+            anything about <em>i</em>.
+          </p>
+          <p class="excerpt-note">
+            <em
+              >Excerpt — full post:
+              <a
+                href="https://vitalik.eth.limo/general/2025/11/25/plinko.html"
+                >vitalik.eth.limo/general/2025/11/25/plinko.html</a
+              >.</em
+            >
+          </p>
+        </div>
+      </article>
+
+      <section class="comments-section">
+        <h2>Comments</h2>
+        <div id="comments" data-post-slug="plinko"></div>
+        <noscript>
+          <p class="no-js">
+            JavaScript is required to view or post comments. The article above
+            renders without it.
+          </p>
+        </noscript>
+      </section>
+    </main>
+    <script type="module" src="/comments.js"></script>
+  </body>
+</html>
