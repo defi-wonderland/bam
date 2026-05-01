@@ -39,6 +39,7 @@ function messageRow(overrides: Partial<MessageRow> = {}): MessageRow {
     messageHash: MHASH_1,
     status: 'pending',
     batchRef: null,
+    chainId: 1,
     ingestedAt: null,
     ingestSeq: null,
     blockNumber: null,
@@ -144,6 +145,7 @@ export function runConformance(make: StoreFactory): void {
           contents: new Uint8Array(40),
           signature: new Uint8Array(65),
           messageHash: mhash,
+          chainId: 1,
           ingestedAt: 1_000,
           ingestSeq: 1,
         })
@@ -170,6 +172,7 @@ export function runConformance(make: StoreFactory): void {
           contents: new Uint8Array(40),
           signature: new Uint8Array(65),
           messageHash: mhash,
+          chainId: 1,
           ingestedAt: 1_000,
           ingestSeq: 1,
         })
@@ -224,7 +227,7 @@ export function runConformance(make: StoreFactory): void {
           })
         );
       });
-      await store.withTxn((txn) => txn.markReorged(TX_A, 5_000));
+      await store.withTxn((txn) => txn.markReorged(1, TX_A, 5_000));
       const batches = await store.withTxn((txn) => txn.listBatches({}));
       expect(batches[0].status).toBe('reorged');
       expect(batches[0].invalidatedAt).toBe(5_000);
@@ -289,7 +292,7 @@ export function runConformance(make: StoreFactory): void {
       const store = await newStore();
       await store.withTxn((txn) => txn.upsertBatch(batchRow({ status: 'pending_tx' })));
       await store.withTxn((txn) =>
-        txn.updateBatchStatus(TX_A, 'confirmed', { blockNumber: 42, txIndex: 3 })
+        txn.updateBatchStatus(1, TX_A, TAG_A, 'confirmed', { blockNumber: 42, txIndex: 3 })
       );
       const [b] = await store.withTxn((txn) => txn.listBatches({}));
       expect(b.status).toBe('confirmed');
@@ -303,7 +306,7 @@ export function runConformance(make: StoreFactory): void {
         txn.upsertBatch(batchRow({ status: 'confirmed', blockNumber: 10 }))
       );
       await store.withTxn((txn) =>
-        txn.updateBatchStatus(TX_A, 'reorged', { invalidatedAt: 9_000 })
+        txn.updateBatchStatus(1, TX_A, TAG_A, 'reorged', { invalidatedAt: 9_000 })
       );
       const [b] = await store.withTxn((txn) => txn.listBatches({}));
       expect(b.status).toBe('reorged');
@@ -425,8 +428,8 @@ export function runConformance(make: StoreFactory): void {
     });
   });
 
-  describe('getBatchByTxHash', () => {
-    it('returns the same row that listBatches would, and null for an unknown hash', async () => {
+  describe('getBatch / getBatchesByTxHash', () => {
+    it('returns the same row that listBatches would, and null for an unknown key', async () => {
       const store = await newStore();
       const snap: BatchMessageSnapshotEntry[] = [snapshotEntry()];
       await store.withTxn((txn) =>
@@ -446,21 +449,33 @@ export function runConformance(make: StoreFactory): void {
       const targetA = fromList.find((b) => b.txHash === TX_A) ?? null;
       expect(targetA).not.toBeNull();
 
-      const direct = await store.withTxn((txn) => txn.getBatchByTxHash(1, TX_A));
+      const direct = await store.withTxn((txn) => txn.getBatch(1, TX_A, TAG_A));
       expect(direct).not.toBeNull();
       expect(direct).toEqual(targetA);
 
       const missing = await store.withTxn((txn) =>
-        txn.getBatchByTxHash(1, ('0x' + 'ee'.repeat(32)) as Bytes32)
+        txn.getBatch(1, ('0x' + 'ee'.repeat(32)) as Bytes32, TAG_A)
       );
       expect(missing).toBeNull();
 
-      // Cross-chain isolation: same txHash on a different chainId
-      // must not return the row.
+      // Unknown contentTag returns null even though the txHash exists.
+      const unknownTag = await store.withTxn((txn) =>
+        txn.getBatch(1, TX_A, ('0x' + 'cc'.repeat(32)) as Bytes32)
+      );
+      expect(unknownTag).toBeNull();
+
+      // Cross-chain isolation: same (txHash, contentTag) on a different
+      // chainId must not return the row.
       const wrongChain = await store.withTxn((txn) =>
-        txn.getBatchByTxHash(999, TX_A)
+        txn.getBatch(999, TX_A, TAG_A)
       );
       expect(wrongChain).toBeNull();
+
+      // getBatchesByTxHash returns the single row when only one tag is
+      // present at this txHash.
+      const allAtA = await store.withTxn((txn) => txn.getBatchesByTxHash(1, TX_A));
+      expect(allAtA).toHaveLength(1);
+      expect(allAtA[0]).toEqual(targetA);
     });
   });
 
@@ -526,6 +541,7 @@ export function runConformance(make: StoreFactory): void {
           contents: new Uint8Array(40),
           signature: new Uint8Array(65),
           messageHash: MHASH_1,
+          chainId: 1,
           ingestedAt: 1_000,
           ingestSeq: 1,
         });

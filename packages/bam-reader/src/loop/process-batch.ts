@@ -22,7 +22,7 @@
  * `BatchRow` keyed by `txHash` (red-team C-6).
  */
 
-import { computeMessageHashForMessage, computeMessageId } from 'bam-sdk';
+import { computeMessageHashForMessage, computeMessageId, FIELD_ELEMENTS_PER_BLOB } from 'bam-sdk';
 import type { Address, BAMMessage, Bytes32 } from 'bam-sdk';
 import type {
   BamStore,
@@ -31,7 +31,7 @@ import type {
   MessageRow,
 } from 'bam-store';
 
-import { extractUsableBytes } from '../blob-fetch/extract.js';
+import { extractSegmentBytes } from '../blob-fetch/extract.js';
 import {
   fetchBlob as defaultFetchBlob,
   type BlobSourceLogger,
@@ -47,6 +47,7 @@ import type {
   VerifyReadContractClient,
 } from '../verify/on-chain-registry.js';
 import type { BlobBatchRegisteredEvent } from '../discovery/log-scan.js';
+import { validateSegmentRange } from '../discovery/validate-range.js';
 import type { ReaderCounters, ReaderEvent } from '../types.js';
 import type { FetchLike } from '../blob-fetch/beacon.js';
 
@@ -84,7 +85,7 @@ export interface ProcessBatchResult {
   /** Tx index for cursor accounting (the live-tail loop tracks max per block). */
   txIndex: number;
   blockNumber: number;
-  outcome: 'decoded' | 'unreachable' | 'decode_failed';
+  outcome: 'decoded' | 'unreachable' | 'decode_failed' | 'range_rejected';
   messagesWritten: number;
 }
 
@@ -146,6 +147,33 @@ export async function processBatch(
     contentTag: opts.event.contentTag,
   });
 
+  // Range-validation chokepoint (006-blob-packing-multi-tag, C-2).
+  // Reject malformed `(startFE, endFE)` from hostile or buggy submitters
+  // *before* any byte slice or store write. log + skip; no row written;
+  // no throw past this point. Events that don't carry an explicit range
+  // are treated as full-blob `[0, 4096)` (the pre-feature wire shape and
+  // the discovery-layer default).
+  const startFE = opts.event.startFE ?? 0;
+  const endFE = opts.event.endFE ?? FIELD_ELEMENTS_PER_BLOB;
+  const rangeCheck = validateSegmentRange(startFE, endFE);
+  if (!rangeCheck.ok) {
+    log?.({
+      kind: 'range_rejected',
+      txHash: opts.event.txHash,
+      versionedHash: opts.event.versionedHash,
+      startFE,
+      endFE,
+      reason: rangeCheck.reason,
+    });
+    opts.counters.skippedRange += 1;
+    return {
+      txIndex: opts.event.txIndex,
+      blockNumber: opts.event.blockNumber,
+      outcome: 'range_rejected',
+      messagesWritten: 0,
+    };
+  }
+
   const baseBatch: BatchRow = {
     txHash: opts.event.txHash,
     chainId: opts.chainId,
@@ -206,7 +234,10 @@ export async function processBatch(
   }
 
   // 2. Decode (dispatch by event.decoder).
-  const usableBytes = extractUsableBytes(blobBytes);
+  // Range-aware slice: take only `[startFE * 31, endFE * 31)` of the
+  // unpadded bytes; for events without an explicit range the chokepoint
+  // already defaulted to the full-blob `[0, 4096)`.
+  const usableBytes = extractSegmentBytes(blobBytes, startFE, endFE);
   let messages: BAMMessage[];
   let signatures: Uint8Array[];
   try {
@@ -321,6 +352,7 @@ export async function processBatch(
         messageHash: v.messageHash,
         status: 'confirmed',
         batchRef: opts.event.txHash,
+        chainId: opts.chainId,
         ingestedAt: null,
         ingestSeq: null,
         blockNumber: opts.event.blockNumber,
@@ -370,5 +402,6 @@ export function emptyCounters(): ReaderCounters {
     skippedVerify: 0,
     skippedConflict: 0,
     undecodable: 0,
+    skippedRange: 0,
   };
 }

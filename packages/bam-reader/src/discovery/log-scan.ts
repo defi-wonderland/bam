@@ -8,6 +8,7 @@
  * functionally equivalent to passing nothing (no filter).
  */
 
+import { FIELD_ELEMENTS_PER_BLOB } from 'bam-sdk';
 import type { Address, Bytes32 } from 'bam-sdk';
 
 export const BLOB_BATCH_REGISTERED_EVENT = {
@@ -19,6 +20,28 @@ export const BLOB_BATCH_REGISTERED_EVENT = {
     { name: 'contentTag', type: 'bytes32', indexed: true },
     { name: 'decoder', type: 'address', indexed: false },
     { name: 'signatureRegistry', type: 'address', indexed: false },
+  ],
+  anonymous: false,
+} as const;
+
+/**
+ * Sibling event emitted by `declareBlobSegment` (the inner ERC-BSS hop
+ * inside `registerBlobBatch` / `registerBlobBatches`). Carries the per-
+ * tag `(startFE, endFE)` that `BlobBatchRegistered` does not.
+ *
+ * The Reader fetches both events for every scan range and joins them
+ * by `(txHash, contentTag)` so that a packed multi-segment blob slices
+ * to the correct per-tag bytes before decode.
+ */
+export const BLOB_SEGMENT_DECLARED_EVENT = {
+  type: 'event',
+  name: 'BlobSegmentDeclared',
+  inputs: [
+    { name: 'versionedHash', type: 'bytes32', indexed: true },
+    { name: 'declarer', type: 'address', indexed: true },
+    { name: 'startFE', type: 'uint16', indexed: false },
+    { name: 'endFE', type: 'uint16', indexed: false },
+    { name: 'contentTag', type: 'bytes32', indexed: true },
   ],
   anonymous: false,
 } as const;
@@ -37,30 +60,71 @@ export interface BlobBatchRegisteredEvent {
   contentTag: Bytes32;
   decoder: Address;
   signatureRegistry: Address;
+  /**
+   * Per-tag segment range, joined from the same-tx `BlobSegmentDeclared`
+   * event by `(txHash, contentTag)`. Optional: defaults to the full-blob
+   * range `[0, FIELD_ELEMENTS_PER_BLOB)` when no matching segment event
+   * is observed in the same range (pre-feature on-chain history; or a
+   * caller that has not migrated to the dual-event scanner). Range
+   * validation (`validateSegmentRange`) is the chokepoint that rejects
+   * malformed inputs before any byte slicing or store write.
+   */
+  startFE?: number;
+  endFE?: number;
 }
 
+/** Common log envelope shared by both event types. */
+interface ScannerLogEnvelope {
+  blockNumber: bigint | number;
+  transactionIndex: bigint | number;
+  logIndex: bigint | number;
+  transactionHash: Bytes32;
+}
+
+export type ScannerBatchLog = ScannerLogEnvelope & {
+  eventName: 'BlobBatchRegistered';
+  args: {
+    versionedHash: Bytes32;
+    submitter: Address;
+    contentTag: Bytes32;
+    decoder: Address;
+    signatureRegistry: Address;
+  };
+};
+
+export type ScannerSegmentLog = ScannerLogEnvelope & {
+  eventName: 'BlobSegmentDeclared';
+  args: {
+    versionedHash: Bytes32;
+    declarer: Address;
+    startFE: number;
+    endFE: number;
+    contentTag: Bytes32;
+  };
+};
+
+export type ScannerLog = ScannerBatchLog | ScannerSegmentLog;
+
+/**
+ * Combined `eth_getLogs` adapter. The scanner asks for both event
+ * types in one round-trip — providers OR the topic[0] filter
+ * server-side, so a single call returns logs of either kind.
+ *
+ * Implementations must populate `eventName` so the scanner can
+ * discriminate without re-decoding by topic[0]. Tag filtering, when
+ * supplied, applies to topic[3] which is `contentTag` on both events.
+ */
 export interface LogScanClient {
   getLogs(args: {
     address: Address;
-    event: typeof BLOB_BATCH_REGISTERED_EVENT;
+    events: readonly [
+      typeof BLOB_BATCH_REGISTERED_EVENT,
+      typeof BLOB_SEGMENT_DECLARED_EVENT,
+    ];
     args?: { contentTag?: readonly Bytes32[] };
     fromBlock: bigint;
     toBlock: bigint;
-  }): Promise<
-    Array<{
-      blockNumber: bigint | number;
-      transactionIndex: bigint | number;
-      logIndex: bigint | number;
-      transactionHash: Bytes32;
-      args: {
-        versionedHash: Bytes32;
-        submitter: Address;
-        contentTag: Bytes32;
-        decoder: Address;
-        signatureRegistry: Address;
-      };
-    }>
-  >;
+  }): Promise<ScannerLog[]>;
 }
 
 export interface ScanLogsOptions {
@@ -113,6 +177,109 @@ function isRangeTooLargeError(err: unknown): boolean {
   return RANGE_TOO_LARGE_PATTERNS.some((re) => re.test(msg));
 }
 
+/**
+ * Pair each `BlobBatchRegistered` log with its corresponding
+ * `BlobSegmentDeclared` log, scoped to the same transaction.
+ *
+ * The BAM Core contract emits the two as a tightly-coupled pair inside
+ * `registerBlobBatch(es)`: BSD first (from the inner `declareBlobSegment`
+ * hop), then BBR. Within a single tx, the n-th BBR's range is carried by
+ * the most recent BSD — preceding the BBR in log order — that has not
+ * already been claimed by an earlier BBR and matches on
+ * `(versionedHash, contentTag)`.
+ *
+ * Walking by `logIndex` and matching most-recent-first (LIFO) is what
+ * makes this robust against hostile injections:
+ *
+ *   - `declareBlobSegment` is publicly callable on BAM Core. A
+ *     multicall tx could emit a "rogue" BSD outside any
+ *     `registerBlobBatch(es)` frame.
+ *   - A leading rogue BSD followed by a legitimate BSD→BBR pair would
+ *     fool a content-keyed last-wins join into pointing the BBR at the
+ *     rogue range. Positional LIFO pairing claims the legitimate BSD
+ *     first; the rogue BSD is left unconsumed and ignored.
+ *   - A trailing rogue BSD (with no following BBR) is similarly
+ *     ignored.
+ *   - `registerBlobBatches([{tagA, A}, {tagA, B}])` with a duplicate
+ *     tag emits BSD_A→BBR_A→BSD_B→BBR_B; each BBR claims its own BSD
+ *     by recency. (The Poster's aggregator never produces such a pack
+ *     — but the contract permits it.)
+ *
+ * Returns a per-BBR-index → range map; absent entries fall back to the
+ * full-blob default in the caller.
+ */
+function pairSegmentRanges(
+  batchLogs: readonly ScannerBatchLog[],
+  segmentLogs: readonly ScannerSegmentLog[]
+): Map<number, { startFE: number; endFE: number }> {
+  // Common case (pre-feature on-chain history; stub clients): no
+  // segment events to pair, every BBR falls back to the default range.
+  if (segmentLogs.length === 0) {
+    return new Map();
+  }
+
+  // Pre-lowercase BSD comparison fields once at push time; the LIFO
+  // match below scans the pending stack and would otherwise lowercase
+  // them per BBR per pending entry.
+  interface PendingBSD {
+    log: ScannerSegmentLog;
+    vhLower: string;
+    tagLower: string;
+  }
+  type TxItem =
+    | { kind: 'bbr'; idx: number; logIndex: number; log: ScannerBatchLog }
+    | { kind: 'bsd'; logIndex: number; bsd: PendingBSD };
+
+  const byTx = new Map<string, TxItem[]>();
+  for (let i = 0; i < batchLogs.length; i++) {
+    const log = batchLogs[i]!;
+    const key = log.transactionHash.toLowerCase();
+    const arr = byTx.get(key) ?? [];
+    arr.push({ kind: 'bbr', idx: i, logIndex: toNumber(log.logIndex), log });
+    byTx.set(key, arr);
+  }
+  for (const log of segmentLogs) {
+    const key = log.transactionHash.toLowerCase();
+    const arr = byTx.get(key) ?? [];
+    arr.push({
+      kind: 'bsd',
+      logIndex: toNumber(log.logIndex),
+      bsd: {
+        log,
+        vhLower: log.args.versionedHash.toLowerCase(),
+        tagLower: log.args.contentTag.toLowerCase(),
+      },
+    });
+    byTx.set(key, arr);
+  }
+
+  const result = new Map<number, { startFE: number; endFE: number }>();
+  for (const items of byTx.values()) {
+    items.sort((a, b) => a.logIndex - b.logIndex);
+    const pending: PendingBSD[] = [];
+    for (const item of items) {
+      if (item.kind === 'bsd') {
+        pending.push(item.bsd);
+        continue;
+      }
+      const targetVH = item.log.args.versionedHash.toLowerCase();
+      const targetTag = item.log.args.contentTag.toLowerCase();
+      for (let j = pending.length - 1; j >= 0; j--) {
+        const bsd = pending[j]!;
+        if (bsd.vhLower === targetVH && bsd.tagLower === targetTag) {
+          result.set(item.idx, {
+            startFE: Number(bsd.log.args.startFE),
+            endFE: Number(bsd.log.args.endFE),
+          });
+          pending.splice(j, 1);
+          break;
+        }
+      }
+    }
+  }
+  return result;
+}
+
 async function fetchRange(
   opts: ScanLogsOptions,
   fromBlock: number,
@@ -121,25 +288,53 @@ async function fetchRange(
   const filterTags =
     opts.contentTags && opts.contentTags.length > 0 ? opts.contentTags : undefined;
 
-  const raw = await opts.publicClient.getLogs({
+  // One combined `eth_getLogs` call returns both event types via the
+  // OR'd topic[0] filter the provider applies server-side.
+  // `BlobBatchRegistered` carries the decoder/registry plumbing;
+  // `BlobSegmentDeclared` carries the per-tag `(startFE, endFE)`
+  // range needed to slice a packed multi-segment blob. They are paired
+  // below per-tx by log-order with LIFO matching on
+  // `(versionedHash, contentTag)` — robust against duplicates and
+  // same-tx hostile `declareBlobSegment` injections.
+  const logs = await opts.publicClient.getLogs({
     address: opts.bamCoreAddress,
-    event: BLOB_BATCH_REGISTERED_EVENT,
+    events: [BLOB_BATCH_REGISTERED_EVENT, BLOB_SEGMENT_DECLARED_EVENT],
     args: filterTags ? { contentTag: filterTags } : undefined,
     fromBlock: BigInt(fromBlock),
     toBlock: BigInt(toBlock),
   });
 
-  return raw.map((log) => ({
-    blockNumber: toNumber(log.blockNumber),
-    txIndex: toNumber(log.transactionIndex),
-    logIndex: toNumber(log.logIndex),
-    txHash: log.transactionHash,
-    versionedHash: log.args.versionedHash,
-    submitter: log.args.submitter,
-    contentTag: log.args.contentTag,
-    decoder: log.args.decoder,
-    signatureRegistry: log.args.signatureRegistry,
-  }));
+  const batchLogs: ScannerBatchLog[] = [];
+  const segmentLogs: ScannerSegmentLog[] = [];
+  for (const log of logs) {
+    if (log.eventName === 'BlobBatchRegistered') {
+      batchLogs.push(log);
+    } else {
+      segmentLogs.push(log);
+    }
+  }
+
+  const ranges = pairSegmentRanges(batchLogs, segmentLogs);
+
+  return batchLogs.map((log, i) => {
+    const range = ranges.get(i);
+    return {
+      blockNumber: toNumber(log.blockNumber),
+      txIndex: toNumber(log.transactionIndex),
+      logIndex: toNumber(log.logIndex),
+      txHash: log.transactionHash,
+      versionedHash: log.args.versionedHash,
+      submitter: log.args.submitter,
+      contentTag: log.args.contentTag,
+      decoder: log.args.decoder,
+      signatureRegistry: log.args.signatureRegistry,
+      // Pre-feature history / stub clients with no BSD: fall back to
+      // the full-blob default. `validateSegmentRange` is the
+      // downstream chokepoint.
+      startFE: range?.startFE ?? 0,
+      endFE: range?.endFE ?? FIELD_ELEMENTS_PER_BLOB,
+    };
+  });
 }
 
 /**

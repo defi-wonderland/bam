@@ -81,6 +81,38 @@ export function encodeBatchABI(messages: BAMMessage[], signatures: Uint8Array[])
 }
 
 /**
+ * Estimate the byte length `encodeBatchABI(messages, signatures)` will
+ * produce, without actually allocating the encoded payload. The math
+ * tracks viem's ABI head/tail layout for `(Message[], bytes)`:
+ *
+ *   - 64 B for the two top-level head offsets (Message[], bytes)
+ *   - 32 B Message[] length prefix + 32·n B per-tuple offsets
+ *   - 96 B per tuple head (sender + nonce + contents-offset)
+ *   - 32 B tuple-tail length prefix + ⌈contents/32⌉·32 B padded bytes
+ *   - 32 B signatureData length prefix + ⌈65n/32⌉·32 B padded sig bytes
+ *
+ * Returns 0 for an empty `messages` array — `encodeBatchABI` returns
+ * an empty buffer in that case, and the policy's greedy walk needs the
+ * estimator to agree (otherwise capacity gating drifts open-loop and
+ * produces selections that won't fit once encoded).
+ */
+export function estimateBatchSizeABI(messages: BAMMessage[]): number {
+  if (messages.length === 0) return 0;
+  const n = messages.length;
+  let total = 64; // 2 head offsets (Message[], bytes)
+  total += 32; // Message[] length prefix
+  total += 32 * n; // per-tuple offsets (each tuple is dynamic via bytes contents)
+  for (const m of messages) {
+    total += 96; // tuple head: address + uint64 + contents-offset
+    total += 32; // tuple-tail: contents length prefix
+    total += Math.ceil(m.contents.length / 32) * 32; // padded contents
+  }
+  total += 32; // signatureData length prefix
+  total += Math.ceil((SIGNATURE_BYTES * n) / 32) * 32; // padded sigs
+  return total;
+}
+
+/**
  * Decode a v1 ABI batch payload into messages + parallel ECDSA signatures.
  *
  * Empty input returns `{ messages: [], signatures: [] }` (no throw).

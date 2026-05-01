@@ -5,7 +5,11 @@ import { describe, expect, it } from 'vitest';
 import { encodeAbiParameters } from 'viem';
 
 import type { Address, BAMMessage } from '../../src/types.js';
-import { decodeBatchABI, encodeBatchABI } from '../../src/codec/abi.js';
+import {
+  decodeBatchABI,
+  encodeBatchABI,
+  estimateBatchSizeABI,
+} from '../../src/codec/abi.js';
 
 const SIGNATURE_BYTES = 65;
 const FIXTURES_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'vectors', 'codec-abi');
@@ -272,5 +276,48 @@ describe('encodeBatchABI / decodeBatchABI (fixture-driven)', () => {
       }
       expect(() => decodeBatchABI(wire)).toThrow(RangeError);
     });
+  });
+});
+
+describe('estimateBatchSizeABI agrees with encodeBatchABI', () => {
+  // Property: for any (messages, signatures) the estimator returns
+  // exactly `encodeBatchABI(messages, signatures).length`. Drift here
+  // produces capacity-gating mismatches in the Poster's policy
+  // (qodo PR #40 #2).
+
+  it('returns 0 for the empty batch', () => {
+    expect(estimateBatchSizeABI([])).toBe(0);
+    expect(encodeBatchABI([], []).length).toBe(0);
+  });
+
+  it('matches encoder length on every committed fixture', () => {
+    const fixtureNames = ['empty', 'one-message', 'four-messages', 'two-fifty-six-messages'];
+    for (const name of fixtureNames) {
+      const f = loadFixture(name);
+      const { messages, signatures } = fixtureToInput(f);
+      const encoded = encodeBatchABI(messages, signatures);
+      expect(estimateBatchSizeABI(messages)).toBe(encoded.length);
+    }
+  });
+
+  it('matches encoder length across a sweep of contents-byte patterns', () => {
+    // Sweep contents lengths around the 32-byte word boundary plus a
+    // few large values — those are the inputs most likely to expose
+    // an off-by-one in the ⌈len/32⌉ padding math.
+    const lengths = [0, 1, 31, 32, 33, 63, 64, 65, 95, 96, 127, 128, 200, 1000, 10_000];
+    for (const len of lengths) {
+      const { message, signature } = makePair(len % 250 + 1, len);
+      const encoded = encodeBatchABI([message], [signature]);
+      expect(estimateBatchSizeABI([message])).toBe(encoded.length);
+    }
+  });
+
+  it('matches encoder length for variable-shape multi-message batches', () => {
+    // Two messages with mismatched contents lengths to ensure the
+    // estimator handles a heterogeneous tuple-tail layout.
+    const { message: m1, signature: s1 } = makePair(7, 33);
+    const { message: m2, signature: s2 } = makePair(11, 200);
+    const encoded = encodeBatchABI([m1, m2], [s1, s2]);
+    expect(estimateBatchSizeABI([m1, m2])).toBe(encoded.length);
   });
 });

@@ -19,6 +19,8 @@ export interface StoreTxnPendingRow {
   contents: Uint8Array;
   signature: Uint8Array;
   messageHash: Bytes32;
+  /** Chain this Poster instance is wired to. Required so `markReorged` can chain-scope the cascade. */
+  chainId: number;
   ingestedAt: number;
   ingestSeq: number;
 }
@@ -62,8 +64,27 @@ export interface StoreTxn {
   markSubmitted(keys: PendingKey[], batchRef: Bytes32): Promise<void>;
   /** Reader-side: idempotent upsert of an observed message keyed by (author, nonce). */
   upsertObserved(row: MessageRow): Promise<void>;
-  /** Poster-side or Reader-side: mark a submitted/confirmed row as reorged. */
-  markReorged(txHash: Bytes32, invalidatedAt: number): Promise<void>;
+  /**
+   * Poster-side or Reader-side: mark a submitted/confirmed row as reorged.
+   *
+   * Composite-key semantics: a packed transaction can produce multiple
+   * `BatchRow`s under the same `(chainId, txHash)` — one per
+   * `contentTag` — because the BAM Core's `registerBlobBatches`
+   * entrypoint emits one `BlobBatchRegistered` event per packed entry.
+   * `markReorged` MUST transition every per-tag row at
+   * `(chainId, txHash)` in a single store transaction, including the
+   * cascading `messages.batch_ref` update. Throw if no row matches.
+   *
+   * Chain-scoped to stay symmetric with `getBatch` / `getBatchesByTxHash`
+   * and to avoid an accidental cross-chain hit on the (vanishingly
+   * unlikely but theoretically possible) shared-`txHash` case once the
+   * store hosts more than one chain.
+   */
+  markReorged(
+    chainId: number,
+    txHash: Bytes32,
+    invalidatedAt: number
+  ): Promise<void>;
 
   // ── unified-schema reads ──────────────────────────────────────────────
   listMessages(query: MessagesQuery): Promise<MessageRow[]>;
@@ -79,8 +100,17 @@ export interface StoreTxn {
    * second writer's nulls don't overwrite the first writer's values.
    */
   upsertBatch(row: BatchRow): Promise<void>;
+  /**
+   * Single-row update keyed by the full composite PK
+   * `(chainId, txHash, contentTag)`. After the multi-tag packing
+   * feature widened the PK, filtering by `txHash` alone would mutate
+   * every per-tag row sharing a packed transaction hash; callers
+   * MUST pass the full key to scope the update to one row.
+   */
   updateBatchStatus(
+    chainId: number,
     txHash: Bytes32,
+    contentTag: Bytes32,
     status: BatchStatus,
     opts?: {
       blockNumber?: number | null;
@@ -90,7 +120,18 @@ export interface StoreTxn {
     }
   ): Promise<void>;
   listBatches(query: BatchesQuery): Promise<BatchRow[]>;
-  getBatchByTxHash(chainId: number, txHash: Bytes32): Promise<BatchRow | null>;
+  /**
+   * Single-row lookup by composite key `(chainId, txHash, contentTag)`.
+   * Returns null if no matching row exists.
+   */
+  getBatch(chainId: number, txHash: Bytes32, contentTag: Bytes32): Promise<BatchRow | null>;
+  /**
+   * All `BatchRow`s under a given `(chainId, txHash)`. After the
+   * multi-tag packing feature, a packed transaction emits N events for
+   * N tags and lands as N distinct rows; callers that don't have a
+   * specific `contentTag` in hand use this accessor.
+   */
+  getBatchesByTxHash(chainId: number, txHash: Bytes32): Promise<BatchRow[]>;
 
   // ── reader cursor ────────────────────────────────────────────────────
   getCursor(chainId: number): Promise<ReaderCursorRow | null>;
@@ -153,6 +194,13 @@ export interface MessageRow {
   status: MessageStatus;
   /** FK to `batches.tx_hash`. Null until the message is submitted or observed. */
   batchRef: Bytes32 | null;
+  /**
+   * Chain this row belongs to. `null` only on rows written before the
+   * `chain_id` column was added (single-chain legacy stores); the app
+   * always populates it on new writes. `markReorged` uses this to
+   * chain-scope the cascade.
+   */
+  chainId: number | null;
   /** Poster-side ingest time, ms since epoch. Null on Reader-observed rows. */
   ingestedAt: number | null;
   /** Poster-side per-tag ingest counter. Null on Reader-observed rows. */
@@ -187,6 +235,13 @@ export interface BatchMessageSnapshotEntry {
  * mutations (reorg + re-enqueue + resubmit), which a single
  * `messages.batch_ref` column cannot represent. Carries a `chainId` so
  * a future multi-chain Reader operates without a schema change.
+ *
+ * **Composite primary key.** Rows are keyed by
+ * `(chainId, txHash, contentTag)`. After the multi-tag blob-packing
+ * feature, a single packed L1 transaction can register N per-tag
+ * batches via `registerBlobBatches`, emitting N `BlobBatchRegistered`
+ * events that share `txHash` but differ in `contentTag`. Each event
+ * lands as one row.
  */
 export interface BatchRow {
   txHash: Bytes32;

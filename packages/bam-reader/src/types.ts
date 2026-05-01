@@ -79,6 +79,12 @@ export interface ReaderCounters {
   skippedConflict: number;
   /** Batches whose blob bytes could not be reached (permanent classification). */
   undecodable: number;
+  /**
+   * `BlobBatchRegistered` events whose `(startFE, endFE)` failed
+   * range validation (`0 ≤ startFE < endFE ≤ 4096`, ABI uint32). Each
+   * increment corresponds to a log + skip; no `BatchRow` is written.
+   */
+  skippedRange: number;
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -116,6 +122,14 @@ export type ReaderEvent =
     }
   | { kind: 'cursor_advanced'; chainId: number; blockNumber: number }
   | { kind: 'reorg_detected'; txHash: Bytes32 }
+  | {
+      kind: 'range_rejected';
+      txHash: Bytes32;
+      versionedHash: Bytes32;
+      startFE: number;
+      endFE: number;
+      reason: string;
+    }
   | { kind: 'live_tail_tick_failed'; error: string }
   | {
       kind: 'backfill_progress';

@@ -63,7 +63,11 @@ export {
   clampReorgWindow,
   type BlockSource,
 } from './submission/reorg-watcher.js';
-export type { BuildAndSubmit, SubmitOutcome } from './submission/types.js';
+export type {
+  BuildAndSubmitMulti,
+  PackedSubmitIncludedEntry,
+  PackedSubmitOutcome,
+} from './submission/types.js';
 export type { ReconcileRpcClient } from './startup/reconcile.js';
 export type { StatusRpcReader } from './surfaces/status.js';
 export { HttpServer } from './http/server.js';

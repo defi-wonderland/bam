@@ -80,6 +80,7 @@ interface RawMessage {
   messageId: string | null;
   status: string;
   batchRef: string | null;
+  chainId: number | null;
   ingestedAt: number | null;
   ingestSeq: number | null;
   blockNumber: number | null;
@@ -115,6 +116,7 @@ function mapMessage(raw: RawMessage): MessageRow {
     messageHash: raw.messageHash as Bytes32,
     status: raw.status as MessageStatus,
     batchRef: raw.batchRef as Bytes32 | null,
+    chainId: raw.chainId,
     ingestedAt: raw.ingestedAt,
     ingestSeq: raw.ingestSeq,
     blockNumber: raw.blockNumber,
@@ -143,11 +145,12 @@ function mapBatch(raw: RawBatch): BatchRow {
 }
 
 function mapPending(raw: RawMessage): StoreTxnPendingRow {
-  // `insertPending` always writes ingestedAt + ingestSeq, but the columns
-  // are nullable to accommodate observed-only rows that never went through
-  // the pending pool. A pending row missing either is a write-path bug,
-  // not a state we should silently coerce to 0.
-  if (raw.ingestedAt === null || raw.ingestSeq === null) {
+  // `insertPending` always writes ingestedAt + ingestSeq + chainId,
+  // but those columns are nullable to accommodate observed-only rows
+  // (no ingest metadata) and legacy rows from before chain_id existed.
+  // A pending row missing any of them is a write-path bug, not a state
+  // we should silently coerce to 0.
+  if (raw.ingestedAt === null || raw.ingestSeq === null || raw.chainId === null) {
     throw new Error(
       `mapPending: pending row (${raw.author}, ${raw.nonce}) has null ingest metadata`
     );
@@ -159,6 +162,7 @@ function mapPending(raw: RawMessage): StoreTxnPendingRow {
     contents: asUint8(raw.contents),
     signature: asUint8(raw.signature),
     messageHash: raw.messageHash as Bytes32,
+    chainId: raw.chainId,
     ingestedAt: raw.ingestedAt,
     ingestSeq: raw.ingestSeq,
   };
@@ -300,6 +304,7 @@ function makeTxn(tx: DrizzleDb): StoreTxn {
         messageId: null,
         status: 'pending',
         batchRef: null,
+        chainId: row.chainId,
         ingestedAt: row.ingestedAt,
         ingestSeq: row.ingestSeq,
         blockNumber: null,
@@ -461,12 +466,13 @@ function makeTxn(tx: DrizzleDb): StoreTxn {
       await tx.execute(sql`
         INSERT INTO messages
           (author, nonce, content_tag, contents, signature, message_hash,
-           message_id, status, batch_ref, ingested_at, ingest_seq,
+           message_id, status, batch_ref, chain_id, ingested_at, ingest_seq,
            block_number, tx_index, message_index_within_batch)
         VALUES (${author}, ${nonce}, ${row.contentTag},
                 ${row.contents}, ${row.signature},
                 ${row.messageHash}, ${row.messageId}, ${row.status},
-                ${row.batchRef}, ${row.ingestedAt}, ${row.ingestSeq},
+                ${row.batchRef}, ${row.chainId},
+                ${row.ingestedAt}, ${row.ingestSeq},
                 ${row.blockNumber}, ${row.txIndex},
                 ${row.messageIndexWithinBatch})
         ON CONFLICT (author, nonce) DO UPDATE SET
@@ -477,6 +483,7 @@ function makeTxn(tx: DrizzleDb): StoreTxn {
           message_id                 = EXCLUDED.message_id,
           status                     = EXCLUDED.status,
           batch_ref                  = EXCLUDED.batch_ref,
+          chain_id                   = EXCLUDED.chain_id,
           ingested_at                = EXCLUDED.ingested_at,
           ingest_seq                 = EXCLUDED.ingest_seq,
           block_number               = EXCLUDED.block_number,
@@ -485,18 +492,38 @@ function makeTxn(tx: DrizzleDb): StoreTxn {
       `);
     },
 
-    async markReorged(txHash: Bytes32, invalidatedAt: number): Promise<void> {
+    async markReorged(
+      chainId: number,
+      txHash: Bytes32,
+      invalidatedAt: number
+    ): Promise<void> {
+      // A packed transaction produces N rows under the same
+      // `(chain_id, tx_hash)` (one per `content_tag`); a single
+      // statement transitions all of them.
       const res = await tx
         .update(batchesT)
         .set({ status: 'reorged', invalidatedAt })
-        .where(eq(batchesT.txHash, txHash));
+        .where(and(eq(batchesT.chainId, chainId), eq(batchesT.txHash, txHash)));
       if (execRowCount(res) === 0) {
-        throw new Error(`markReorged: no batch for tx_hash=${txHash}`);
+        throw new Error(
+          `markReorged: no batch for chain_id=${chainId} tx_hash=${txHash}`
+        );
       }
+      // Chain-scope the cascade so a (vanishingly unlikely) shared
+      // `txHash` across chains can't bleed reorg state across them.
+      // Legacy rows from before `chain_id` was added carry NULL and
+      // do not match — they belong to a single-chain era and are not
+      // a reorg target anyway.
       await tx
         .update(messagesT)
         .set({ status: 'reorged' })
-        .where(and(eq(messagesT.batchRef, txHash), eq(messagesT.status, 'confirmed')));
+        .where(
+          and(
+            eq(messagesT.batchRef, txHash),
+            eq(messagesT.chainId, chainId),
+            eq(messagesT.status, 'confirmed')
+          )
+        );
     },
 
     // ── unified-schema reads ─────────────────────────────────────────
@@ -571,9 +598,7 @@ function makeTxn(tx: DrizzleDb): StoreTxn {
                 ${row.replacedByTxHash}, ${row.submittedAt},
                 ${row.invalidatedAt}, ${snapshotJson},
                 ${submitter}, ${row.l1IncludedAtUnixSec})
-        ON CONFLICT (tx_hash) DO UPDATE SET
-          chain_id                = EXCLUDED.chain_id,
-          content_tag             = EXCLUDED.content_tag,
+        ON CONFLICT (chain_id, tx_hash, content_tag) DO UPDATE SET
           blob_versioned_hash     = EXCLUDED.blob_versioned_hash,
           batch_content_hash      = EXCLUDED.batch_content_hash,
           block_number            = EXCLUDED.block_number,
@@ -592,7 +617,9 @@ function makeTxn(tx: DrizzleDb): StoreTxn {
     },
 
     async updateBatchStatus(
+      chainId: number,
       txHash: Bytes32,
+      contentTag: Bytes32,
       status: BatchStatus,
       opts?: {
         blockNumber?: number | null;
@@ -606,21 +633,51 @@ function makeTxn(tx: DrizzleDb): StoreTxn {
       if (opts?.txIndex !== undefined) set.txIndex = opts.txIndex;
       if (opts?.replacedByTxHash !== undefined) set.replacedByTxHash = opts.replacedByTxHash;
       if (opts?.invalidatedAt !== undefined) set.invalidatedAt = opts.invalidatedAt;
-      const res = await tx.update(batchesT).set(set).where(eq(batchesT.txHash, txHash));
+      const res = await tx
+        .update(batchesT)
+        .set(set)
+        .where(
+          and(
+            eq(batchesT.chainId, chainId),
+            eq(batchesT.txHash, txHash),
+            eq(batchesT.contentTag, contentTag)
+          )
+        );
       if (execRowCount(res) === 0) {
-        throw new Error(`updateBatchStatus: no batch for tx_hash=${txHash}`);
+        throw new Error(
+          `updateBatchStatus: no batch for chain_id=${chainId} tx_hash=${txHash} content_tag=${contentTag}`
+        );
       }
     },
 
-    async getBatchByTxHash(
+    async getBatch(
       chainId: number,
-      txHash: Bytes32
+      txHash: Bytes32,
+      contentTag: Bytes32
     ): Promise<BatchRow | null> {
       const rows = await tx
         .select()
         .from(batchesT)
-        .where(and(eq(batchesT.chainId, chainId), eq(batchesT.txHash, txHash)));
+        .where(
+          and(
+            eq(batchesT.chainId, chainId),
+            eq(batchesT.txHash, txHash),
+            eq(batchesT.contentTag, contentTag)
+          )
+        );
       return rows[0] ? mapBatch(rows[0] as unknown as RawBatch) : null;
+    },
+
+    async getBatchesByTxHash(
+      chainId: number,
+      txHash: Bytes32
+    ): Promise<BatchRow[]> {
+      const rows = await tx
+        .select()
+        .from(batchesT)
+        .where(and(eq(batchesT.chainId, chainId), eq(batchesT.txHash, txHash)))
+        .orderBy(asc(batchesT.contentTag));
+      return rows.map((r) => mapBatch(r as unknown as RawBatch));
     },
 
     async listBatches(query: BatchesQuery): Promise<BatchRow[]> {

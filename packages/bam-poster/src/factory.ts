@@ -25,8 +25,8 @@ import {
 } from './ingest/size-bound.js';
 import { createMemoryStore } from 'bam-store';
 import { defaultBatchPolicy, DEFAULT_BLOB_CAPACITY_BYTES } from './policy/default.js';
-import { SubmissionLoop } from './submission/loop.js';
-import type { BuildAndSubmit } from './submission/types.js';
+import { AggregatorLoop } from './submission/aggregator-loop.js';
+import type { BuildAndSubmitMulti } from './submission/types.js';
 import { DEFAULT_BACKOFF } from './submission/backoff.js';
 import {
   ReorgWatcher,
@@ -55,12 +55,14 @@ const signerRegistry = new Set<Address>();
 
 export interface PosterFactoryExtras {
   /**
-   * Injection hook: the on-chain submission path. If absent, the
-   * Poster expects the caller to wire the real viem-backed submitter
-   * (see `src/submission/build-and-submit.ts`; not part of the core
-   * factory because it pulls the KZG trusted setup).
+   * Multi-tag (packed) submission path — the only on-chain submitter
+   * path after 006-blob-packing-multi-tag. Calls
+   * `registerBlobBatches`; single-tag rounds emit a one-element
+   * array. Not wired by `createPoster` itself because the real
+   * implementation pulls the KZG trusted setup at runtime
+   * (`buildAndSubmitWithViem` in `src/submission/build-and-submit.ts`).
    */
-  buildAndSubmit: BuildAndSubmit;
+  buildAndSubmitMulti: BuildAndSubmitMulti;
   /** Chain-ID + bytecode reconciler. */
   rpc: ReconcileRpcClient & StatusRpcReader & BlockSource;
 }
@@ -73,7 +75,8 @@ export interface PosterFactoryExtras {
  * `start()` (which would spawn autonomous workers).
  */
 export interface InternalPoster extends Poster {
-  _tickTag(tag: Bytes32): Promise<'idle' | 'success' | 'retry' | 'permanent' | undefined>;
+  /** Drive one cross-tag aggregator tick. */
+  _tickAggregator(): Promise<'idle' | 'success' | 'retry' | 'permanent'>;
   _tickReorgWatcher(): Promise<{ reorgedCount: number; keptCount: number }>;
   _started(): boolean;
   _stopped(): boolean;
@@ -81,6 +84,12 @@ export interface InternalPoster extends Poster {
 
 const DEFAULT_IDLE_POLL_MS = 1_000;
 const DEFAULT_REORG_POLL_MS = 12_000;
+/**
+ * Operator-visible packing-loss-streak warning threshold (T023). The
+ * `/health` surface flags any tag whose `packingLossStreak >=` this
+ * value as `warn: true`. Detection-only — no behavior change.
+ */
+export const DEFAULT_PACKING_LOSS_STREAK_WARN_THRESHOLD = 10;
 
 /**
  * Default logger — info/warn to stdout, error to stderr, same
@@ -102,9 +111,9 @@ const defaultLogger: PosterLogger = (level, message) => {
  * reconciliation (chain-ID + contract code) runs *before* any
  * submission loop is created; a mismatch throws synchronously.
  *
- * `start()` spawns autonomous per-tag submission workers + a
- * reorg-watcher worker; `stop()` cancels them and drains in-flight
- * ticks before closing the store.
+ * `start()` spawns the cross-tag aggregator worker + the reorg-
+ * watcher worker; `stop()` cancels them and drains in-flight ticks
+ * before closing the store.
  */
 export async function createPoster(
   config: PosterConfig,
@@ -142,6 +151,8 @@ export async function createPoster(
     const idlePollMs = config.idlePollMs ?? DEFAULT_IDLE_POLL_MS;
     const reorgPollMs = config.reorgPollMs ?? DEFAULT_REORG_POLL_MS;
     const logger: PosterLogger = config.logger ?? defaultLogger;
+    const packingLossWarnThreshold =
+      config.packingLossStreakWarnThreshold ?? DEFAULT_PACKING_LOSS_STREAK_WARN_THRESHOLD;
 
     // Canonicalize the configured allowlist once; downstream maps,
     // store queries, and comparisons all operate on this single
@@ -159,28 +170,9 @@ export async function createPoster(
       allowlistedTags,
       maxMessageSizeBytes: maxMessageSize,
       maxContentsSizeBytes: maxContentsSize,
+      chainId: config.chainId,
       now,
     });
-
-    // One submission loop per tag.
-    const loops = new Map<Bytes32, SubmissionLoop>();
-    for (const tag of allowlistedTags) {
-      loops.set(
-        tag,
-        new SubmissionLoop({
-          tag,
-          chainId: config.chainId,
-          store,
-          policy: batchPolicy,
-          blobCapacityBytes: blobCapacity,
-          buildAndSubmit: extras.buildAndSubmit,
-          backoff,
-          now,
-          reorgWindowBlocks: reorgWindow,
-          logger,
-        })
-      );
-    }
 
     const reorgWatcher = new ReorgWatcher({
       store,
@@ -190,37 +182,52 @@ export async function createPoster(
       now,
     });
 
-    // Per-tag workers + reorg watcher. Dormant until `start()` —
-    // tests driving ticks manually via InternalPoster never call
-    // `start()` and therefore never race with an autonomous worker.
-    const tagWorkers = new Map<Bytes32, WorkerTimer>();
-    for (const [tag, loop] of loops) {
-      tagWorkers.set(
-        tag,
-        new WorkerTimer(async () => {
-          const outcome = await loop.tick();
-          // Refresh the health latch on every tick so `health().since`
-          // reports when the non-ok epoch actually started, not when a
-          // consumer next happened to call `health()` (qodo review).
-          aggregateHealth();
-          switch (outcome) {
-            case 'idle':
-              return idlePollMs;
-            case 'success':
-              return 0; // immediate next round
-            case 'retry':
-              return loop.nextDelayMs();
-            case 'permanent':
-              return null; // stop the worker
-            default:
-              return idlePollMs;
-          }
-        })
-      );
-    }
+    // Top-level cross-tag aggregator. After 006-blob-packing-multi-tag
+    // this is the only submission path; single-tag rounds emit a
+    // one-element `registerBlobBatches` array.
+    const aggregatorLoop = new AggregatorLoop({
+      tags: allowlistedTags,
+      chainId: config.chainId,
+      store,
+      policy: batchPolicy,
+      blobCapacityBytes: blobCapacity,
+      buildAndSubmitMulti: extras.buildAndSubmitMulti,
+      backoff,
+      now,
+      reorgWindowBlocks: reorgWindow,
+      maxTagsPerPack: config.maxTagsPerPack,
+      capacityFEs: config.aggregatorCapacityFEs,
+      capacityBytes: config.aggregatorCapacityBytes,
+      encodeBatch: config.aggregatorEncodeBatch,
+      logger,
+    });
+
     const reorgWorker = new WorkerTimer(async () => {
       await reorgWatcher.tick();
       return reorgPollMs;
+    });
+
+    // Aggregator worker. Dormant until `start()` — tests driving
+    // ticks manually via InternalPoster never call `start()` and
+    // therefore never race with an autonomous worker.
+    const aggregatorWorker = new WorkerTimer(async () => {
+      const outcome = await aggregatorLoop.tick();
+      // Refresh the health latch on every tick so `health().since`
+      // reports when the non-ok epoch actually started, not when a
+      // consumer next happened to call `health()` (qodo review).
+      aggregateHealth();
+      switch (outcome) {
+        case 'idle':
+          return idlePollMs;
+        case 'success':
+          return 0;
+        case 'retry':
+          return aggregatorLoop.nextDelayMs();
+        case 'permanent':
+          return null;
+        default:
+          return idlePollMs;
+      }
     });
 
     let started = false;
@@ -238,11 +245,10 @@ export async function createPoster(
     }
 
     /**
-     * Collapse per-tag loop states into a single health snapshot.
-     * When any loop is non-ok we also surface a short reason so the
-     * `/health` consumer can tell what tripped (e.g. "tag
-     * 0xabc… has failed 7 consecutive submissions"). Strictly textual —
-     * no structured fields, no PII.
+     * Collapse the aggregator's state into a single health snapshot.
+     * Pulls reason text from the aggregator-level `permanentlyStopped`
+     * flag and backoff attempts so a `/health` consumer can tell what
+     * tripped without re-walking the loop internals.
      *
      * `nonOkSince` is latched at the first non-ok observation and
      * cleared when aggregate state returns to ok, so `since` reports
@@ -250,30 +256,19 @@ export async function createPoster(
      */
     let nonOkSince: Date | null = null;
     const aggregateHealth = (): HealthSnapshot => {
-      let result: HealthSnapshot = { state: 'ok' };
-      let worst: HealthState = 'ok';
-      let worstTag: Bytes32 | null = null;
-      let worstAttempts = 0;
-      for (const [tag, l] of loops) {
-        const s = l.healthState();
-        if (s === 'unhealthy') {
-          result = {
-            state: 'unhealthy',
-            reason: `tag ${tag} has failed ${l.attempts()} consecutive submissions`,
-          };
-          worst = 'unhealthy';
-          break;
-        }
-        if (s === 'degraded' && worst === 'ok') {
-          worst = 'degraded';
-          worstTag = tag;
-          worstAttempts = l.attempts();
-        }
-      }
-      if (worst === 'degraded' && worstTag !== null) {
+      const state = aggregatorLoop.healthState();
+      let result: HealthSnapshot = { state };
+      if (state === 'unhealthy') {
+        result = {
+          state: 'unhealthy',
+          reason: aggregatorLoop.isPermanentlyStopped()
+            ? 'aggregator PERMANENT failure — operator must intervene'
+            : `aggregator has failed ${aggregatorLoop.attempts()} consecutive submissions`,
+        };
+      } else if (state === 'degraded') {
         result = {
           state: 'degraded',
-          reason: `tag ${worstTag} has failed ${worstAttempts} consecutive submissions`,
+          reason: `aggregator has failed ${aggregatorLoop.attempts()} consecutive submissions`,
         };
       }
 
@@ -337,13 +332,25 @@ export async function createPoster(
           submissionState: snap.state,
           reason: snap.reason,
           since: snap.since,
+          aggregator: {
+            lastPackedTxHash: aggregatorLoop.lastPackedSnapshot().txHash,
+            lastPackedTagCount: aggregatorLoop.lastPackedSnapshot().tagCount,
+            permanentlyStopped: aggregatorLoop.isPermanentlyStopped(),
+            tags: aggregatorLoop.packingLossSnapshot().map((t) => ({
+              contentTag: t.contentTag,
+              pendingCount: t.pendingCount,
+              packingLossStreak: t.packingLossStreak,
+              lastIncludedAt: t.lastIncludedAt,
+              warn: t.packingLossStreak >= packingLossWarnThreshold,
+            })),
+          },
         });
       },
       async start(): Promise<void> {
         if (stopped) throw new Error('Poster: cannot start a stopped instance');
         if (started) return;
         started = true;
-        for (const worker of tagWorkers.values()) worker.start(0);
+        aggregatorWorker.start(0);
         reorgWorker.start(reorgPollMs);
       },
       async stop(): Promise<void> {
@@ -352,17 +359,14 @@ export async function createPoster(
         stopped = true;
         // Cancel timers + drain in-flight ticks before closing the
         // store out from under them.
-        const pending: Promise<void>[] = [];
-        for (const worker of tagWorkers.values()) pending.push(worker.stop());
-        pending.push(reorgWorker.stop());
-        await Promise.all(pending);
+        await Promise.all([aggregatorWorker.stop(), reorgWorker.stop()]);
         signerRegistry.delete(address);
         await store.close();
       },
 
       // ── InternalPoster hooks (test-only) ───────────────────────
-      async _tickTag(tag: Bytes32) {
-        return loops.get(canonicalTag(tag))?.tick();
+      async _tickAggregator() {
+        return aggregatorLoop.tick();
       },
       async _tickReorgWatcher() {
         return reorgWatcher.tick();

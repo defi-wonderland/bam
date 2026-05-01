@@ -22,6 +22,8 @@ import { LocalEcdsaSigner } from '../signer/local.js';
 import { createDbStore, createMemoryStore } from 'bam-store';
 import { StartupReconciliationError } from '../startup/reconcile.js';
 import { DEFAULT_MAX_MESSAGE_SIZE_BYTES } from '../ingest/size-bound.js';
+import { encodeBatchABI, estimateBatchSizeABI, type BAMMessage } from 'bam-sdk';
+import { defaultBatchPolicy } from '../policy/default.js';
 
 /**
  * Resolve + load a dotenv file so users don't have to `export` each
@@ -94,20 +96,43 @@ export async function runCli(): Promise<void> {
     store = await createMemoryStore();
   }
 
-  // Real on-chain submission via viem — the default `buildAndSubmit`
-  // consults `config.rpcUrl`, builds a blob tx, waits for inclusion,
-  // and returns the receipt. Not wired by `createPoster` itself because
-  // it pulls in the KZG trusted setup at runtime.
+  // Real on-chain submission via viem — `buildAndSubmitMulti`
+  // consults `config.rpcUrl`, builds a packed type-3 tx calling
+  // `registerBlobBatches`, waits for inclusion, and returns the
+  // receipt. Not wired by `createPoster` itself because it pulls in
+  // the KZG trusted setup at runtime.
   const { buildAndSubmitWithViem } = await import('../submission/build-and-submit.js');
   const viemPieces = await buildAndSubmitWithViem({
     rpcUrl: env.rpcUrl,
     chainId: env.chainId,
     bamCoreAddress: env.bamCoreAddress,
     signer,
-    batchEncoding: env.batchEncoding,
     decoderAddress: env.decoderAddress,
     signatureRegistryAddress: env.signatureRegistryAddress,
   });
+
+  // The packed flow encodes per-segment payload bytes inside the
+  // aggregator (one `payloadBytes` per content tag), then weaves the
+  // segments together into a single multi-segment blob downstream.
+  // Wire the aggregator's encoder so `POSTER_BATCH_ENCODING=abi` flips
+  // every segment to the ERC-8180 v1 ABI shape paired with the
+  // registry-resolved `ABIDecoder`. `binary` is the default — leaving
+  // the override unset uses the SDK's `encodeBatch`.
+  //
+  // The batch policy's capacity gating MUST use a size estimator that
+  // tracks the encoder. A binary-estimator + ABI-encoder pairing
+  // undercounts payload by ~2x and produces selections that won't
+  // fit (qodo PR #40 #2), so we hand the ABI estimator to the policy
+  // when the encoder is ABI.
+  const useAbi = env.batchEncoding === 'abi';
+  const aggregatorEncodeBatch = useAbi
+    ? (msgs: BAMMessage[], signatures: Uint8Array[]) => ({
+        data: encodeBatchABI(msgs, signatures),
+      })
+    : undefined;
+  const batchPolicy = useAbi
+    ? defaultBatchPolicy({ estimateBatchSize: estimateBatchSizeABI })
+    : undefined;
 
   let poster;
   try {
@@ -119,9 +144,12 @@ export async function runCli(): Promise<void> {
         signer,
         store,
         reorgWindowBlocks: env.reorgWindowBlocks,
+        packingLossStreakWarnThreshold: env.packingLossStreakWarnThreshold,
+        aggregatorEncodeBatch,
+        batchPolicy,
       },
       {
-        buildAndSubmit: viemPieces.buildAndSubmit,
+        buildAndSubmitMulti: viemPieces.buildAndSubmitMulti,
         rpc: viemPieces.rpc,
       }
     );

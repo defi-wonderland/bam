@@ -217,11 +217,14 @@ export const flushHandler: Handler = async (req, res, ctx) => {
   }
   // The flush endpoint is a nudge; the actual submission loop runs
   // autonomously. For synchronous flush in tests, the factory exposes
-  // `_tickTag`. Over HTTP we acknowledge the request so callers don't
-  // block on a flush.
-  const internal = ctx.poster as unknown as { _tickTag?: (tag: `0x${string}`) => Promise<void> };
-  if (typeof internal._tickTag === 'function') {
-    await internal._tickTag(contentTag as `0x${string}`);
+  // `_tickAggregator`. Over HTTP we acknowledge the request so callers
+  // don't block on a flush. The aggregator considers every allowlisted
+  // tag each tick; the `contentTag` query param is informational only
+  // — tests pass it so a single-tag deployment still surfaces it in
+  // the response body.
+  const internal = ctx.poster as unknown as { _tickAggregator?: () => Promise<unknown> };
+  if (typeof internal._tickAggregator === 'function') {
+    await internal._tickAggregator();
   }
   return sendJson(res, 200, { flushed: contentTag });
 };

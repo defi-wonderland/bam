@@ -174,6 +174,7 @@ describe('ReaderReorgWatcher.tick', () => {
         messageHash: ('0x' + '22'.repeat(32)) as Bytes32,
         status: 'confirmed',
         batchRef: tx,
+        chainId: CHAIN_ID,
         ingestedAt: null,
         ingestSeq: null,
         blockNumber: 95,

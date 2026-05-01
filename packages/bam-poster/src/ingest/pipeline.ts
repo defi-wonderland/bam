@@ -20,6 +20,8 @@ export interface IngestPipelineOptions {
   allowlistedTags: readonly Bytes32[];
   maxMessageSizeBytes: number;
   maxContentsSizeBytes: number;
+  /** Chain this Poster instance is wired to. Stamped on every pending row so `markReorged` can chain-scope the cascade. */
+  chainId: number;
   now: () => Date;
 }
 
@@ -139,6 +141,7 @@ export class IngestPipeline {
         contents: decoded.contents,
         signature: decoded.signature,
         messageHash,
+        chainId: this.opts.chainId,
         ingestedAt: this.opts.now().getTime(),
         ingestSeq: seq,
       });

@@ -231,6 +231,7 @@ describe('createReader', () => {
         messageHash: MHASH,
         status: 'confirmed',
         batchRef: TX_KNOWN,
+        chainId: 1,
         ingestedAt: null,
         ingestSeq: null,
         blockNumber: 10,

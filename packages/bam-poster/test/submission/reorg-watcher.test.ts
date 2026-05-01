@@ -74,6 +74,7 @@ async function seedConfirmedBatch(
         messageHash: m.messageHash,
         status: 'confirmed',
         batchRef: args.txHash,
+        chainId: 31337,
         ingestedAt: null,
         ingestSeq: m.originalIngestSeq,
         blockNumber: args.blockNumber,

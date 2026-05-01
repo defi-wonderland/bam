@@ -175,6 +175,28 @@ export interface Health {
   state: HealthState;
   reason?: string;
   since?: Date;
+  /**
+   * Aggregator-level fields (006-blob-packing-multi-tag, T023). Set
+   * only when the Poster is running with the cross-tag aggregator
+   * wired (i.e. `extras.buildAndSubmitMulti` was supplied).
+   */
+  lastPackedTxHash?: Bytes32 | null;
+  lastPackedTagCount?: number;
+  permanentlyStopped?: boolean;
+  /**
+   * Per-tag packing-loss-streak snapshot. One entry per allowlisted
+   * tag. `warn` flips to `true` once the streak hits the operator-
+   * configured threshold (`POSTER_PACKING_LOSS_STREAK_WARN_THRESHOLD`).
+   */
+  tags?: HealthTagEntry[];
+}
+
+export interface HealthTagEntry {
+  contentTag: Bytes32;
+  pendingCount: number;
+  packingLossStreak: number;
+  lastIncludedAt: number | null;
+  warn: boolean;
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -199,11 +221,33 @@ export interface PoolView {
 }
 
 export interface BatchPolicy {
+  /**
+   * Trigger-aware selection. Returns the messages this policy WANTS
+   * to ship right now — gated on size / age / count / forceFlush
+   * thresholds. The cross-tag aggregator uses `select` to decide
+   * whether *anything* gets submitted on a given tick: if no tag
+   * returns a non-empty selection, the tick is a no-op.
+   */
   select(
     tag: Bytes32,
     pool: PoolView,
     blobCapacityBytes: number,
     now: Date
+  ): { msgs: DecodedMessage[] } | null;
+  /**
+   * Trigger-free greedy fill. Returns whatever fits under
+   * `blobCapacityBytes` for `tag`, regardless of size/age/count
+   * thresholds — the aggregator calls `fill` for every other
+   * allowlisted tag with a non-empty pool *after* at least one tag
+   * fired `select`, so those tags ride as passengers on a tx that's
+   * already going out. Triggers set the maximum latency a tag can
+   * sit at; capacity sets the fill. Returns null when the pool is
+   * empty.
+   */
+  fill(
+    tag: Bytes32,
+    pool: PoolView,
+    blobCapacityBytes: number
   ): { msgs: DecodedMessage[] } | null;
 }
 
@@ -254,6 +298,41 @@ export interface PosterConfig {
   idlePollMs?: number;
   reorgPollMs?: number;
   logger?: PosterLogger;
+  /**
+   * Maximum number of per-tag entries the cross-tag aggregator
+   * (006-blob-packing-multi-tag) packs into one transaction.
+   * Construction-time constant; not a runtime toggle. Default `8`.
+   * Setting to `1` short-circuits the aggregator to single-tag mode.
+   * Only applies when `extras.buildAndSubmitMulti` is supplied.
+   */
+  maxTagsPerPack?: number;
+  /**
+   * Operator-visible packing-loss-streak warning threshold. The
+   * `/health` surface flags any tag whose `packingLossStreak >=`
+   * this value as `warn: true`. Detection-only — no behavior
+   * change at the threshold. Default `10`.
+   */
+  packingLossStreakWarnThreshold?: number;
+  /**
+   * Aggregator capacity overrides. Test-only — production callers
+   * leave these unset and the aggregator uses the SDK's
+   * `FIELD_ELEMENTS_PER_BLOB` and `USABLE_BYTES_PER_BLOB` defaults.
+   */
+  aggregatorCapacityFEs?: number;
+  aggregatorCapacityBytes?: number;
+  /**
+   * Aggregator encoder override. Two production callers:
+   *   - the CLI passes an ABI-codec wrapper when
+   *     `POSTER_BATCH_ENCODING=abi` so per-segment payload bytes match
+   *     the `ABIDecoder` named in `decoderAddress`;
+   *   - tests pin the planner's FE math by supplying a fixed-overhead
+   *     encoder.
+   * Leaving it unset selects the SDK's binary `encodeBatch`.
+   */
+  aggregatorEncodeBatch?: (
+    msgs: import('bam-sdk').BAMMessage[],
+    signatures: Uint8Array[]
+  ) => { data: Uint8Array };
 }
 
 // ═══════════════════════════════════════════════════════════════════════

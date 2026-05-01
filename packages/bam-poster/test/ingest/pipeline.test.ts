@@ -87,6 +87,7 @@ async function mkHarness(opts?: {
     allowlistedTags: opts?.allowlist ?? [TAG],
     maxMessageSizeBytes: opts?.maxMessageSizeBytes ?? 120_000,
     maxContentsSizeBytes: opts?.maxContentsSizeBytes ?? 100_000,
+    chainId: 1,
     now: () => new Date(0),
   });
   return { pipeline, store, validator, verifyCalls: counter };

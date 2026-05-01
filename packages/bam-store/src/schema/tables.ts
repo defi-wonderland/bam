@@ -57,6 +57,7 @@ export const messages = pgTable(
     messageId: text('message_id'),
     status: text('status').notNull(),
     batchRef: text('batch_ref'),
+    chainId: bigint('chain_id', { mode: 'number' }),
     ingestedAt: bigint('ingested_at', { mode: 'number' }),
     ingestSeq: bigint('ingest_seq', { mode: 'number' }),
     blockNumber: bigint('block_number', { mode: 'number' }),
@@ -84,7 +85,7 @@ export const messages = pgTable(
 export const batches = pgTable(
   'batches',
   {
-    txHash: text('tx_hash').primaryKey(),
+    txHash: text('tx_hash').notNull(),
     chainId: bigint('chain_id', { mode: 'number' }).notNull(),
     contentTag: text('content_tag').notNull(),
     blobVersionedHash: text('blob_versioned_hash').notNull(),
@@ -100,6 +101,7 @@ export const batches = pgTable(
     l1IncludedAtUnixSec: bigint('l1_included_at_unix_sec', { mode: 'number' }),
   },
   (t) => ({
+    pk: primaryKey({ columns: [t.chainId, t.txHash, t.contentTag] }),
     tagBlock: index('idx_batches_tag_block').on(t.contentTag, t.blockNumber),
     status: index('idx_batches_status').on(t.status),
   })

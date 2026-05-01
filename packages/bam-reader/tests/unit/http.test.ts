@@ -99,6 +99,7 @@ describe('ReaderHttpServer', () => {
         skippedVerify: 0,
         skippedConflict: 0,
         undecodable: 0,
+        skippedRange: 0,
       },
     });
   });
@@ -180,6 +181,7 @@ describe('ReaderHttpServer', () => {
       messageHash: MHASH,
       status: 'confirmed',
       batchRef: TX_KNOWN,
+      chainId: 1,
       ingestedAt: null,
       ingestSeq: null,
       blockNumber: 10,

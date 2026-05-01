@@ -83,12 +83,11 @@ describe.skipIf(!SHOULD_RUN)('E2E — reorg (anvil_reorg)', () => {
     const signer = new LocalEcdsaSigner(
       '0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d'
     );
-    const { buildAndSubmit, rpc } = await buildAndSubmitWithViem({
+    const { buildAndSubmitMulti, rpc } = await buildAndSubmitWithViem({
       rpcUrl: RPC_URL,
       chainId: CHAIN_ID,
       bamCoreAddress: BAM_CORE,
       signer,
-      batchEncoding: 'binary',
       decoderAddress: zeroAddress,
     });
     const poster = (await createPoster(
@@ -101,12 +100,12 @@ describe.skipIf(!SHOULD_RUN)('E2E — reorg (anvil_reorg)', () => {
         reorgWindowBlocks: 32,
         now: () => new Date(),
       },
-      { buildAndSubmit, rpc }
+      { buildAndSubmitMulti, rpc }
     )) as InternalPoster;
     posters.push(poster);
 
     await poster.submit(signedEnvelope(1n));
-    await poster._tickTag(TAG);
+    await poster._tickAggregator();
     const before = await poster.listSubmittedBatches({ contentTag: TAG });
     expect(before[0].status).toBe('included');
     const includedBlock = before[0].blockNumber!;

@@ -73,25 +73,49 @@ function fakeL1(opts: {
       const ts = opts.blockTimestamps?.get(blockNumber) ?? blockNumber;
       return { parentBeaconBlockRoot: root, timestampUnixSec: ts };
     },
-    async getLogs(args) {
+    async getLogs(args: Parameters<LiveTailL1Client['getLogs']>[0]) {
       calls.logs += 1;
       const fromBlock = Number(args.fromBlock);
       const toBlock = Number(args.toBlock);
-      return opts.events
-        .filter((e) => e.blockNumber >= fromBlock && e.blockNumber <= toBlock)
-        .map((e) => ({
-          blockNumber: BigInt(e.blockNumber),
-          transactionIndex: BigInt(e.txIndex),
-          logIndex: BigInt(e.logIndex),
-          transactionHash: e.txHash,
-          args: {
-            versionedHash: e.versionedHash,
-            submitter: e.submitter,
-            contentTag: e.contentTag,
-            decoder: e.decoder,
-            signatureRegistry: e.signatureRegistry,
-          },
-        }));
+      const inRange = opts.events.filter(
+        (e) => e.blockNumber >= fromBlock && e.blockNumber <= toBlock
+      );
+      const batchOut = inRange.map((e) => ({
+        eventName: 'BlobBatchRegistered' as const,
+        // The synthetic BSD lands at logIndex - 1 below; the BBR keeps
+        // its original index. Pairing logic only needs them to share
+        // tx + tag.
+        blockNumber: BigInt(e.blockNumber),
+        transactionIndex: BigInt(e.txIndex),
+        logIndex: BigInt(e.logIndex),
+        transactionHash: e.txHash,
+        args: {
+          versionedHash: e.versionedHash,
+          submitter: e.submitter,
+          contentTag: e.contentTag,
+          decoder: e.decoder,
+          signatureRegistry: e.signatureRegistry,
+        },
+      }));
+      // Synthesize one BSD per BBR with the seeded `(startFE, endFE)`
+      // (or the full-blob default). BSD precedes BBR per the contract
+      // emit order, so we use logIndex - 1 (or 0 when logIndex is 0
+      // already — pairing tolerates either order via LIFO).
+      const segmentOut = inRange.map((e) => ({
+        eventName: 'BlobSegmentDeclared' as const,
+        blockNumber: BigInt(e.blockNumber),
+        transactionIndex: BigInt(e.txIndex),
+        logIndex: BigInt(Math.max(0, e.logIndex - 1)),
+        transactionHash: e.txHash,
+        args: {
+          versionedHash: e.versionedHash,
+          declarer: e.submitter,
+          startFE: e.startFE ?? 0,
+          endFE: e.endFE ?? 4096,
+          contentTag: e.contentTag,
+        },
+      }));
+      return [...batchOut, ...segmentOut];
     },
   });
   return client;

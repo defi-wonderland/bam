@@ -14,7 +14,10 @@ import {
   defaultBatchPolicy,
   type InternalPoster,
 } from '../../src/index.js';
-import type { BuildAndSubmit, SubmitOutcome } from '../../src/submission/types.js';
+import type {
+  BuildAndSubmitMulti,
+  PackedSubmitOutcome,
+} from '../../src/submission/types.js';
 import type { BlockSource } from '../../src/submission/reorg-watcher.js';
 import type { ReconcileRpcClient } from '../../src/startup/reconcile.js';
 import type { StatusRpcReader } from '../../src/surfaces/status.js';
@@ -94,21 +97,55 @@ function mkRpc(ctl: RpcCtl): ReconcileRpcClient & StatusRpcReader & BlockSource 
   };
 }
 
-function mkBuildAndSubmit(outcomes: SubmitOutcome[]): {
-  fn: BuildAndSubmit;
+/**
+ * Build a stub `BuildAndSubmitMulti` that returns the supplied
+ * outcomes in order. Each outcome's `entries` field is filled in
+ * dynamically from the pack the aggregator hands over so the chain
+ * coordinates are deterministic but the per-tag messages mirror what
+ * was actually selected.
+ */
+type IncludedSeed = {
+  kind: 'included';
+  txHash: Bytes32;
+  blockNumber: number;
+  txIndex: number;
+  blobVersionedHash: Bytes32;
+  submitter: Address;
+};
+
+function mkBuildAndSubmit(seeds: IncludedSeed[]): {
+  fn: BuildAndSubmitMulti;
   calls: number;
 } {
   let i = 0;
   const state = { calls: 0 };
-  const fn: BuildAndSubmit = async () => {
+  const fn: BuildAndSubmitMulti = async ({ pack }) => {
     state.calls++;
-    return outcomes[Math.min(i++, outcomes.length - 1)];
+    const seed = seeds[Math.min(i++, seeds.length - 1)]!;
+    const outcome: PackedSubmitOutcome = {
+      kind: seed.kind,
+      txHash: seed.txHash,
+      blockNumber: seed.blockNumber,
+      txIndex: seed.txIndex,
+      blobVersionedHash: seed.blobVersionedHash,
+      submitter: seed.submitter,
+      entries: pack.plan.included.map((seg) => {
+        const sel = pack.includedSelections.get(seg.contentTag)!;
+        return {
+          contentTag: seg.contentTag,
+          startFE: seg.startFE,
+          endFE: seg.endFE,
+          messages: sel.messages,
+        };
+      }),
+    };
+    return outcome;
   };
   return { fn, calls: state.calls };
 }
 
 async function makePoster(
-  buildAndSubmit: BuildAndSubmit,
+  buildAndSubmitMulti: BuildAndSubmitMulti,
   rpc: ReconcileRpcClient & StatusRpcReader & BlockSource
 ): Promise<InternalPoster> {
   // Use headless signer with a different key so the factory's "same
@@ -126,7 +163,7 @@ async function makePoster(
       reorgWindowBlocks: 4,
       now: () => new Date(5_000),
     },
-    { buildAndSubmit, rpc }
+    { buildAndSubmitMulti, rpc }
   )) as InternalPoster;
   posters.push(poster);
   return poster;
@@ -146,7 +183,7 @@ describe('createPoster — full ingest → submit cycle', () => {
     const pendingBefore = await poster.listPending({ contentTag: TAG });
     expect(pendingBefore.length).toBe(1);
 
-    await poster._tickTag(TAG);
+    await poster._tickAggregator();
 
     const pendingAfter = await poster.listPending({ contentTag: TAG });
     expect(pendingAfter.length).toBe(0);
@@ -165,7 +202,7 @@ describe('createPoster — full ingest → submit cycle', () => {
     const poster = await makePoster(bas.fn, mkRpc(ctl));
 
     await poster.submit(signedEnvelope(1n));
-    await poster._tickTag(TAG);
+    await poster._tickAggregator();
 
     // Simulate a reorg: tx A vanishes from canonical chain; head advances.
     ctl.reorgedTxs.add(TX_A);
@@ -198,7 +235,7 @@ describe('createPoster — full ingest → submit cycle', () => {
     const poster = await makePoster(bas.fn, mkRpc(ctl));
 
     await poster.submit(signedEnvelope(1n));
-    await poster._tickTag(TAG);
+    await poster._tickAggregator();
 
     // Reorg out tx A.
     ctl.reorgedTxs.add(TX_A);
@@ -206,7 +243,7 @@ describe('createPoster — full ingest → submit cycle', () => {
     await poster._tickReorgWatcher();
 
     // Resubmit — picks up the re-enqueued message and lands it in TX_B.
-    await poster._tickTag(TAG);
+    await poster._tickAggregator();
 
     const submitted = await poster.listSubmittedBatches({ contentTag: TAG });
     expect(submitted.length).toBe(2);
@@ -233,7 +270,7 @@ describe('createPoster — full ingest → submit cycle', () => {
     ]);
     const poster = await makePoster(bas.fn, mkRpc(ctl));
     await poster.submit(signedEnvelope(1n));
-    await poster._tickTag(TAG);
+    await poster._tickAggregator();
     const h = await poster.health();
     expect(h.state).toBe('ok');
     const s = await poster.status();
