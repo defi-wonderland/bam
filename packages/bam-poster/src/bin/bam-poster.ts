@@ -22,7 +22,8 @@ import { LocalEcdsaSigner } from '../signer/local.js';
 import { createDbStore, createMemoryStore } from 'bam-store';
 import { StartupReconciliationError } from '../startup/reconcile.js';
 import { DEFAULT_MAX_MESSAGE_SIZE_BYTES } from '../ingest/size-bound.js';
-import { encodeBatchABI, type BAMMessage } from 'bam-sdk';
+import { encodeBatchABI, estimateBatchSizeABI, type BAMMessage } from 'bam-sdk';
+import { defaultBatchPolicy } from '../policy/default.js';
 
 /**
  * Resolve + load a dotenv file so users don't have to `export` each
@@ -117,12 +118,21 @@ export async function runCli(): Promise<void> {
   // every segment to the ERC-8180 v1 ABI shape paired with the
   // registry-resolved `ABIDecoder`. `binary` is the default — leaving
   // the override unset uses the SDK's `encodeBatch`.
-  const aggregatorEncodeBatch =
-    env.batchEncoding === 'abi'
-      ? (msgs: BAMMessage[], signatures: Uint8Array[]) => ({
-          data: encodeBatchABI(msgs, signatures),
-        })
-      : undefined;
+  //
+  // The batch policy's capacity gating MUST use a size estimator that
+  // tracks the encoder. A binary-estimator + ABI-encoder pairing
+  // undercounts payload by ~2x and produces selections that won't
+  // fit (qodo PR #40 #2), so we hand the ABI estimator to the policy
+  // when the encoder is ABI.
+  const useAbi = env.batchEncoding === 'abi';
+  const aggregatorEncodeBatch = useAbi
+    ? (msgs: BAMMessage[], signatures: Uint8Array[]) => ({
+        data: encodeBatchABI(msgs, signatures),
+      })
+    : undefined;
+  const batchPolicy = useAbi
+    ? defaultBatchPolicy({ estimateBatchSize: estimateBatchSizeABI })
+    : undefined;
 
   let poster;
   try {
@@ -136,6 +146,7 @@ export async function runCli(): Promise<void> {
         reorgWindowBlocks: env.reorgWindowBlocks,
         packingLossStreakWarnThreshold: env.packingLossStreakWarnThreshold,
         aggregatorEncodeBatch,
+        batchPolicy,
       },
       {
         buildAndSubmitMulti: viemPieces.buildAndSubmitMulti,

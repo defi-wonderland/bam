@@ -126,6 +126,7 @@ export type { EncodedBatch } from './batch.js';
 export {
   decodeBatchABI,
   encodeBatchABI,
+  estimateBatchSizeABI,
 } from './codec/abi.js';
 
 // Compression functions

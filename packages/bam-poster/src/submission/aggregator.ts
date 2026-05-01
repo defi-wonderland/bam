@@ -247,11 +247,14 @@ export function createAggregator(opts: AggregatorOptions): Aggregator {
       // (d) plan.
       const plan = planPack(capped, capacity);
 
-      // (f) update streaks. Only `firedByTrigger` tags count for the
-      // starvation signal — passengers neither help (they ride for
-      // free) nor hurt (their absence isn't a missed deadline).
-      // Capping a passenger out is fine; capping a triggered tag out
-      // is starvation worth flagging.
+      // (f) update streaks. Only `firedByTrigger` tags affect the
+      // starvation signal at all — passengers neither help (they
+      // ride for free, so a passenger inclusion shouldn't *reset*
+      // the streak) nor hurt (their absence isn't a missed
+      // deadline). `lastIncludedAt` tracks every real inclusion,
+      // passenger or not — it answers "when did this tag last
+      // land?" — but `packingLossStreak` is the trigger-only
+      // starvation counter (cubic PR #40 P2).
       const includedTags = new Set(plan.included.map((s: PackPlanIncluded) => s.contentTag));
       const excludedTags: Bytes32[] = [
         ...plan.excluded.map((s) => s.contentTag),
@@ -260,10 +263,12 @@ export function createAggregator(opts: AggregatorOptions): Aggregator {
       const nowMs = input.now.getTime();
       for (const tag of opts.tags) {
         const tagState = state.get(tag)!;
-        if (includedTags.has(tag)) {
-          tagState.packingLossStreak = 0;
+        const wasIncluded = includedTags.has(tag);
+        const wasTrigger = firedByTrigger.has(tag);
+        if (wasIncluded) {
           tagState.lastIncludedAt = nowMs;
-        } else if (firedByTrigger.has(tag)) {
+          if (wasTrigger) tagState.packingLossStreak = 0;
+        } else if (wasTrigger) {
           tagState.packingLossStreak += 1;
         }
       }

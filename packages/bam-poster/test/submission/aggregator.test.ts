@@ -220,6 +220,72 @@ describe('createAggregator', () => {
     expect(snap.find((s) => s.contentTag === TAG_B)!.packingLossStreak).toBe(0);
   });
 
+  it('passenger ride does NOT reset a non-zero streak (cubic PR #40 P2)', () => {
+    // Regression: previously the streak was reset on any inclusion,
+    // including passenger-only rides — which made the metric NOT
+    // trigger-only as intended. Set up TAG_B with a non-zero streak
+    // (round 1 capacity-loss), then have it ride as a passenger in
+    // round 2; assert the streak is unchanged.
+    const SELECT_A_ALWAYS_B_ON_TWO: BatchPolicy = {
+      select(tag, pool, _cap, _now) {
+        const list = pool.list(tag);
+        if (list.length === 0) return null;
+        if (tag === TAG_A) return { msgs: [...list] };
+        if (tag === TAG_B && list.length >= 2) return { msgs: [...list] };
+        return null;
+      },
+      fill(tag, pool, _cap) {
+        const list = pool.list(tag);
+        return list.length === 0 ? null : { msgs: [...list] };
+      },
+    };
+    const perMsgEncoder = (msgs: { sender: Address; nonce: bigint; contents: Uint8Array }[]) => ({
+      data: new Uint8Array(msgs.length * 300),
+    });
+    const agg = createAggregator({
+      policy: SELECT_A_ALWAYS_B_ON_TWO,
+      tags: [TAG_A, TAG_B],
+      maxTagsPerPack: 8,
+      blobCapacityBytes: 1_000,
+      capacityBytes: 1_000,
+      capacityFEs: 100,
+      now: () => new Date(0),
+      encodeBatch: perMsgEncoder,
+    });
+
+    // Round 1: A fires (1 msg → 300 B); B fires (3 msgs → 900 B).
+    // Plan oldest-first: A lands (leftover 700 B); B exceeds and is
+    // capped out → B.streak = 1.
+    agg.tick({
+      pool: makePool({
+        [TAG_A]: [msg(1, 100)],
+        [TAG_B]: [msg(2, 200), msg(3, 300), msg(4, 400)],
+      }),
+      tags: [TAG_A, TAG_B],
+      now: new Date(1_000),
+    });
+    expect(
+      agg.packingLossSnapshot().find((s) => s.contentTag === TAG_B)!.packingLossStreak
+    ).toBe(1);
+
+    // Round 2: B's pool now has only 1 message, so its select gate
+    // (≥ 2) holds. A fires; B rides as passenger; both fit (300 +
+    // 300 = 600 B). The streak MUST remain 1 — passenger rides
+    // don't reset the starvation metric.
+    agg.tick({
+      pool: makePool({
+        [TAG_A]: [msg(5, 500)],
+        [TAG_B]: [msg(6, 600)],
+      }),
+      tags: [TAG_A, TAG_B],
+      now: new Date(2_000),
+    });
+    const snap = agg.packingLossSnapshot();
+    const b = snap.find((s) => s.contentTag === TAG_B)!;
+    expect(b.packingLossStreak).toBe(1); // unchanged — passenger ride
+    expect(b.lastIncludedAt).toBe(2_000); // but inclusion timestamp updates
+  });
+
   it('passenger fill never bumps the streak on a capacity-loss', () => {
     // TAG_A triggers and fills its 600-byte payload. TAG_B rides as
     // passenger with another 600-byte payload — together they exceed
