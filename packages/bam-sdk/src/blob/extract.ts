@@ -25,6 +25,7 @@ import {
  * - `startFE < 0`
  * - `endFE > FIELD_ELEMENTS_PER_BLOB`
  * - `startFE >= endFE`
+ * - `blob.length < endFE * 32` (input too short for the requested range)
  *
  * Returns a freshly-allocated `Uint8Array` of length
  * `(endFE - startFE) * 31`.
@@ -50,6 +51,16 @@ export function extractSegmentBytes(
   if (startFE >= endFE) {
     throw new RangeError(
       `extractSegmentBytes: startFE must be < endFE (got ${startFE}, ${endFE})`
+    );
+  }
+  // Guard against silent zero-padding when the caller hands in a
+  // truncated buffer: `subarray` past the end returns whatever's there
+  // (or fewer bytes than asked); without this check, the extracted
+  // segment would silently include the missing FEs as zeros.
+  const requiredBytes = endFE * BYTES_PER_FIELD_ELEMENT;
+  if (blob.length < requiredBytes) {
+    throw new RangeError(
+      `extractSegmentBytes: blob too short for endFE=${endFE} (need >= ${requiredBytes} bytes, got ${blob.length})`
     );
   }
 

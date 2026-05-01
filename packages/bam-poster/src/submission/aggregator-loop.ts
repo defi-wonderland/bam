@@ -228,6 +228,7 @@ export class AggregatorLoop {
             Math.max(0, outcome.blockNumber - reorgWindow)
           );
           const reorged = await txn.listBatches({
+            chainId: this.opts.chainId,
             contentTag: entry.contentTag,
             status: 'reorged',
             sinceBlock: windowStart,
@@ -238,9 +239,13 @@ export class AggregatorLoop {
               includedHashSet.has(m.messageHash.toLowerCase())
             );
             if (overlaps) {
-              await txn.updateBatchStatus(b.txHash, 'reorged', {
-                replacedByTxHash: outcome.txHash,
-              });
+              await txn.updateBatchStatus(
+                b.chainId,
+                b.txHash,
+                b.contentTag,
+                'reorged',
+                { replacedByTxHash: outcome.txHash }
+              );
             }
           }
         }

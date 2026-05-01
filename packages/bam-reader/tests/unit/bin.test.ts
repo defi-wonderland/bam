@@ -149,7 +149,7 @@ describe('bam-reader CLI — argv parsing', () => {
 
 describe('bam-reader CLI — lookupDeployBlock', () => {
   it('returns the BAM Core deploy block for a known chainId', () => {
-    expect(lookupDeployBlock(11155111)).toBe(10_697_923);
+    expect(lookupDeployBlock(11155111)).toBe(10_764_769);
   });
 
   it('throws UnknownChainDeploymentError on an unknown chainId', () => {
@@ -181,7 +181,7 @@ describe('bam-reader CLI — resolveBackfillRange', () => {
       fakeL1(11_500_000)
     );
     // Reorg safety: cursor must not advance past safeHead = 11_500_000 - 32.
-    expect(r).toEqual({ fromBlock: 10_697_923, toBlock: 11_499_968 });
+    expect(r).toEqual({ fromBlock: 10_764_769, toBlock: 11_499_968 });
   });
 
   it('honors --to override under fromMarker=deploy (operator opt-in past safeHead)', async () => {
@@ -190,7 +190,7 @@ describe('bam-reader CLI — resolveBackfillRange', () => {
       baseCfg({ chainId: 11155111 }),
       fakeL1(11_500_000)
     );
-    expect(r).toEqual({ fromBlock: 10_697_923, toBlock: 11_000_000 });
+    expect(r).toEqual({ fromBlock: 10_764_769, toBlock: 11_000_000 });
   });
 
   it('rejects --from deploy --to N when N < deployBlock (inverted range)', async () => {
@@ -207,12 +207,12 @@ describe('bam-reader CLI — resolveBackfillRange', () => {
         baseCfg({ chainId: 11155111 }),
         fakeL1(11_500_000)
       )
-    ).rejects.toThrow(/below deploy block 10697923/);
+    ).rejects.toThrow(/below deploy block 10764769/);
   });
 
   it('throws a chain-too-young error for --from deploy when head is within the reorg window', async () => {
     // Young chain: head=10, reorgWindowBlocks=32 → safeHead clamped to 0.
-    // Sepolia deploy block (10_697_923) is unreachable; the error should
+    // Sepolia deploy block (10_764_769) is unreachable; the error should
     // explicitly name the reorg-window cause rather than the generic
     // inverted-range message.
     await expect(
@@ -322,7 +322,7 @@ describe('bam-reader CLI — resolveStartBlock', () => {
   it('falls back to the bam-sdk deploy table when env is unset', () => {
     const warn = vi.fn();
     const got = resolveStartBlock(baseCfg({ chainId: 11155111 }), warn);
-    expect(got).toBe(10_697_923);
+    expect(got).toBe(10_764_769);
     expect(warn).not.toHaveBeenCalled();
   });
 

@@ -502,18 +502,20 @@ function makeTxn(tx: DrizzleDb): StoreTxn {
           `markReorged: no batch for chain_id=${chainId} tx_hash=${txHash}`
         );
       }
-      // The `messages` table has no `chain_id` column (PK is
-      // `(author, nonce)`). Scope the cascade to the chain via an
-      // EXISTS join on `batches`, which we just transitioned.
-      await tx.execute(sql`
-        UPDATE messages SET status = 'reorged'
-        WHERE batch_ref = ${txHash}
-          AND status = 'confirmed'
-          AND EXISTS (
-            SELECT 1 FROM batches
-            WHERE chain_id = ${chainId} AND tx_hash = ${txHash}
-          )
-      `);
+      // KNOWN LIMITATION: the `messages` table has no `chain_id`
+      // column (PK is `(author, nonce)`), so this cascade cannot be
+      // truly chain-scoped. If two chains share a confirmed batch
+      // under the same `txHash`, the cascade will hit messages on
+      // both. In practice tx hashes don't collide across chains and
+      // the substrate is deployed per-chain, so this is a latent
+      // multi-chain hazard rather than an active bug. Properly
+      // scoping requires adding `messages.chain_id` (follow-up).
+      await tx
+        .update(messagesT)
+        .set({ status: 'reorged' })
+        .where(
+          and(eq(messagesT.batchRef, txHash), eq(messagesT.status, 'confirmed'))
+        );
     },
 
     // ── unified-schema reads ─────────────────────────────────────────
@@ -607,7 +609,9 @@ function makeTxn(tx: DrizzleDb): StoreTxn {
     },
 
     async updateBatchStatus(
+      chainId: number,
       txHash: Bytes32,
+      contentTag: Bytes32,
       status: BatchStatus,
       opts?: {
         blockNumber?: number | null;
@@ -621,9 +625,20 @@ function makeTxn(tx: DrizzleDb): StoreTxn {
       if (opts?.txIndex !== undefined) set.txIndex = opts.txIndex;
       if (opts?.replacedByTxHash !== undefined) set.replacedByTxHash = opts.replacedByTxHash;
       if (opts?.invalidatedAt !== undefined) set.invalidatedAt = opts.invalidatedAt;
-      const res = await tx.update(batchesT).set(set).where(eq(batchesT.txHash, txHash));
+      const res = await tx
+        .update(batchesT)
+        .set(set)
+        .where(
+          and(
+            eq(batchesT.chainId, chainId),
+            eq(batchesT.txHash, txHash),
+            eq(batchesT.contentTag, contentTag)
+          )
+        );
       if (execRowCount(res) === 0) {
-        throw new Error(`updateBatchStatus: no batch for tx_hash=${txHash}`);
+        throw new Error(
+          `updateBatchStatus: no batch for chain_id=${chainId} tx_hash=${txHash} content_tag=${contentTag}`
+        );
       }
     },
 

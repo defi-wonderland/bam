@@ -18,8 +18,10 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PACKAGES=("packages/bam-poster/src" "packages/bam-reader/src")
 # Patterns: literal multiplications and assignments + the bare 4096
-# literal anywhere outside an import. Word-boundary anchored.
-FORBIDDEN_RE='\* 31[^0-9]|\* 32[^0-9]|= 31[^0-9]|= 32[^0-9]|\b4096\b'
+# literal anywhere outside an import. The 31/32 patterns use a
+# negative lookahead alternative (either non-digit OR end-of-line)
+# so a literal at EOL is still caught.
+FORBIDDEN_RE='\* 31([^0-9]|$)|\* 32([^0-9]|$)|= 31([^0-9]|$)|= 32([^0-9]|$)|\b4096\b'
 
 violations=0
 for pkg in "${PACKAGES[@]}"; do
@@ -59,7 +61,7 @@ for pkg in "${PACKAGES[@]}"; do
       }
     ' "$file" \
       | grep -E ":.*($FORBIDDEN_RE)" \
-      | grep -vE "^[0-9]+:\s*import\s|REORG_WINDOW|MAX_FEE|RPC_URL|PORT|MAX_BLOCKS_PER_RANGE|MAX_BLOCKS_BACKFILL|RETRY|RATE_LIMIT|chainId|gas|timeout" \
+      | grep -vE "^[0-9]+:\s*import\s|^[0-9]+:.*\b\w*(REORG_WINDOW|MAX_FEE|RPC_URL|PORT|MAX_BLOCKS_PER_RANGE|MAX_BLOCKS_BACKFILL|RETRY|RATE_LIMIT)\w*\s*=" \
       || true)
     if [ -n "$matches" ]; then
       while IFS= read -r line; do

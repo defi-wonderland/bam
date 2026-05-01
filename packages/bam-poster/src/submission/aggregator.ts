@@ -206,8 +206,13 @@ export function createAggregator(opts: AggregatorOptions): Aggregator {
       // (d) plan.
       const plan = planPack(capped, capacity);
 
-      // (f) update streaks.
+      // (f) update streaks. The streak counts tags whose policy
+      // *fired* (returned a selection) but got squeezed out by
+      // capacity — capping or per-FE planning. Tags whose policy
+      // chose not to fire (e.g. a forceFlush threshold not yet hit)
+      // are deliberate holds, not starvation.
       const includedTags = new Set(plan.included.map((s: PackPlanIncluded) => s.contentTag));
+      const firedTags = new Set(selections.map((s) => s.contentTag));
       const excludedTags: Bytes32[] = [
         ...plan.excluded.map((s) => s.contentTag),
         ...cappedExcluded.map((s) => s.contentTag),
@@ -218,16 +223,25 @@ export function createAggregator(opts: AggregatorOptions): Aggregator {
         if (includedTags.has(tag)) {
           tagState.packingLossStreak = 0;
           tagState.lastIncludedAt = nowMs;
-        } else if (tagState.pendingCount > 0) {
-          // Only excluded *with* pending data counts as a loss.
+        } else if (firedTags.has(tag)) {
           tagState.packingLossStreak += 1;
         }
+      }
+
+      // (g) `includedSelections` MUST mirror `plan.included` — pruning
+      // tags that capping or planning excluded so downstream code
+      // can't accidentally process a tag that wasn't actually
+      // submitted on-chain.
+      const prunedSelections = new Map<Bytes32, AggregatorBatchSelection>();
+      for (const seg of plan.included) {
+        const sel = enriched.get(seg.contentTag);
+        if (sel !== undefined) prunedSelections.set(seg.contentTag, sel);
       }
 
       return {
         pack: {
           plan,
-          includedSelections: enriched,
+          includedSelections: prunedSelections,
           excludedTags,
         },
       };

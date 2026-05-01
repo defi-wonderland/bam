@@ -98,8 +98,17 @@ export interface StoreTxn {
    * second writer's nulls don't overwrite the first writer's values.
    */
   upsertBatch(row: BatchRow): Promise<void>;
+  /**
+   * Single-row update keyed by the full composite PK
+   * `(chainId, txHash, contentTag)`. After the multi-tag packing
+   * feature widened the PK, filtering by `txHash` alone would mutate
+   * every per-tag row sharing a packed transaction hash; callers
+   * MUST pass the full key to scope the update to one row.
+   */
   updateBatchStatus(
+    chainId: number,
     txHash: Bytes32,
+    contentTag: Bytes32,
     status: BatchStatus,
     opts?: {
       blockNumber?: number | null;

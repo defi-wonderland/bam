@@ -289,7 +289,7 @@ export function runConformance(make: StoreFactory): void {
       const store = await newStore();
       await store.withTxn((txn) => txn.upsertBatch(batchRow({ status: 'pending_tx' })));
       await store.withTxn((txn) =>
-        txn.updateBatchStatus(TX_A, 'confirmed', { blockNumber: 42, txIndex: 3 })
+        txn.updateBatchStatus(1, TX_A, TAG_A, 'confirmed', { blockNumber: 42, txIndex: 3 })
       );
       const [b] = await store.withTxn((txn) => txn.listBatches({}));
       expect(b.status).toBe('confirmed');
@@ -303,7 +303,7 @@ export function runConformance(make: StoreFactory): void {
         txn.upsertBatch(batchRow({ status: 'confirmed', blockNumber: 10 }))
       );
       await store.withTxn((txn) =>
-        txn.updateBatchStatus(TX_A, 'reorged', { invalidatedAt: 9_000 })
+        txn.updateBatchStatus(1, TX_A, TAG_A, 'reorged', { invalidatedAt: 9_000 })
       );
       const [b] = await store.withTxn((txn) => txn.listBatches({}));
       expect(b.status).toBe('reorged');

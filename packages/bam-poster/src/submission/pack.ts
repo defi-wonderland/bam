@@ -180,6 +180,18 @@ export function validatePackPlanInvariants(plan: PackPlan): void {
           `(startFE=${seg.startFE}, lastEnd=${lastEnd})`
       );
     }
+    // The planner produces `endFE - startFE = ceil(payload.length/31)`
+    // by construction, so this branch is unreachable for plans the
+    // aggregator built. It guards against hand-crafted plans (tests,
+    // future callers) where the FE range is too small for the payload —
+    // assembly would silently truncate without it.
+    const segmentCapacityBytes = (seg.endFE - seg.startFE) * USABLE_BYTES_PER_FIELD_ELEMENT;
+    if (seg.payloadBytes.length > segmentCapacityBytes) {
+      throw new Error(
+        `validatePackPlanInvariants: payload overflows declared range at ${seg.contentTag} ` +
+          `(payload=${seg.payloadBytes.length} bytes, capacity=${segmentCapacityBytes} bytes)`
+      );
+    }
     lastEnd = seg.endFE;
   }
 }
