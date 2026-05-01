@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
+import { zeroAddress } from 'viem';
 import {
   encodeContents,
   signECDSAWithKey,
@@ -87,6 +88,7 @@ describe.skipIf(!SHOULD_RUN)('E2E — contract round trip (anvil)', () => {
       chainId: CHAIN_ID,
       bamCoreAddress: BAM_CORE,
       signer,
+      decoderAddress: zeroAddress,
     });
     const poster = (await createPoster(
       {

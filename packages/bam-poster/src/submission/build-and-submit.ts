@@ -42,6 +42,15 @@ export interface BuildAndSubmitOptions {
   chainId: number;
   bamCoreAddress: Address;
   signer: Signer;
+  /**
+   * Per-segment decoder. The packed flow passes this verbatim into
+   * every entry of the `registerBlobBatches` array; pick the address
+   * appropriate for the wire format the aggregator is encoding (zero
+   * for the binary codec, the registry-resolved `ABIDecoder` for the
+   * v1 ABI shape from #39). The CLI always sets this; the field is
+   * optional purely so unit tests don't have to thread `zeroAddress`
+   * through every fixture — the runtime falls back to `zeroAddress`.
+   */
   decoderAddress?: Address;
   signatureRegistryAddress?: Address;
   maxFeePerBlobGasGwei?: string;
@@ -135,8 +144,8 @@ export function classifySubmissionError(
 export async function buildAndSubmitWithViem(
   opts: BuildAndSubmitOptions
 ): Promise<BuildAndSubmitBundle> {
-  const decoder = (opts.decoderAddress ?? zeroAddress);
-  const sigRegistry = (opts.signatureRegistryAddress ?? zeroAddress);
+  const decoder = opts.decoderAddress ?? zeroAddress;
+  const sigRegistry = opts.signatureRegistryAddress ?? zeroAddress;
   const gwei = opts.maxFeePerBlobGasGwei ?? '30';
 
   const transport = opts.transport ?? viemTransport(opts);

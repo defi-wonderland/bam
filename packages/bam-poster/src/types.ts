@@ -299,9 +299,13 @@ export interface PosterConfig {
   aggregatorCapacityFEs?: number;
   aggregatorCapacityBytes?: number;
   /**
-   * Aggregator encoder override. Test-only — used to pin the
-   * planner's FE math without depending on encoded-batch overhead
-   * arithmetic. Production callers leave it unset.
+   * Aggregator encoder override. Two production callers:
+   *   - the CLI passes an ABI-codec wrapper when
+   *     `POSTER_BATCH_ENCODING=abi` so per-segment payload bytes match
+   *     the `ABIDecoder` named in `decoderAddress`;
+   *   - tests pin the planner's FE math by supplying a fixed-overhead
+   *     encoder.
+   * Leaving it unset selects the SDK's binary `encodeBatch`.
    */
   aggregatorEncodeBatch?: (
     msgs: import('bam-sdk').BAMMessage[],
