@@ -138,6 +138,10 @@ describe('AggregatorLoop', () => {
         if (msgs.length === 0) return null;
         return { msgs: [...msgs] };
       },
+      fill(tag: Bytes32, pool: { list: (t: Bytes32) => readonly any[] }) {
+        const msgs = pool.list(tag);
+        return msgs.length === 0 ? null : { msgs: [...msgs] };
+      },
     };
 
     const loop = new AggregatorLoop({
@@ -193,6 +197,10 @@ describe('AggregatorLoop', () => {
         const msgs = pool.list(tag);
         if (msgs.length === 0) return null;
         return { msgs: [...msgs] };
+      },
+      fill(tag: Bytes32, pool: { list: (t: Bytes32) => readonly any[] }) {
+        const msgs = pool.list(tag);
+        return msgs.length === 0 ? null : { msgs: [...msgs] };
       },
     };
 

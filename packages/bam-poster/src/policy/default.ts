@@ -55,14 +55,7 @@ export function defaultBatchPolicy(
       const pending = pool.list(tag);
       if (pending.length === 0) return null;
 
-      // Greedy, capacity-aware FIFO walk.
-      const picked: DecodedMessage[] = [];
-      for (const next of pending) {
-        const candidate = [...picked, next];
-        const size = estimateBatchSize(candidate.map(toBAMMessage));
-        if (size > blobCapacityBytes) break;
-        picked.push(next);
-      }
+      const picked = greedyFifoFill(pending, blobCapacityBytes);
       if (picked.length === 0) return null;
 
       if (config.forceFlush) return { msgs: picked };
@@ -101,7 +94,39 @@ export function defaultBatchPolicy(
 
       return null;
     },
+
+    fill(
+      tag: Bytes32,
+      pool: PoolView,
+      blobCapacityBytes: number
+    ): { msgs: DecodedMessage[] } | null {
+      const pending = pool.list(tag);
+      if (pending.length === 0) return null;
+      const picked = greedyFifoFill(pending, blobCapacityBytes);
+      return picked.length === 0 ? null : { msgs: picked };
+    },
   };
+}
+
+/**
+ * Shared greedy, capacity-aware FIFO walk. `select` and `fill` agree
+ * on what fits — the only difference between them is whether to
+ * actually ship the result. Factoring out the loop guarantees they
+ * can't drift, and gives passenger fills the same arithmetic the
+ * triggering tag's batch-size estimate was checked against.
+ */
+function greedyFifoFill(
+  pending: readonly DecodedMessage[],
+  blobCapacityBytes: number
+): DecodedMessage[] {
+  const picked: DecodedMessage[] = [];
+  for (const next of pending) {
+    const candidate = [...picked, next];
+    const size = estimateBatchSize(candidate.map(toBAMMessage));
+    if (size > blobCapacityBytes) break;
+    picked.push(next);
+  }
+  return picked;
 }
 
 function toBAMMessage(d: DecodedMessage): BAMMessage {

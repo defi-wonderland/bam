@@ -98,6 +98,10 @@ const alwaysFire = {
     if (msgs.length === 0) return null;
     return { msgs: [...msgs] };
   },
+  fill(tag: Bytes32, pool: { list: (t: Bytes32) => readonly any[] }) {
+    const msgs = pool.list(tag);
+    return msgs.length === 0 ? null : { msgs: [...msgs] };
+  },
 };
 
 function bytes32(label: string, n: number): Bytes32 {

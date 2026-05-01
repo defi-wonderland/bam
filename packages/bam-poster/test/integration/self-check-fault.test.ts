@@ -101,6 +101,10 @@ const alwaysFire = {
     if (msgs.length === 0) return null;
     return { msgs: [...msgs] };
   },
+  fill(tag: Bytes32, pool: { list: (t: Bytes32) => readonly any[] }) {
+    const msgs = pool.list(tag);
+    return msgs.length === 0 ? null : { msgs: [...msgs] };
+  },
 };
 
 describe('self-check fault injection (T026, G-5)', () => {

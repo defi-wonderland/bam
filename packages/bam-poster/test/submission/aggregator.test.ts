@@ -39,11 +39,22 @@ const ALWAYS_FIRE_POLICY: BatchPolicy = {
     if (list.length === 0) return null;
     return { msgs: [...list] };
   },
+  fill(_tag, pool, _capacityBytes) {
+    const list = pool.list(_tag);
+    return list.length === 0 ? null : { msgs: [...list] };
+  },
 };
 
 const NEVER_FIRE_POLICY: BatchPolicy = {
   select(_tag, _pool, _capacityBytes, _now) {
     return null;
+  },
+  // `fill` returns the pool unconditionally — that's the whole point
+  // of passenger semantics. A "never fire" policy still passenger-
+  // rides if some other tag triggers on the same tick.
+  fill(_tag, pool, _capacityBytes) {
+    const list = pool.list(_tag);
+    return list.length === 0 ? null : { msgs: [...list] };
   },
 };
 
@@ -165,6 +176,92 @@ describe('createAggregator', () => {
     const included = result.pack!.plan.included.map((s) => s.contentTag);
     expect(included).toEqual([TAG_A, TAG_B]);
     expect(result.pack!.excludedTags).toContain(TAG_C);
+  });
+
+  it('passenger fill: a tag whose select did not fire still rides when another tag triggered', () => {
+    // `select` fires only for TAG_A; TAG_B has pending but its trigger
+    // policy says "not yet". Once TAG_A fires, TAG_B should ride as a
+    // passenger via `fill` — capacity sets the fill, triggers set the
+    // max latency.
+    const SELECT_ONLY_A: BatchPolicy = {
+      select(tag, pool, _cap, _now) {
+        if (tag !== TAG_A) return null;
+        const list = pool.list(tag);
+        return list.length === 0 ? null : { msgs: [...list] };
+      },
+      fill(tag, pool, _cap) {
+        const list = pool.list(tag);
+        return list.length === 0 ? null : { msgs: [...list] };
+      },
+    };
+    const agg = createAggregator({
+      policy: SELECT_ONLY_A,
+      tags: [TAG_A, TAG_B],
+      maxTagsPerPack: 8,
+      blobCapacityBytes: 130_000,
+      now: () => new Date(0),
+      encodeBatch: fixedEncoder(64),
+    });
+    const result = agg.tick({
+      pool: makePool({
+        [TAG_A]: [msg(1, 100)],
+        [TAG_B]: [msg(2, 200)],
+      }),
+      tags: [TAG_A, TAG_B],
+      now: new Date(0),
+    });
+    const included = result.pack!.plan.included.map((s) => s.contentTag);
+    expect(included.sort()).toEqual([TAG_A, TAG_B].sort());
+
+    // Streak: TAG_A reset (included), TAG_B unchanged at 0 — passengers
+    // do not count as fired-and-excluded.
+    const snap = agg.packingLossSnapshot();
+    expect(snap.find((s) => s.contentTag === TAG_A)!.packingLossStreak).toBe(0);
+    expect(snap.find((s) => s.contentTag === TAG_B)!.packingLossStreak).toBe(0);
+  });
+
+  it('passenger fill never bumps the streak on a capacity-loss', () => {
+    // TAG_A triggers and fills its 600-byte payload. TAG_B rides as
+    // passenger with another 600-byte payload — together they exceed
+    // the 1000-byte capacity so TAG_B is dropped by the planner. TAG_B
+    // is a passenger, so its streak must NOT increment.
+    const SELECT_ONLY_A: BatchPolicy = {
+      select(tag, pool, _cap, _now) {
+        if (tag !== TAG_A) return null;
+        const list = pool.list(tag);
+        return list.length === 0 ? null : { msgs: [...list] };
+      },
+      fill(tag, pool, _cap) {
+        const list = pool.list(tag);
+        return list.length === 0 ? null : { msgs: [...list] };
+      },
+    };
+    const agg = createAggregator({
+      policy: SELECT_ONLY_A,
+      tags: [TAG_A, TAG_B],
+      maxTagsPerPack: 8,
+      blobCapacityBytes: 1_000,
+      capacityBytes: 1_000,
+      capacityFEs: 100,
+      now: () => new Date(1_000),
+      encodeBatch: fixedEncoder(600),
+    });
+    const result = agg.tick({
+      pool: makePool({
+        [TAG_A]: [msg(1, 100)],
+        [TAG_B]: [msg(2, 200)],
+      }),
+      tags: [TAG_A, TAG_B],
+      now: new Date(1_000),
+    });
+    const included = result.pack!.plan.included.map((s) => s.contentTag);
+    expect(included).toEqual([TAG_A]);
+
+    const snap = agg.packingLossSnapshot();
+    expect(snap.find((s) => s.contentTag === TAG_A)!.packingLossStreak).toBe(0);
+    // The critical assertion: passengers do not contribute to the
+    // starvation signal.
+    expect(snap.find((s) => s.contentTag === TAG_B)!.packingLossStreak).toBe(0);
   });
 
   it('multi-tag overflow respects oldest-first when capacity binds', () => {

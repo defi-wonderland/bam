@@ -221,11 +221,33 @@ export interface PoolView {
 }
 
 export interface BatchPolicy {
+  /**
+   * Trigger-aware selection. Returns the messages this policy WANTS
+   * to ship right now — gated on size / age / count / forceFlush
+   * thresholds. The cross-tag aggregator uses `select` to decide
+   * whether *anything* gets submitted on a given tick: if no tag
+   * returns a non-empty selection, the tick is a no-op.
+   */
   select(
     tag: Bytes32,
     pool: PoolView,
     blobCapacityBytes: number,
     now: Date
+  ): { msgs: DecodedMessage[] } | null;
+  /**
+   * Trigger-free greedy fill. Returns whatever fits under
+   * `blobCapacityBytes` for `tag`, regardless of size/age/count
+   * thresholds — the aggregator calls `fill` for every other
+   * allowlisted tag with a non-empty pool *after* at least one tag
+   * fired `select`, so those tags ride as passengers on a tx that's
+   * already going out. Triggers set the maximum latency a tag can
+   * sit at; capacity sets the fill. Returns null when the pool is
+   * empty.
+   */
+  fill(
+    tag: Bytes32,
+    pool: PoolView,
+    blobCapacityBytes: number
   ): { msgs: DecodedMessage[] } | null;
 }
 

@@ -149,6 +149,10 @@ export function createAggregator(opts: AggregatorOptions): Aggregator {
     tick(input: AggregatorTickInput): AggregatorTickResult {
       const selections: PerTagSelection[] = [];
       const enriched = new Map<Bytes32, AggregatorBatchSelection>();
+      // Tags whose `policy.select` actually fired this tick. The
+      // streak counter only watches these — passengers ride for free
+      // and shouldn't be credited as either firing or starving.
+      const firedByTrigger = new Set<Bytes32>();
 
       // (a) + (b): snapshot + per-tag select.
       for (const tag of opts.tags) {
@@ -165,6 +169,7 @@ export function createAggregator(opts: AggregatorOptions): Aggregator {
         );
         if (picked === null || picked.msgs.length === 0) continue;
 
+        firedByTrigger.add(tag);
         const oldestIngestedAt = pool[0]!.ingestedAt ?? input.now.getTime();
         const bamMsgs: BAMMessage[] = picked.msgs.map((m) => ({
           sender: m.sender,
@@ -190,6 +195,42 @@ export function createAggregator(opts: AggregatorOptions): Aggregator {
       // (c) no fire → no-op.
       if (selections.length === 0) return { pack: null };
 
+      // (b'): passenger fill. The tx is going out for the trigger-
+      // firing tags above; every other allowlisted tag with non-empty
+      // pending rides as a passenger via `policy.fill`. Triggers gate
+      // *whether* to ship at all; capacity gates *how full* the
+      // shipment is. Doing the same select-then-encode dance here, but
+      // without the trigger guard.
+      for (const tag of opts.tags) {
+        if (firedByTrigger.has(tag)) continue;
+        const pool = input.pool.list(tag);
+        if (pool.length === 0) continue;
+
+        const filled = opts.policy.fill(tag, input.pool, opts.blobCapacityBytes);
+        if (filled === null || filled.msgs.length === 0) continue;
+
+        const oldestIngestedAt = pool[0]!.ingestedAt ?? input.now.getTime();
+        const bamMsgs: BAMMessage[] = filled.msgs.map((m) => ({
+          sender: m.sender,
+          nonce: m.nonce,
+          contents: m.contents,
+        }));
+        const signatures = filled.msgs.map((m) => m.signature);
+        const encoded = encode(bamMsgs, signatures);
+
+        selections.push({
+          contentTag: tag,
+          payloadBytes: encoded.data,
+          oldestIngestedAt,
+          pendingMessageCount: pool.length,
+        });
+        enriched.set(tag, {
+          contentTag: tag,
+          messages: filled.msgs,
+          payloadBytes: encoded.data,
+        });
+      }
+
       // Cap at `maxTagsPerPack`: planner's oldest-first arbitration
       // already gives a deterministic order; truncate the *sorted*
       // list, then plan against capacity.
@@ -206,13 +247,12 @@ export function createAggregator(opts: AggregatorOptions): Aggregator {
       // (d) plan.
       const plan = planPack(capped, capacity);
 
-      // (f) update streaks. The streak counts tags whose policy
-      // *fired* (returned a selection) but got squeezed out by
-      // capacity — capping or per-FE planning. Tags whose policy
-      // chose not to fire (e.g. a forceFlush threshold not yet hit)
-      // are deliberate holds, not starvation.
+      // (f) update streaks. Only `firedByTrigger` tags count for the
+      // starvation signal — passengers neither help (they ride for
+      // free) nor hurt (their absence isn't a missed deadline).
+      // Capping a passenger out is fine; capping a triggered tag out
+      // is starvation worth flagging.
       const includedTags = new Set(plan.included.map((s: PackPlanIncluded) => s.contentTag));
-      const firedTags = new Set(selections.map((s) => s.contentTag));
       const excludedTags: Bytes32[] = [
         ...plan.excluded.map((s) => s.contentTag),
         ...cappedExcluded.map((s) => s.contentTag),
@@ -223,19 +263,24 @@ export function createAggregator(opts: AggregatorOptions): Aggregator {
         if (includedTags.has(tag)) {
           tagState.packingLossStreak = 0;
           tagState.lastIncludedAt = nowMs;
-        } else if (firedTags.has(tag)) {
+        } else if (firedByTrigger.has(tag)) {
           tagState.packingLossStreak += 1;
         }
       }
 
-      // (g) `includedSelections` MUST mirror `plan.included` — pruning
-      // tags that capping or planning excluded so downstream code
-      // can't accidentally process a tag that wasn't actually
-      // submitted on-chain.
+      // (g) `includedSelections` MUST mirror `plan.included`. A
+      // missing entry would mean the plan referenced a tag we never
+      // enriched — a hard bug, not a "softly skip" condition (qodo#3).
       const prunedSelections = new Map<Bytes32, AggregatorBatchSelection>();
       for (const seg of plan.included) {
         const sel = enriched.get(seg.contentTag);
-        if (sel !== undefined) prunedSelections.set(seg.contentTag, sel);
+        if (sel === undefined) {
+          throw new Error(
+            `aggregator invariant: plan.included references tag ${seg.contentTag} ` +
+              `that was never enriched. This is a producer-side bug.`
+          );
+        }
+        prunedSelections.set(seg.contentTag, sel);
       }
 
       return {

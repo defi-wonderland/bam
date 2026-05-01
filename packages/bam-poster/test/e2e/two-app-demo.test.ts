@@ -107,6 +107,10 @@ const alwaysFire = {
     if (msgs.length === 0) return null;
     return { msgs: [...msgs] };
   },
+  fill(tag: Bytes32, pool: { list: (t: Bytes32) => readonly any[] }) {
+    const msgs = pool.list(tag);
+    return msgs.length === 0 ? null : { msgs: [...msgs] };
+  },
 };
 
 describe('two-app demo: bam-twitter + message-in-a-blobble (T028)', () => {
