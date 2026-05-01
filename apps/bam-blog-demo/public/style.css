@@ -1,166 +1,218 @@
-/* Minimal stylesheet — sparse, monospace-leaning, no chrome.
-   Models Vitalik's blog: a centered article column, plain serif body,
-   muted dates, no header/footer ornament. The comments section that
-   the widget mounts inherits the same palette. */
+/* Mirrors the layout and palette of vitalik.eth.limo (source:
+   github.com/vbuterin/blog `site/css/main.css`). The variable
+   names, colors, font stack, line-height, container widths,
+   and post-list typography are taken verbatim so a side-by-side
+   visual matches the original.
+
+   Widget-rendered classes (`.bam-*`) are added at the bottom and
+   styled to fit the inherited palette — they are mine, not in
+   the upstream stylesheet. */
 
 :root {
-  --fg: #1a1a1a;
-  --fg-muted: #6b6b6b;
-  --bg: #fefefe;
-  --line: #e2e2e2;
-  --link: #0a58ca;
-  --link-hover: #003a87;
-  --accent: #6b6b6b;
-  --pending: #b07300;
-  --error: #c0392b;
-  --measure: 38rem;
+  --color-bg: #fff;
+  --color-text: #333;
+  --color-anchor: #337ab7;
+  --color-heading: #111;
+  --color-divider: #cdcdcd;
+  --color-code-bg: #f7f7f7;
+  --color-code-text: #333;
+  --color-muted: #515151;
+  --color-pending: #b07300;
+  --color-error: #c0392b;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-bg: #1c1c1c;
+    --color-text: #e5e5e5;
+    --color-anchor: #c3a554;
+    --color-heading: #fff;
+    --color-divider: #444;
+    --color-code-bg: #2d2d2d;
+    --color-code-text: #f7f7f7;
+    --color-muted: #b8b8b8;
+  }
 }
 
 * {
   box-sizing: border-box;
 }
 
-html,
 body {
   margin: 0;
-  padding: 0;
-  background: var(--bg);
-  color: var(--fg);
-  font-family:
-    'Georgia', 'Times New Roman', Times, serif;
-  font-size: 17px;
-  line-height: 1.55;
-}
-
-main {
-  max-width: var(--measure);
-  margin: 4rem auto;
-  padding: 0 1.25rem;
+  font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI',
+    sans-serif;
+  line-height: 1.8;
+  background: var(--color-bg);
+  color: var(--color-text);
 }
 
 a {
-  color: var(--link);
-  text-decoration: underline;
-}
-a:hover {
-  color: var(--link-hover);
-}
-
-p.back {
-  font-size: 0.9rem;
-  margin: 0 0 2rem 0;
-}
-p.back a {
-  color: var(--fg-muted);
+  color: var(--color-anchor);
   text-decoration: none;
 }
-p.back a:hover {
-  color: var(--link);
+a:hover,
+a:focus {
   text-decoration: underline;
 }
 
-article header h1 {
-  font-size: 1.7rem;
-  margin: 0 0 0.4rem 0;
-  font-weight: 700;
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  color: var(--color-heading);
   line-height: 1.25;
+  margin-top: 1.2em;
+  margin-bottom: 0.6em;
 }
-article header .date {
-  margin: 0 0 2rem 0;
-  color: var(--fg-muted);
-  font-size: 0.95rem;
+h1 {
+  font-size: 2rem;
 }
-
-.prose p {
-  margin: 0 0 1.1rem 0;
+h2 {
+  font-size: 1.6rem;
 }
-.prose .excerpt-note {
-  margin-top: 2rem;
-  color: var(--fg-muted);
-  font-size: 0.9rem;
-  border-top: 1px dotted var(--line);
-  padding-top: 1rem;
+h3 {
+  font-size: 1.3rem;
 }
 
-/* Index page */
+img,
+svg {
+  max-width: 100%;
+  height: auto;
+}
 
-.site-header h1 {
-  margin: 0 0 0.25rem 0;
-  font-size: 1.7rem;
+.container-fluid {
+  padding: 40px 15px;
+  margin: auto;
+  max-width: 1200px;
 }
-.site-header .tagline {
-  color: var(--fg-muted);
-  margin: 0 0 2rem 0;
+
+.markdown-body {
+  max-width: 760px;
+  margin: auto;
+  padding: 40px 15px;
+  position: relative;
+  letter-spacing: 0.025em;
 }
-.post-list {
-  list-style: none;
+
+.markdown-body h1 {
+  font-weight: 600;
+  margin-top: 0;
+  padding-bottom: 0.3em;
+  margin-bottom: 0.5rem;
+  border-bottom: 1px solid var(--color-divider);
+}
+
+.markdown-body hr {
+  height: 0.25em;
   padding: 0;
-  margin: 0 0 3rem 0;
-}
-.post-list li {
-  padding: 0.5rem 0;
-  border-bottom: 1px dotted var(--line);
-  display: flex;
-  justify-content: space-between;
-  gap: 1rem;
-  align-items: baseline;
-}
-.post-list .date {
-  color: var(--fg-muted);
-  font-size: 0.85rem;
-  white-space: nowrap;
-}
-.site-footer {
-  color: var(--fg-muted);
-  font-size: 0.85rem;
+  margin: 24px 0;
+  background-color: var(--color-divider);
+  border: 0;
 }
 
-/* Comments */
+.markdown-body small {
+  font-size: 0.85rem;
+  color: var(--color-text);
+}
+
+.markdown-body blockquote {
+  margin: 0 0 1em;
+  padding: 0 1em;
+  border-left: 4px solid var(--color-divider);
+  color: var(--color-text);
+  opacity: 0.8;
+}
+
+.markdown-body code {
+  background: var(--color-code-bg);
+  color: var(--color-code-text);
+  padding: 0.2em 0.4em;
+  border-radius: 4px;
+}
+.markdown-body pre {
+  background: var(--color-code-bg);
+  color: var(--color-code-text);
+  padding: 0.8em;
+  overflow: auto;
+  border-radius: 4px;
+}
+
+/* Index page (categories row + post list) */
+
+.toc-category {
+  display: inline-block;
+  width: 100px;
+  padding: 8px 4px;
+  text-align: center;
+}
+
+.post-list {
+  margin-left: 0;
+  padding-left: 0;
+  list-style: none;
+}
+.post-list > li {
+  margin-bottom: 30px;
+}
+
+.post-link {
+  display: block;
+  font-size: 24px;
+}
+.post-meta {
+  font-size: 14px;
+  color: var(--color-muted);
+}
+
+/* Comments — widget-rendered, my own classes. Styled to fit
+   the markdown-body palette so the section visually belongs to
+   the page rather than feeling bolted on. */
 
 .comments-section {
   margin-top: 3rem;
-  border-top: 1px solid var(--line);
-  padding-top: 2rem;
 }
 .comments-section h2 {
-  font-size: 1.1rem;
+  font-size: 1.3rem;
   margin: 0 0 1rem 0;
 }
 .no-js {
-  color: var(--fg-muted);
+  color: var(--color-muted);
   font-style: italic;
 }
 
-/* Widget-rendered classes (kept here so the widget bundle has no CSS). */
-
 .bam-status {
-  color: var(--fg-muted);
-  font-size: 0.9rem;
+  color: var(--color-muted);
+  font-size: 0.95rem;
   margin: 0.5rem 0;
 }
 .bam-status--error {
-  color: var(--error);
+  color: var(--color-error);
 }
 
 .bam-connect {
   margin: 0 0 1.25rem 0;
-  font-size: 0.9rem;
-  color: var(--fg-muted);
+  font-size: 0.95rem;
+  color: var(--color-muted);
 }
 .bam-connect button,
 .bam-composer button,
 .bam-comment__reply-btn {
   font: inherit;
   background: none;
-  border: 1px solid var(--line);
-  color: var(--fg);
-  padding: 0.35rem 0.8rem;
+  border: 1px solid var(--color-divider);
+  color: var(--color-text);
+  padding: 0.4rem 0.9rem;
   cursor: pointer;
+  border-radius: 4px;
 }
 .bam-connect button:hover,
 .bam-composer button:hover,
 .bam-comment__reply-btn:hover {
-  border-color: var(--accent);
+  border-color: var(--color-anchor);
+  color: var(--color-anchor);
 }
 .bam-connect button:disabled,
 .bam-composer button:disabled {
@@ -179,10 +231,11 @@ article header .date {
   width: 100%;
   min-height: 4.5rem;
   padding: 0.6rem;
-  border: 1px solid var(--line);
-  background: var(--bg);
-  color: var(--fg);
+  border: 1px solid var(--color-divider);
+  background: var(--color-bg);
+  color: var(--color-text);
   resize: vertical;
+  border-radius: 4px;
 }
 .bam-composer__row {
   display: flex;
@@ -192,16 +245,16 @@ article header .date {
 }
 .bam-composer__chars {
   font-size: 0.85rem;
-  color: var(--fg-muted);
+  color: var(--color-muted);
 }
 .bam-composer__chars--warn {
-  color: var(--pending);
+  color: var(--color-pending);
 }
 .bam-composer__chars--bad {
-  color: var(--error);
+  color: var(--color-error);
 }
 .bam-composer__error {
-  color: var(--error);
+  color: var(--color-error);
   font-size: 0.9rem;
 }
 
@@ -216,7 +269,7 @@ article header .date {
 .bam-thread .bam-thread {
   margin-top: 0.75rem;
   padding-left: 1.25rem;
-  border-left: 2px solid var(--line);
+  border-left: 2px solid var(--color-divider);
 }
 
 .bam-comment__head {
@@ -224,15 +277,15 @@ article header .date {
   gap: 0.6rem;
   align-items: baseline;
   font-size: 0.85rem;
-  color: var(--fg-muted);
+  color: var(--color-muted);
   margin-bottom: 0.35rem;
 }
 .bam-comment__addr {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 .bam-comment__badge--pending {
-  color: var(--pending);
-  border: 1px solid var(--pending);
+  color: var(--color-pending);
+  border: 1px solid var(--color-pending);
   border-radius: 2px;
   padding: 0 0.4em;
   font-size: 0.7rem;
@@ -247,12 +300,12 @@ article header .date {
   font-size: 0.85rem;
 }
 .bam-comment__reply-btn {
-  padding: 0.15rem 0.5rem;
+  padding: 0.15rem 0.6rem;
   font-size: 0.8rem;
 }
 
 .bam-empty {
-  color: var(--fg-muted);
+  color: var(--color-muted);
   font-style: italic;
   margin: 1rem 0;
 }

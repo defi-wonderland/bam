@@ -173,6 +173,20 @@ in `docs/specs/features/001-blog-comments/spec.md`:
       `secure-llms.html`. The article and date render; the
       comments area shows the `<noscript>` fallback.
 
+## Visual parity with vitalik.eth.limo
+
+The CSS palette, font stack (Inter / system-ui sans-serif),
+container widths (760px markdown body inside a 1200px shell),
+the `<div id="doc" class="container-fluid markdown-body">` page
+structure, and the floated `<small>` byline pattern are taken
+directly from `site/css/main.css` and the published post HTML
+in <https://github.com/vbuterin/blog>. Light/dark mode follows
+the user's `prefers-color-scheme` (no manual toggle in the demo
+— the upstream has one, but it's incidental to the comments
+demo). The widget-rendered classes (`.bam-*`) are mine and
+inherit the same palette so the comments section visually
+belongs to the page.
+
 ## Stack
 
 - **Static HTML** — 5 hand-authored post pages + index, no
