@@ -41,6 +41,7 @@ import {
   getChainId,
   onAccountsChanged,
   signTypedData as walletSignTypedData,
+  switchChain as walletSwitchChain,
 } from './eth.js';
 import { slugToPostIdHash, postIdHashToSlug } from './post-id.js';
 import {
@@ -128,6 +129,8 @@ function walletErrorText(err: WalletError): string {
       return 'Wallet is disconnected. Reconnect and try again.';
     case 'bad_signature_shape':
       return 'Wallet returned an invalid signature.';
+    case 'wrong_chain':
+      return 'Please switch your wallet to Sepolia and try again.';
     default:
       return 'Wallet error.';
   }
@@ -228,11 +231,25 @@ async function submit(c: Controller): Promise<void> {
   rerender(c);
 
   try {
-    let chainId = SEPOLIA_CHAIN_ID;
+    // Domain chainId in the typed-data must match the Poster's
+    // expected chainId or the recovered signer differs and the
+    // submission rejects with bad_signature. Prompt the wallet to
+    // switch if it isn't on Sepolia already.
+    let chainId: number;
     try {
       chainId = await getChainId();
     } catch {
-      // Fall through with default; signing will surface the real error.
+      chainId = SEPOLIA_CHAIN_ID;
+    }
+    if (chainId !== SEPOLIA_CHAIN_ID) {
+      await walletSwitchChain(SEPOLIA_CHAIN_ID);
+      chainId = await getChainId();
+      if (chainId !== SEPOLIA_CHAIN_ID) {
+        throw new WalletError(
+          'wrong_chain',
+          `wallet is on chain ${chainId}; expected ${SEPOLIA_CHAIN_ID}`
+        );
+      }
     }
 
     let nonce = await fetchNextNonce(sender);

@@ -28,6 +28,7 @@ export type WalletErrorCode =
   | 'unsupported_method'
   | 'disconnected'
   | 'bad_signature_shape'
+  | 'wrong_chain'
   | 'unknown';
 
 export class WalletError extends Error {
@@ -138,6 +139,24 @@ export async function getChainId(): Promise<number> {
     throw new WalletError('unknown', 'eth_chainId returned an unexpected shape');
   }
   return Number.parseInt(raw, 16);
+}
+
+/**
+ * Prompts the wallet to switch to `chainId`. Returns once the
+ * wallet acknowledges the switch (the wallet may emit a
+ * `chainChanged` event before this resolves). Throws
+ * `request_rejected` if the user dismisses the prompt.
+ */
+export async function switchChain(chainId: number): Promise<void> {
+  const provider = getProvider();
+  try {
+    await provider.request({
+      method: 'wallet_switchEthereumChain',
+      params: [{ chainId: `0x${chainId.toString(16)}` }],
+    });
+  } catch (err) {
+    throw mapProviderError(err);
+  }
 }
 
 /**
