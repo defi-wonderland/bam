@@ -80,6 +80,25 @@ bytes K+4..   : utf8 content
 `src/widget/codec.ts`. Round-trip + negative cases pinned in
 `test/codec.test.ts`.
 
+## Quick look (against the live fly.dev Poster + Reader)
+
+If you just want to see it working without bringing up the whole
+local stack:
+
+```bash
+git checkout claude/add-blog-comments-ZUEFb
+pnpm install
+pnpm --filter bam-sdk build
+POSTER_URL=https://bam-poster.fly.dev \
+READER_URL=https://bam-reader.fly.dev \
+  pnpm --filter bam-blog-demo dev
+# → http://localhost:3002
+```
+
+`server.ts` proxies `/api/*` to those upstreams, so the browser
+only ever talks to localhost (no CORS headache). All you need
+locally is a Sepolia-funded wallet to post a comment.
+
 ## Setup
 
 Run all three demos against the shared Poster + Reader:
@@ -90,7 +109,7 @@ pnpm install
 pnpm --filter bam-sdk build
 pnpm db:up
 cp .env.local.example .env.local                          # Poster + Reader env
-cp apps/bam-blog-demo/.env.example apps/bam-blog-demo/.env # this app's env
+cp apps/bam-blog-demo/.env.local.example apps/bam-blog-demo/.env.local # this app's env
 
 pnpm dev   # spawns Poster :8787, Reader :8788, blobble :3000, twitter :3001, blog-demo :3002
 ```
