@@ -39,6 +39,9 @@ dist/
 .claude/context-snapshots/
 .claude/settings.local.json
 
+# Vercel
+.vercel
+
 # Spec kit: per-feature scaffolding (spec.md/plan.md/tasks.md/red-team.md).
 # Promote anything worth persisting to docs/specs/ root.
 docs/specs/features/
