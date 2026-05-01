@@ -8,11 +8,19 @@ export function PanelShell({
   title,
   endpoint,
   status,
+  overridden,
   children,
 }: {
   title: string;
   endpoint: string;
   status: PanelResult<unknown>['kind'];
+  /**
+   * `true` when the upstream URL for this panel differs from the
+   * build-time `NEXT_PUBLIC_DEFAULT_*` default. Surfaces a small
+   * "override" pill next to the endpoint label so a viewer can see
+   * when the displayed data is from a non-default URL.
+   */
+  overridden?: boolean;
   children: ReactNode;
 }) {
   return (
@@ -20,7 +28,17 @@ export function PanelShell({
       <header className="flex items-baseline justify-between gap-3">
         <div className="flex flex-col gap-0.5">
           <h2 className="text-sm font-semibold text-slate-900">{title}</h2>
-          <EndpointLabel endpoint={endpoint} />
+          <div className="flex items-baseline gap-2">
+            <EndpointLabel endpoint={endpoint} />
+            {overridden && (
+              <span
+                data-testid="panel-override-flag"
+                className="text-[10px] uppercase tracking-wide bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded"
+              >
+                override
+              </span>
+            )}
+          </div>
         </div>
         <StatusBadge kind={status} />
       </header>

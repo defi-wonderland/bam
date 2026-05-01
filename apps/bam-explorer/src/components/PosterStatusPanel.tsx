@@ -2,9 +2,20 @@ import type { PanelResult } from '../lib/panel-result';
 import { DegradedBody } from './DegradedBody';
 import { PanelShell } from './PanelShell';
 
-export function PosterStatusPanel({ result }: { result: PanelResult<unknown> }) {
+export function PosterStatusPanel({
+  result,
+  overridden,
+}: {
+  result: PanelResult<unknown>;
+  overridden?: boolean;
+}) {
   return (
-    <PanelShell title="Poster status" endpoint="Poster GET /status" status={result.kind}>
+    <PanelShell
+      title="Poster status"
+      endpoint="Poster GET /status"
+      status={result.kind}
+      overridden={overridden}
+    >
       {result.kind === 'ok' ? (
         <pre
           data-testid="poster-status-ok"

@@ -2,7 +2,7 @@
 
 Read-only monitoring dashboard for a BAM Reader + Poster pair. Where the other demo apps in this repo (`bam-twitter`, `message-in-a-blobble`) each exercise an opinionated end-to-end use of BAM, **Explorer** is a "look at this page" answer for operators, demoers, and new contributors who want to see the stack producing data.
 
-The page is **server-rendered** and **read-only by design**. There is no submit button, no flush button, and no API route that proxies a write — the Poster's `POST /submit` and `POST /flush` are deliberately not wired up here.
+The page is **fully client-rendered** and **read-only by design**. The Explorer's Next.js server only serves a static HTML shell + JS bundle; every fetch to the Reader and Poster happens directly from the viewer's browser. There is no submit button, no flush button, and no API route — the Poster's `POST /submit` and `POST /flush` are deliberately not wired up.
 
 ## What it surfaces
 
@@ -11,31 +11,32 @@ The page is **server-rendered** and **read-only by design**. There is no submit 
 
 Each panel labels the upstream endpoint it reads, and renders one of four explicit states — **ok**, **not configured**, **unreachable**, or **error** — so a surprising number on the page is always traceable to a specific upstream call you can re-issue with `curl`. Panels degrade independently: if the Reader is down, the Poster panels still render, and vice versa.
 
-## Refresh model
+## Configuration: env defaults + per-viewer Settings
 
-One-shot, server-rendered. A page load fetches every panel server-side in one pass; reload to re-fetch. The header shows a "fetched Ns ago" freshness indicator so you can tell how recent the snapshot is.
+Two configuration sources, in priority order:
 
-## Environment variables
+1. **Settings** — a panel in the page header lets the viewer override the Reader URL, Poster URL, Poster bearer token, and content-tags list. Values persist in `localStorage` and survive reloads. Clearing a field reverts to the build-time default.
+2. **Build-time env** — `NEXT_PUBLIC_DEFAULT_*` baked into the bundle. **No token default** — a deployed Explorer never serves an operator's bearer token to anonymous visitors.
 
-All env vars are server-side. The Explorer's server-rendered routes never accept user-supplied upstream URLs.
+When a Reader/Poster URL has been overridden, an "override" pill appears next to the affected panels' endpoint label so the viewer can see the displayed data is not from the build-time default.
 
-| Env var | Required | Default | Purpose |
-| --- | --- | --- | --- |
-| `READER_URL` | optional¹ | — | Reader base URL (e.g. `http://localhost:8788`). |
-| `READER_TIMEOUT_MS` | optional | `8000` | Per-request timeout against the Reader. |
-| `POSTER_URL` | optional¹ | — | Poster base URL (e.g. `http://localhost:8787`). |
-| `POSTER_AUTH_TOKEN` | optional | — | Bearer token forwarded to the Poster. Stays server-side; never echoed to the browser. |
-| `EXPLORER_CONTENT_TAGS` | optional | — | Comma-separated `0x`-prefixed bytes32 content tags to surface in Reader-list panels. If empty/unset, those panels render the "no content tags configured" state; the rest of the page still works. |
-| `EXPLORER_PENDING_LIMIT` | optional | `50` | Page size for Poster `/pending` (clamped to `[1, 200]`). |
-| `EXPLORER_SUBMITTED_LIMIT` | optional | `50` | Page size for Poster `/submitted-batches` (clamped to `[1, 200]`). |
-| `EXPLORER_BATCHES_LIMIT` | optional | `50` | Per-tag page size for Reader `/batches` (clamped to `[1, 200]`). |
-| `EXPLORER_MESSAGES_LIMIT` | optional | `50` | Per-tag page size for Reader `/messages` (clamped to `[1, 200]`). |
+### Build-time env vars (defaults baked into the bundle)
 
-¹ "Optional" in the sense that the app boots without it — the corresponding panels render "not configured" instead.
+| Env var | Default | Purpose |
+| --- | --- | --- |
+| `NEXT_PUBLIC_DEFAULT_READER_URL` | — | Default Reader base URL (e.g. `http://localhost:8788`). Empty → Reader panels render "not configured" until the viewer sets one in Settings. |
+| `NEXT_PUBLIC_DEFAULT_POSTER_URL` | — | Default Poster base URL. Same not-configured semantics as Reader. |
+| `NEXT_PUBLIC_DEFAULT_CONTENT_TAGS` | — | Comma-separated `0x`-prefixed bytes32 default content tags. Reader-list panels group by tag. Empty → Reader-list panels render "no content tags configured" until the viewer adds tags in Settings. |
+
+Note: there is **no** `NEXT_PUBLIC_DEFAULT_POSTER_AUTH_TOKEN`. A bearer token can only be entered per-viewer through Settings; it is stored in that viewer's `localStorage` and sent as `Authorization: Bearer …` on outbound Poster fetches.
+
+### Per-panel limits
+
+Defaults: 50 each. Per-viewer overrides via Settings (clamped to `[1, 200]`). The Reader caps at 1000 and the Poster at 10 000, so 50 is well within both and human-scannable.
 
 ## Local dev
 
-Point the Explorer at a Reader and Poster you already have running. The other demo apps (`bam-twitter`, `message-in-a-blobble`) use the same env-var contract, so any Reader/Poster pair already configured for those works here unchanged.
+Both upstreams (`bam-reader`, `@bam/poster`) already CORS-allow `*` and accept the `Authorization` header on the relevant routes, so the browser-direct fetch works out of the box.
 
 ```sh
 cd apps/bam-explorer
@@ -46,10 +47,12 @@ pnpm dev                           # serves on http://localhost:3003
 `.env.local` for a typical local-dev setup:
 
 ```sh
-READER_URL=http://localhost:8788
-POSTER_URL=http://localhost:8787
-EXPLORER_CONTENT_TAGS=0x<bytes32-tag-1>,0x<bytes32-tag-2>
+NEXT_PUBLIC_DEFAULT_READER_URL=http://localhost:8788
+NEXT_PUBLIC_DEFAULT_POSTER_URL=http://localhost:8787
+NEXT_PUBLIC_DEFAULT_CONTENT_TAGS=0x<bytes32-tag-1>,0x<bytes32-tag-2>
 ```
+
+If you want the Explorer to come up empty so every viewer types their own URLs in Settings, leave the env vars blank — the page still works, it just renders "not configured" until the viewer fills in Settings.
 
 ## Tests
 
@@ -57,11 +60,19 @@ EXPLORER_CONTENT_TAGS=0x<bytes32-tag-1>,0x<bytes32-tag-2>
 pnpm --filter bam-explorer test:run
 ```
 
-Tests cover the env parser, both HTTP clients, every per-panel fetcher, the UI primitives (`StatusBadge`, `Freshness`), each panel component's degraded-state rendering, the batch-detail route, and a page-level integration test that pins the partial-offline posture (Reader down → Poster panels still render, and vice versa).
+Tests cover env parsing, the `useExplorerConfig` hook (env defaults / overrides / corrupt-storage fallback / "no token from env"), both HTTP clients, every per-panel fetcher, the UI primitives (`StatusBadge`, `Freshness`, `SettingsPanel`), each panel component's degraded-state rendering and override-flag rendering, the batch-detail card, and a Dashboard integration test that pins:
+
+- happy-path rendering of all panels with their endpoint labels,
+- partial-offline posture (Reader-down → Poster panels still ok, and vice versa),
+- the "no content tags configured" state,
+- the "override active" pill appearing next to the affected panels,
+- freshness indicator + working Refresh button.
 
 ## What this app deliberately does **not** do
 
 - No wallet, no signing, no submit flow. It does not depend on `wagmi` / `viem` / `rainbowkit`.
 - No write proxy to the Poster. The Explorer's copy of `poster-client.ts` does not export `submitMessage` or `flush`, and the app contains no API route — by construction.
-- No background polling. Reload the page to re-fetch.
-- No multi-deployment switching. One Explorer instance points at one Reader URL and one Poster URL, like the existing demos.
+- No outbound network call from the Explorer's server. All upstream fetches happen from the viewer's browser.
+- No build-time default for the Poster bearer token. A deployed Explorer never ships an operator's token to anonymous visitors.
+- No background polling. Use the Refresh button.
+- No multi-deployment switching with shared state. Each viewer's Settings live in their own `localStorage` only.

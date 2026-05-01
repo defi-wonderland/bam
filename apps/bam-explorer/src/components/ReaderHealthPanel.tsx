@@ -2,9 +2,20 @@ import type { PanelResult } from '../lib/panel-result';
 import { DegradedBody } from './DegradedBody';
 import { PanelShell } from './PanelShell';
 
-export function ReaderHealthPanel({ result }: { result: PanelResult<unknown> }) {
+export function ReaderHealthPanel({
+  result,
+  overridden,
+}: {
+  result: PanelResult<unknown>;
+  overridden?: boolean;
+}) {
   return (
-    <PanelShell title="Reader health" endpoint="Reader GET /health" status={result.kind}>
+    <PanelShell
+      title="Reader health"
+      endpoint="Reader GET /health"
+      status={result.kind}
+      overridden={overridden}
+    >
       {result.kind === 'ok' ? (
         <pre
           data-testid="reader-health-ok"

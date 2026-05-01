@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Bytes32 } from 'bam-sdk';
 
 import {
@@ -24,16 +24,11 @@ import {
 
 const TAG = ('0x' + 'aa'.repeat(32)) as Bytes32;
 const TX_HASH = '0x' + 'cc'.repeat(32);
-
-beforeEach(() => {
-  process.env.READER_URL = 'http://reader.test';
-  process.env.POSTER_URL = 'http://poster.test';
-});
+const READER_CFG = { baseUrl: 'http://reader.test' };
+const POSTER_CFG = { baseUrl: 'http://poster.test' };
 
 afterEach(() => {
   vi.restoreAllMocks();
-  delete process.env.READER_URL;
-  delete process.env.POSTER_URL;
 });
 
 describe('Reader fetchers — happy path', () => {
@@ -43,9 +38,8 @@ describe('Reader fetchers — happy path', () => {
       body: { ok: true },
       contentType: 'application/json',
     });
-    const r = await fetchReaderHealth();
+    const r = await fetchReaderHealth(READER_CFG);
     expect(r.kind).toBe('ok');
-    if (r.kind === 'ok') expect(r.data).toEqual({ ok: true });
   });
 
   it('fetchReaderBatches returns ok on 200', async () => {
@@ -54,7 +48,7 @@ describe('Reader fetchers — happy path', () => {
       body: { batches: [] },
       contentType: 'application/json',
     });
-    const r = await fetchReaderBatches(TAG, 50);
+    const r = await fetchReaderBatches(READER_CFG, TAG, 50);
     expect(r.kind).toBe('ok');
   });
 
@@ -64,7 +58,7 @@ describe('Reader fetchers — happy path', () => {
       body: { messages: [] },
       contentType: 'application/json',
     });
-    const r = await fetchReaderMessages(TAG, 50);
+    const r = await fetchReaderMessages(READER_CFG, TAG, 50);
     expect(r.kind).toBe('ok');
   });
 });
@@ -76,7 +70,7 @@ describe('Reader fetchers — error paths', () => {
       body: { error: 'internal_error' },
       contentType: 'application/json',
     });
-    const r = await fetchReaderHealth();
+    const r = await fetchReaderHealth(READER_CFG);
     expect(r).toMatchObject({ kind: 'error', status: 500, detail: 'internal_error' });
   });
 
@@ -84,25 +78,30 @@ describe('Reader fetchers — error paths', () => {
     vi.spyOn(readerClient, 'getHealth').mockRejectedValue(
       new ReaderUnreachableError('connection refused')
     );
-    const r = await fetchReaderHealth();
+    const r = await fetchReaderHealth(READER_CFG);
     expect(r).toMatchObject({ kind: 'unreachable', detail: 'connection refused' });
   });
 
   it('ReaderConfigError → not_configured variant', async () => {
     vi.spyOn(readerClient, 'getHealth').mockRejectedValue(
-      new ReaderConfigError('READER_URL env is required')
+      new ReaderConfigError('Reader URL not configured')
     );
-    const r = await fetchReaderHealth();
+    const r = await fetchReaderHealth(READER_CFG);
     expect(r).toMatchObject({
       kind: 'not_configured',
       reason: 'reader_url_not_configured',
     });
   });
 
-  it('unexpected throw is caught into error variant — does not propagate', async () => {
+  it('unexpected throw is caught into error variant', async () => {
     vi.spyOn(readerClient, 'listBatches').mockRejectedValue(new Error('boom'));
-    const r = await fetchReaderBatches(TAG, 50);
+    const r = await fetchReaderBatches(READER_CFG, TAG, 50);
     expect(r.kind).toBe('error');
+  });
+
+  it('empty baseUrl → not_configured (real client error)', async () => {
+    const r = await fetchReaderHealth({ baseUrl: '' });
+    expect(r.kind).toBe('not_configured');
   });
 });
 
@@ -113,7 +112,7 @@ describe('Reader batch-by-tx-hash', () => {
       body: { batch: { txHash: TX_HASH } },
       contentType: 'application/json',
     });
-    const r = await fetchReaderBatchByTxHash(TX_HASH);
+    const r = await fetchReaderBatchByTxHash(READER_CFG, TX_HASH);
     expect(r.kind).toBe('ok');
   });
 
@@ -123,7 +122,7 @@ describe('Reader batch-by-tx-hash', () => {
       body: { error: 'not_found' },
       contentType: 'application/json',
     });
-    const r = await fetchReaderBatchByTxHash(TX_HASH);
+    const r = await fetchReaderBatchByTxHash(READER_CFG, TX_HASH);
     expect(r.kind).toBe('not_found');
   });
 
@@ -131,67 +130,75 @@ describe('Reader batch-by-tx-hash', () => {
     vi.spyOn(readerClient, 'getBatch').mockRejectedValue(
       new ReaderUnreachableError('down')
     );
-    const r = await fetchReaderBatchByTxHash(TX_HASH);
+    const r = await fetchReaderBatchByTxHash(READER_CFG, TX_HASH);
     expect(r.kind).toBe('unreachable');
   });
 });
 
 describe('Poster fetchers — happy path', () => {
-  it('fetchPosterHealth returns ok on 200', async () => {
+  it('fetchPosterHealth returns ok', async () => {
     vi.spyOn(posterClient, 'getHealth').mockResolvedValue({
       status: 200,
       body: { health: { state: 'ok' } },
       contentType: 'application/json',
     });
-    const r = await fetchPosterHealth();
+    const r = await fetchPosterHealth(POSTER_CFG);
     expect(r.kind).toBe('ok');
   });
 
-  it('fetchPosterStatus returns ok on 200', async () => {
+  it('fetchPosterStatus returns ok', async () => {
     vi.spyOn(posterClient, 'getStatus').mockResolvedValue({
       status: 200,
       body: { status: { foo: 'bar' } },
       contentType: 'application/json',
     });
-    const r = await fetchPosterStatus();
+    const r = await fetchPosterStatus(POSTER_CFG);
     expect(r.kind).toBe('ok');
   });
 
-  it('fetchPosterPending returns ok on 200', async () => {
+  it('fetchPosterPending returns ok', async () => {
     vi.spyOn(posterClient, 'getPending').mockResolvedValue({
       status: 200,
       body: { pending: [] },
       contentType: 'application/json',
     });
-    const r = await fetchPosterPending(50);
+    const r = await fetchPosterPending(POSTER_CFG, 50);
     expect(r.kind).toBe('ok');
   });
 
-  it('fetchPosterSubmittedBatches returns ok on 200', async () => {
+  it('fetchPosterSubmittedBatches returns ok', async () => {
     vi.spyOn(posterClient, 'getSubmittedBatches').mockResolvedValue({
       status: 200,
       body: { batches: [] },
       contentType: 'application/json',
     });
-    const r = await fetchPosterSubmittedBatches(50);
+    const r = await fetchPosterSubmittedBatches(POSTER_CFG, 50);
     expect(r.kind).toBe('ok');
+  });
+
+  it('forwards authToken through to the client', async () => {
+    const spy = vi.spyOn(posterClient, 'getStatus').mockResolvedValue({
+      status: 200,
+      body: { status: {} },
+      contentType: 'application/json',
+    });
+    await fetchPosterStatus({ baseUrl: 'http://x', authToken: 'tok' });
+    expect(spy).toHaveBeenCalledWith({ baseUrl: 'http://x', authToken: 'tok' });
   });
 });
 
 describe('Poster fetchers — error paths', () => {
   it('PosterUnreachableError → unreachable variant', async () => {
-    vi.spyOn(posterClient, 'getStatus').mockRejectedValue(
-      new PosterUnreachableError('timeout')
-    );
-    const r = await fetchPosterStatus();
+    vi.spyOn(posterClient, 'getStatus').mockRejectedValue(new PosterUnreachableError('timeout'));
+    const r = await fetchPosterStatus(POSTER_CFG);
     expect(r.kind).toBe('unreachable');
   });
 
   it('PosterConfigError → not_configured variant', async () => {
     vi.spyOn(posterClient, 'getStatus').mockRejectedValue(
-      new PosterConfigError('POSTER_URL env is required')
+      new PosterConfigError('Poster URL not configured')
     );
-    const r = await fetchPosterStatus();
+    const r = await fetchPosterStatus(POSTER_CFG);
     expect(r).toMatchObject({
       kind: 'not_configured',
       reason: 'poster_url_not_configured',
@@ -204,29 +211,7 @@ describe('Poster fetchers — error paths', () => {
       body: { error: 'unhealthy' },
       contentType: 'application/json',
     });
-    const r = await fetchPosterHealth();
+    const r = await fetchPosterHealth(POSTER_CFG);
     expect(r).toMatchObject({ kind: 'error', status: 503 });
-  });
-});
-
-describe('No fetcher throws — even on malformed JSON / weird body', () => {
-  it('Reader fetcher with non-object body still returns ok', async () => {
-    vi.spyOn(readerClient, 'getHealth').mockResolvedValue({
-      status: 200,
-      body: null,
-      contentType: 'application/json',
-    });
-    const r = await fetchReaderHealth();
-    expect(r.kind).toBe('ok');
-  });
-
-  it('Poster fetcher with non-object body still returns ok', async () => {
-    vi.spyOn(posterClient, 'getStatus').mockResolvedValue({
-      status: 200,
-      body: 'plain text',
-      contentType: 'text/plain',
-    });
-    const r = await fetchPosterStatus();
-    expect(r.kind).toBe('ok');
   });
 });

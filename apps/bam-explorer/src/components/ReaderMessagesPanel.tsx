@@ -17,9 +17,11 @@ interface MessageItem {
 export function ReaderMessagesPanel({
   resultsByTag,
   noTagsConfigured,
+  overridden,
 }: {
   resultsByTag: Map<Bytes32, PanelResult<unknown>>;
   noTagsConfigured: boolean;
+  overridden?: boolean;
 }) {
   const overallKind = noTagsConfigured ? 'not_configured' : aggregateKind(resultsByTag);
 
@@ -28,6 +30,7 @@ export function ReaderMessagesPanel({
       title="Confirmed messages"
       endpoint="Reader GET /messages"
       status={overallKind}
+      overridden={overridden}
     >
       {noTagsConfigured ? (
         <DegradedBody

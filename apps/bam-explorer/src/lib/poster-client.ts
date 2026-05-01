@@ -1,16 +1,11 @@
 /**
- * Typed HTTP client for the `@bam/poster` service. **Read-only by
- * design** — only the four GET endpoints the Explorer surfaces
- * (`/health`, `/status`, `/pending`, `/submitted-batches`) are
- * exported. The Poster's `POST /submit` and `POST /flush` are
- * deliberately not wired up here so a future contributor cannot
- * trigger a write from inside the Explorer without first
- * re-introducing those exports.
- *
- * Same env-var contract as the other demo apps' Poster client:
- * `POSTER_URL`, `POSTER_AUTH_TOKEN`. Same error vocabulary
- * (`PosterUnreachableError` / `PosterConfigError`). Server-rendered
- * only — no Next.js API route, no `posterErrorToResponse`.
+ * Typed HTTP client for the `@bam/poster` service. **Pure browser
+ * client, read-only by design.** Every call takes the upstream
+ * `baseUrl` and an optional bearer `authToken` explicitly — both
+ * sourced from Settings + `NEXT_PUBLIC_DEFAULT_*` build defaults.
+ * The Poster's `POST /submit` and `POST /flush` are deliberately
+ * not exported here; a future contributor cannot wire a write
+ * surface without first re-introducing those exports.
  */
 
 export class PosterUnreachableError extends Error {
@@ -24,12 +19,27 @@ export class PosterConfigError extends Error {
   readonly reason = 'poster_url_not_configured';
 }
 
-export function resolvePosterUrl(envOverride?: string): string {
-  const url = envOverride ?? process.env.POSTER_URL;
-  if (!url || url.length === 0) {
-    throw new PosterConfigError('POSTER_URL env is required');
+export interface PosterClientConfig {
+  /** Poster base URL. Empty string → `PosterConfigError`. */
+  baseUrl: string;
+  /**
+   * Optional bearer token. Forwarded as
+   * `Authorization: Bearer <token>` on every call. **Never** sourced
+   * from a build-time env: a deployed Explorer doesn't ship an
+   * operator's token to anonymous visitors.
+   */
+  authToken?: string;
+  signal?: AbortSignal;
+  timeoutMs?: number;
+}
+
+const DEFAULT_TIMEOUT_MS = 8_000;
+
+function resolveBase(raw: string): string {
+  if (!raw || raw.length === 0) {
+    throw new PosterConfigError('Poster URL not configured');
   }
-  return url.replace(/\/$/, '');
+  return raw.replace(/\/$/, '');
 }
 
 export interface PosterResponse {
@@ -38,36 +48,27 @@ export interface PosterResponse {
   contentType: string;
 }
 
-const DEFAULT_POSTER_TIMEOUT_MS = 8_000;
-
 async function rawFetch(
-  path: string,
-  init?: { envUrl?: string; signal?: AbortSignal; timeoutMs?: number }
+  cfg: PosterClientConfig,
+  path: string
 ): Promise<PosterResponse> {
-  const base = resolvePosterUrl(init?.envUrl);
+  const base = resolveBase(cfg.baseUrl);
   const url = `${base}${path}`;
-  const timeoutMs = init?.timeoutMs ?? DEFAULT_POSTER_TIMEOUT_MS;
+  const timeoutMs = cfg.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const timeoutSignal = AbortSignal.timeout(timeoutMs);
-  const signal = init?.signal
-    ? AbortSignal.any([init.signal, timeoutSignal])
-    : timeoutSignal;
+  const signal = cfg.signal ? AbortSignal.any([cfg.signal, timeoutSignal]) : timeoutSignal;
   const headers: Record<string, string> = {};
-  const token = process.env.POSTER_AUTH_TOKEN;
-  if (token && token.length > 0) {
-    headers.Authorization = `Bearer ${token}`;
+  if (cfg.authToken && cfg.authToken.length > 0) {
+    headers.Authorization = `Bearer ${cfg.authToken}`;
   }
   let res: Response;
   try {
     res = await fetch(url, { method: 'GET', headers, signal });
   } catch (err) {
     if (err instanceof Error && err.name === 'TimeoutError') {
-      throw new PosterUnreachableError(
-        `poster did not respond within ${timeoutMs}ms`
-      );
+      throw new PosterUnreachableError(`poster did not respond within ${timeoutMs}ms`);
     }
-    throw new PosterUnreachableError(
-      err instanceof Error ? err.message : 'unreachable'
-    );
+    throw new PosterUnreachableError(err instanceof Error ? err.message : 'unreachable');
   }
   const contentType = res.headers.get('content-type') ?? 'application/json';
   let body: unknown;
@@ -79,47 +80,33 @@ async function rawFetch(
   return { status: res.status, body, contentType };
 }
 
-export async function getHealth(
-  args: { envUrl?: string; signal?: AbortSignal } = {}
-): Promise<PosterResponse> {
-  return rawFetch('/health', { envUrl: args.envUrl, signal: args.signal });
+export async function getHealth(cfg: PosterClientConfig): Promise<PosterResponse> {
+  return rawFetch(cfg, '/health');
 }
 
-export async function getStatus(
-  args: { envUrl?: string; signal?: AbortSignal } = {}
-): Promise<PosterResponse> {
-  return rawFetch('/status', { envUrl: args.envUrl, signal: args.signal });
+export async function getStatus(cfg: PosterClientConfig): Promise<PosterResponse> {
+  return rawFetch(cfg, '/status');
 }
 
 export async function getPending(
-  args: { contentTag?: string; limit?: number; envUrl?: string; signal?: AbortSignal } = {}
+  cfg: PosterClientConfig,
+  args: { contentTag?: string; limit?: number } = {}
 ): Promise<PosterResponse> {
   const q = new URLSearchParams();
   if (args.contentTag !== undefined) q.set('contentTag', args.contentTag);
   if (args.limit !== undefined) q.set('limit', String(args.limit));
   const qs = q.toString();
-  return rawFetch(`/pending${qs ? '?' + qs : ''}`, {
-    envUrl: args.envUrl,
-    signal: args.signal,
-  });
+  return rawFetch(cfg, `/pending${qs ? '?' + qs : ''}`);
 }
 
 export async function getSubmittedBatches(
-  args: {
-    contentTag?: string;
-    limit?: number;
-    sinceBlock?: string;
-    envUrl?: string;
-    signal?: AbortSignal;
-  } = {}
+  cfg: PosterClientConfig,
+  args: { contentTag?: string; limit?: number; sinceBlock?: string } = {}
 ): Promise<PosterResponse> {
   const q = new URLSearchParams();
   if (args.contentTag !== undefined) q.set('contentTag', args.contentTag);
   if (args.limit !== undefined) q.set('limit', String(args.limit));
   if (args.sinceBlock !== undefined) q.set('sinceBlock', args.sinceBlock);
   const qs = q.toString();
-  return rawFetch(`/submitted-batches${qs ? '?' + qs : ''}`, {
-    envUrl: args.envUrl,
-    signal: args.signal,
-  });
+  return rawFetch(cfg, `/submitted-batches${qs ? '?' + qs : ''}`);
 }

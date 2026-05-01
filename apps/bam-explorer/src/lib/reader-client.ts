@@ -1,15 +1,11 @@
 /**
- * Typed HTTP client for the `bam-reader` service. Trimmed copy of the
- * client used by the other demo apps — only the endpoints the
- * Explorer reads (health, batches list, messages list, batch by tx
- * hash) are kept. Same env-var contract (`READER_URL`,
- * `READER_TIMEOUT_MS`), same error vocabulary, so an operator who
- * knows the other demos already knows this one.
+ * Typed HTTP client for the `bam-reader` service. **Pure browser
+ * client now** — every call takes the upstream `baseUrl` explicitly
+ * so the caller (the dashboard's React state, sourced from Settings
+ * + `NEXT_PUBLIC_DEFAULT_*` build defaults) controls which Reader is
+ * being hit. No `process.env` reads here.
  *
- * The Explorer is server-rendered: this module is consumed directly
- * by server components, not via a Next.js API route. As a result,
- * `readerErrorToResponse` (used by the proxy-route demos) is
- * intentionally omitted.
+ * Read-only: only the four endpoints Explorer surfaces are exposed.
  */
 
 export class ReaderUnreachableError extends Error {
@@ -23,12 +19,25 @@ export class ReaderConfigError extends Error {
   readonly reason = 'reader_url_not_configured';
 }
 
-export function resolveReaderUrl(envOverride?: string): string {
-  const url = envOverride ?? process.env.READER_URL;
-  if (!url || url.length === 0) {
-    throw new ReaderConfigError('READER_URL env is required');
+export interface ReaderClientConfig {
+  /**
+   * Reader base URL. May include a trailing slash (stripped). An
+   * empty string causes every call to throw `ReaderConfigError`.
+   */
+  baseUrl: string;
+  /** Per-call abort signal. */
+  signal?: AbortSignal;
+  /** Per-call timeout override. Defaults to 8 000 ms. */
+  timeoutMs?: number;
+}
+
+const DEFAULT_TIMEOUT_MS = 8_000;
+
+function resolveBase(raw: string): string {
+  if (!raw || raw.length === 0) {
+    throw new ReaderConfigError('Reader URL not configured');
   }
-  return url.replace(/\/$/, '');
+  return raw.replace(/\/$/, '');
 }
 
 export interface ReaderResponse {
@@ -37,39 +46,23 @@ export interface ReaderResponse {
   contentType: string;
 }
 
-const DEFAULT_READER_TIMEOUT_MS = 8_000;
-
-function resolveTimeoutMs(): number {
-  const raw = process.env.READER_TIMEOUT_MS;
-  if (raw === undefined || raw === '') return DEFAULT_READER_TIMEOUT_MS;
-  const n = Number(raw);
-  if (!Number.isFinite(n) || n <= 0) return DEFAULT_READER_TIMEOUT_MS;
-  return n;
-}
-
 async function rawFetch(
-  path: string,
-  init?: { envUrl?: string; signal?: AbortSignal; timeoutMs?: number }
+  cfg: ReaderClientConfig,
+  path: string
 ): Promise<ReaderResponse> {
-  const base = resolveReaderUrl(init?.envUrl);
+  const base = resolveBase(cfg.baseUrl);
   const url = `${base}${path}`;
-  const timeoutMs = init?.timeoutMs ?? resolveTimeoutMs();
+  const timeoutMs = cfg.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const timeoutSignal = AbortSignal.timeout(timeoutMs);
-  const signal = init?.signal
-    ? AbortSignal.any([init.signal, timeoutSignal])
-    : timeoutSignal;
+  const signal = cfg.signal ? AbortSignal.any([cfg.signal, timeoutSignal]) : timeoutSignal;
   let res: Response;
   try {
     res = await fetch(url, { method: 'GET', signal });
   } catch (err) {
     if (err instanceof Error && err.name === 'TimeoutError') {
-      throw new ReaderUnreachableError(
-        `reader did not respond within ${timeoutMs}ms`
-      );
+      throw new ReaderUnreachableError(`reader did not respond within ${timeoutMs}ms`);
     }
-    throw new ReaderUnreachableError(
-      err instanceof Error ? err.message : 'unreachable'
-    );
+    throw new ReaderUnreachableError(err instanceof Error ? err.message : 'unreachable');
   }
   const contentType = res.headers.get('content-type') ?? 'application/json';
   let body: unknown;
@@ -81,10 +74,8 @@ async function rawFetch(
   return { status: res.status, body, contentType };
 }
 
-export async function getHealth(
-  args: { envUrl?: string; signal?: AbortSignal } = {}
-): Promise<ReaderResponse> {
-  return rawFetch('/health', { envUrl: args.envUrl, signal: args.signal });
+export async function getHealth(cfg: ReaderClientConfig): Promise<ReaderResponse> {
+  return rawFetch(cfg, '/health');
 }
 
 export interface ListMessagesArgs {
@@ -92,11 +83,10 @@ export interface ListMessagesArgs {
   status?: 'pending' | 'submitted' | 'confirmed' | 'reorged';
   limit?: number;
   batchRef?: string;
-  envUrl?: string;
-  signal?: AbortSignal;
 }
 
 export async function listConfirmedMessages(
+  cfg: ReaderClientConfig,
   args: ListMessagesArgs
 ): Promise<ReaderResponse> {
   const q = new URLSearchParams();
@@ -104,39 +94,29 @@ export async function listConfirmedMessages(
   if (args.status !== undefined) q.set('status', args.status);
   if (args.limit !== undefined) q.set('limit', String(args.limit));
   if (args.batchRef !== undefined) q.set('batchRef', args.batchRef);
-  return rawFetch(`/messages?${q.toString()}`, {
-    envUrl: args.envUrl,
-    signal: args.signal,
-  });
+  return rawFetch(cfg, `/messages?${q.toString()}`);
 }
 
 export interface ListBatchesArgs {
   contentTag: string;
   status?: 'pending_tx' | 'confirmed' | 'reorged';
   limit?: number;
-  envUrl?: string;
-  signal?: AbortSignal;
 }
 
 export async function listBatches(
+  cfg: ReaderClientConfig,
   args: ListBatchesArgs
 ): Promise<ReaderResponse> {
   const q = new URLSearchParams();
   q.set('contentTag', args.contentTag);
   if (args.status !== undefined) q.set('status', args.status);
   if (args.limit !== undefined) q.set('limit', String(args.limit));
-  return rawFetch(`/batches?${q.toString()}`, {
-    envUrl: args.envUrl,
-    signal: args.signal,
-  });
+  return rawFetch(cfg, `/batches?${q.toString()}`);
 }
 
 export async function getBatch(
-  txHash: string,
-  args: { envUrl?: string; signal?: AbortSignal } = {}
+  cfg: ReaderClientConfig,
+  txHash: string
 ): Promise<ReaderResponse> {
-  return rawFetch(`/batches/${encodeURIComponent(txHash)}`, {
-    envUrl: args.envUrl,
-    signal: args.signal,
-  });
+  return rawFetch(cfg, `/batches/${encodeURIComponent(txHash)}`);
 }

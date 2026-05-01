@@ -12,14 +12,17 @@ interface BatchItem {
 
 export function PosterSubmittedBatchesPanel({
   result,
+  overridden,
 }: {
   result: PanelResult<unknown>;
+  overridden?: boolean;
 }) {
   return (
     <PanelShell
       title="Submitted batches"
       endpoint="Poster GET /submitted-batches"
       status={result.kind}
+      overridden={overridden}
     >
       {result.kind === 'ok' ? (
         <SubmittedList data={result.data} />

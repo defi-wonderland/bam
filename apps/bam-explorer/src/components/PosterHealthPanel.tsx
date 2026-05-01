@@ -2,9 +2,20 @@ import type { PanelResult } from '../lib/panel-result';
 import { DegradedBody } from './DegradedBody';
 import { PanelShell } from './PanelShell';
 
-export function PosterHealthPanel({ result }: { result: PanelResult<unknown> }) {
+export function PosterHealthPanel({
+  result,
+  overridden,
+}: {
+  result: PanelResult<unknown>;
+  overridden?: boolean;
+}) {
   return (
-    <PanelShell title="Poster health" endpoint="Poster GET /health" status={result.kind}>
+    <PanelShell
+      title="Poster health"
+      endpoint="Poster GET /health"
+      status={result.kind}
+      overridden={overridden}
+    >
       {result.kind === 'ok' ? (
         <PosterHealthBody data={result.data} />
       ) : (

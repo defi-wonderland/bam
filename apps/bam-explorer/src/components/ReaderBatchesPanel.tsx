@@ -18,14 +18,21 @@ interface BatchItem {
 export function ReaderBatchesPanel({
   resultsByTag,
   noTagsConfigured,
+  overridden,
 }: {
   resultsByTag: Map<Bytes32, PanelResult<unknown>>;
   noTagsConfigured: boolean;
+  overridden?: boolean;
 }) {
   const overallKind = noTagsConfigured ? 'not_configured' : aggregateKind(resultsByTag);
 
   return (
-    <PanelShell title="Confirmed batches" endpoint="Reader GET /batches" status={overallKind}>
+    <PanelShell
+      title="Confirmed batches"
+      endpoint="Reader GET /batches"
+      status={overallKind}
+      overridden={overridden}
+    >
       {noTagsConfigured ? (
         <DegradedBody
           result={{

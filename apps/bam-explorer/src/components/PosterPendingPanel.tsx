@@ -10,12 +10,19 @@ interface PendingItem {
   [key: string]: unknown;
 }
 
-export function PosterPendingPanel({ result }: { result: PanelResult<unknown> }) {
+export function PosterPendingPanel({
+  result,
+  overridden,
+}: {
+  result: PanelResult<unknown>;
+  overridden?: boolean;
+}) {
   return (
     <PanelShell
       title="Pending messages"
       endpoint="Poster GET /pending"
       status={result.kind}
+      overridden={overridden}
     >
       {result.kind === 'ok' ? (
         <PendingList data={result.data} />
