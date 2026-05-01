@@ -127,6 +127,12 @@ export interface ListMessagesArgs {
    * with their full `contents` payload).
    */
   batchRef?: string;
+  /**
+   * Restrict to messages from one author (0x-prefixed 20-byte hex).
+   * Used by `/api/next-nonce` to keep the cross-tag scan proportional
+   * to a sender's history rather than total confirmed history.
+   */
+  author?: string;
   envUrl?: string;
   signal?: AbortSignal;
 }
@@ -139,6 +145,7 @@ export async function listConfirmedMessages(
   if (args.status !== undefined) q.set('status', args.status);
   if (args.limit !== undefined) q.set('limit', String(args.limit));
   if (args.batchRef !== undefined) q.set('batchRef', args.batchRef);
+  if (args.author !== undefined) q.set('author', args.author);
   return rawFetch(`/messages?${q.toString()}`, {
     envUrl: args.envUrl,
     signal: args.signal,

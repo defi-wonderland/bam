@@ -14,7 +14,7 @@
  */
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import type { Bytes32 } from 'bam-sdk';
+import type { Address, Bytes32 } from 'bam-sdk';
 import type {
   BatchStatus,
   BatchesQuery,
@@ -41,6 +41,7 @@ export type Handler = (
 ) => Promise<void>;
 
 const HEX_BYTES32_RE = /^0x[0-9a-fA-F]{64}$/;
+const HEX_ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
 const MESSAGE_STATUSES: ReadonlySet<MessageStatus> = new Set([
   'pending',
   'submitted',
@@ -107,6 +108,7 @@ interface ParsedListQuery {
   status?: string;
   limit?: number;
   batchRef?: Bytes32;
+  author?: Address;
 }
 
 function parseLimit(raw: string): number | { error: string } {
@@ -121,7 +123,7 @@ function parseLimit(raw: string): number | { error: string } {
 function parseListQuery(
   url: URL,
   validStatuses: ReadonlySet<string>,
-  options?: { allowBatchRef?: boolean }
+  options?: { allowBatchRef?: boolean; allowAuthor?: boolean }
 ): ParsedListQuery | { error: string } {
   const contentTag = url.searchParams.get('contentTag');
   if (contentTag === null) return { error: 'contentTag' };
@@ -150,6 +152,18 @@ function parseListQuery(
     }
   }
 
+  if (options?.allowAuthor) {
+    const author = url.searchParams.get('author');
+    if (author !== null) {
+      if (!HEX_ADDRESS_RE.test(author)) return { error: 'author' };
+      // Stored lower-case in `bam-store`; the postgres adapter also
+      // lowers `query.author`, but normalise here so the bytes that
+      // hit the wire match the stored form (mixed-case input still
+      // works either way).
+      out.author = author.toLowerCase() as Address;
+    }
+  }
+
   return out;
 }
 
@@ -159,7 +173,10 @@ export const healthHandler: Handler = async (_req, res, ctx) => {
 };
 
 export const messagesHandler: Handler = async (_req, res, ctx, extras) => {
-  const parsed = parseListQuery(extras.url, MESSAGE_STATUSES, { allowBatchRef: true });
+  const parsed = parseListQuery(extras.url, MESSAGE_STATUSES, {
+    allowBatchRef: true,
+    allowAuthor: true,
+  });
   if ('error' in parsed) {
     badRequest(res, parsed.error);
     return;
@@ -169,6 +186,7 @@ export const messagesHandler: Handler = async (_req, res, ctx, extras) => {
     ...(parsed.status !== undefined && { status: parsed.status as MessageStatus }),
     ...(parsed.limit !== undefined && { limit: parsed.limit }),
     ...(parsed.batchRef !== undefined && { batchRef: parsed.batchRef }),
+    ...(parsed.author !== undefined && { author: parsed.author }),
   };
   try {
     const messages = await ctx.reader.listConfirmedMessages(query);

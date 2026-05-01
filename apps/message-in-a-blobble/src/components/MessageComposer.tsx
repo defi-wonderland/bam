@@ -16,40 +16,22 @@ import { encodeSocialContents } from '@/lib/contents-codec';
 import { MESSAGES_QUERY_KEY } from '@/lib/messages';
 
 /**
- * Per-sender next-nonce estimate. Walks the two Poster-backed sources
- * (pending + confirmed) and picks `max(nonce) + 1`. Feature 002's
- * pool enforces strict monotonicity per ERC-8180; on collision we
- * see `stale_nonce` and retry.
+ * Per-sender next-nonce estimate. Delegates to `/api/next-nonce`,
+ * which walks pending + confirmed across **every** contentTag this
+ * Poster handles — required because the Poster's monotonicity check
+ * is per sender across all tags (a per-tag scan would live-lock the
+ * same wallet posting in multiple apps).
  */
 async function nextNonceForSender(address: string): Promise<bigint> {
-  const lc = address.toLowerCase();
-  const [pendingRes, confirmedRes] = await Promise.all([
-    fetch('/api/messages').then((r) => (r.ok ? r.json() : { pending: [] })),
-    fetch('/api/confirmed-messages').then((r) => (r.ok ? r.json() : { messages: [] })),
-  ]);
-  const pending = (pendingRes as { pending?: Array<{ sender: string; nonce: string | number }> })
-    .pending ?? [];
-  const confirmed = (confirmedRes as { messages?: Array<{ sender: string; nonce: string | number }> })
-    .messages ?? [];
-  const parse = (v: string | number): bigint | null => {
-    try {
-      return BigInt(v);
-    } catch {
-      return null;
-    }
-  };
-  let max = -1n;
-  for (const p of pending) {
-    if (p.sender.toLowerCase() !== lc) continue;
-    const n = parse(p.nonce);
-    if (n !== null && n > max) max = n;
+  const res = await fetch(`/api/next-nonce?sender=${encodeURIComponent(address)}`);
+  if (!res.ok) {
+    throw new Error(`next-nonce lookup failed: ${res.status}`);
   }
-  for (const c of confirmed) {
-    if (c.sender.toLowerCase() !== lc) continue;
-    const n = parse(c.nonce);
-    if (n !== null && n > max) max = n;
+  const data = (await res.json()) as { nextNonce?: string };
+  if (typeof data.nextNonce !== 'string') {
+    throw new Error('next-nonce response missing nextNonce');
   }
-  return max + 1n;
+  return BigInt(data.nextNonce);
 }
 
 function bytesToHex(b: Uint8Array): `0x${string}` {
