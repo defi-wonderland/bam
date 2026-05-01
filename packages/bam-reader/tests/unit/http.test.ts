@@ -337,6 +337,41 @@ describe('ReaderHttpServer', () => {
       expect(res.status).toBe(400);
       expect(await res.json()).toEqual({ error: 'bad_request', reason: 'batchRef' });
     });
+
+    it('filters by author when supplied (drives the cross-tag next-nonce scan)', async () => {
+      const { port } = await bootSeededServer();
+      const hit = await fetch(
+        `http://127.0.0.1:${port}/messages?contentTag=${TAG}&author=${ADDR}`
+      );
+      expect(hit.status).toBe(200);
+      expect((await hit.json()).messages.length).toBe(1);
+
+      const otherAuthor = '0x' + '22'.repeat(20);
+      const miss = await fetch(
+        `http://127.0.0.1:${port}/messages?contentTag=${TAG}&author=${otherAuthor}`
+      );
+      expect(miss.status).toBe(200);
+      expect((await miss.json()).messages).toEqual([]);
+    });
+
+    it('accepts mixed-case author and matches the lower-cased stored value', async () => {
+      const { port } = await bootSeededServer();
+      const upper = ('0x' + '11'.repeat(20)).toUpperCase().replace('0X', '0x');
+      const res = await fetch(
+        `http://127.0.0.1:${port}/messages?contentTag=${TAG}&author=${upper}`
+      );
+      expect(res.status).toBe(200);
+      expect((await res.json()).messages.length).toBe(1);
+    });
+
+    it('rejects malformed author with 400', async () => {
+      const { port } = await bootSeededServer();
+      const res = await fetch(
+        `http://127.0.0.1:${port}/messages?contentTag=${TAG}&author=0xnope`
+      );
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({ error: 'bad_request', reason: 'author' });
+    });
   });
 
   // ── T006 — GET /batches ──────────────────────────────────────────────

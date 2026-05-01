@@ -77,11 +77,17 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   }
 
   // Confirmed view: Reader requires a contentTag, so fan out per known tag.
-  // Any tag failing fails the whole request — see header note on
-  // why we don't return a partial answer.
+  // The `author` filter pushes the per-sender narrowing to the Reader,
+  // so payload size scales with this sender's history (not global
+  // confirmed history). Any tag failing fails the whole request — see
+  // header note on why we don't return a partial answer.
   for (const tag of KNOWN_CONTENT_TAGS) {
     try {
-      const reader = await listConfirmedMessages({ contentTag: tag, status: 'confirmed' });
+      const reader = await listConfirmedMessages({
+        contentTag: tag,
+        status: 'confirmed',
+        author: lc,
+      });
       if (reader.status !== 200) {
         return NextResponse.json(
           {
@@ -93,6 +99,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         );
       }
       const rows = (reader.body as { messages?: ReaderMessageRow[] }).messages ?? [];
+      // Re-check `author` client-side: an older Reader that predates
+      // the `author` query param will silently ignore it and return
+      // all senders' rows, which would over-count `max`. Cheap O(n)
+      // pass over a payload the Reader has already narrowed.
       for (const r of rows) {
         if (r.author.toLowerCase() !== lc) continue;
         const n = parseNonce(r.nonce);

@@ -32,6 +32,11 @@ export const MESSAGE_IN_A_BLOBBLE_TAG =
  * Poster grows a `/nonce/:sender` endpoint we union the confirmed
  * views across known tags. New apps sharing this Poster need to be
  * added here — explicit list, not auto-discovery.
+ *
+ * Operator-side dependency: the Reader's `READER_CONTENT_TAGS` env
+ * (root `.env.local.example`) must be unset (follow-all) or include
+ * every tag listed below. A narrower Reader makes `/api/next-nonce`
+ * blind to foreign-tag confirmed history.
  */
 export const TWITTER_TAG =
   '0xf0fea94ffd2ae32ed878c57e3427bbffab46d333d09837bc640d952795090718' as const;

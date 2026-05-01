@@ -77,6 +77,14 @@ describe('GET /api/next-nonce', () => {
     expect(urls[0]).toContain('http://poster.test/pending');
     expect(urls.some((u) => u.includes('reader.test/messages') && u.includes(MESSAGE_IN_A_BLOBBLE_TAG))).toBe(true);
     expect(urls.some((u) => u.includes('reader.test/messages') && u.includes(TWITTER_TAG))).toBe(true);
+    // Each Reader call must include the lower-cased sender as `author` so
+    // the Reader narrows the per-tag scan to this sender's history.
+    const expectedAuthor = encodeURIComponent(SENDER.toLowerCase());
+    const readerCalls = urls.filter((u) => u.includes('reader.test/messages'));
+    expect(readerCalls.length).toBe(2);
+    for (const u of readerCalls) {
+      expect(u).toContain(`author=${expectedAuthor}`);
+    }
   });
 
   it('returns 0 for a sender with no history', async () => {
