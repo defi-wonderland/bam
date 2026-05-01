@@ -55,12 +55,35 @@ export function render(
   state: RenderState,
   handlers: RenderHandlers
 ): void {
+  // Capture textarea focus + caret before the rebuild — the
+  // controller re-renders on every keystroke, and without this the
+  // composer would lose focus mid-typing.
+  const active = document.activeElement;
+  const restore =
+    active instanceof HTMLTextAreaElement && mount.contains(active)
+      ? { start: active.selectionStart, end: active.selectionEnd }
+      : null;
+
   mount.replaceChildren();
   mount.appendChild(renderConnect(state, handlers));
   if (state.composer.replyTo === null) {
     mount.appendChild(renderComposer(state, handlers));
   }
   mount.appendChild(renderThread(state, handlers));
+
+  if (restore !== null) {
+    const ta = mount.querySelector<HTMLTextAreaElement>(
+      '.bam-composer textarea'
+    );
+    if (ta !== null && !ta.disabled) {
+      ta.focus();
+      try {
+        ta.setSelectionRange(restore.start, restore.end);
+      } catch {
+        // selectionStart/End can be null on some browsers
+      }
+    }
+  }
 }
 
 function renderConnect(
