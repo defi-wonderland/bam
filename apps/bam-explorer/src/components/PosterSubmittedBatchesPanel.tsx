@@ -13,9 +13,11 @@ interface BatchItem {
 export function PosterSubmittedBatchesPanel({
   result,
   overridden,
+  onRefresh,
 }: {
   result: PanelResult<unknown>;
   overridden?: boolean;
+  onRefresh?: () => void | Promise<void>;
 }) {
   return (
     <PanelShell
@@ -23,6 +25,7 @@ export function PosterSubmittedBatchesPanel({
       endpoint="Poster GET /submitted-batches"
       status={result.kind}
       overridden={overridden}
+      onRefresh={onRefresh}
     >
       {result.kind === 'ok' ? (
         <SubmittedList data={result.data} />
@@ -55,7 +58,7 @@ function SubmittedList({ data }: { data: unknown }) {
         </thead>
         <tbody>
           {items.slice(0, 50).map((b, i) => (
-            <tr key={String(b.txHash ?? i)} className="text-slate-800">
+            <tr key={`${String(b.txHash ?? '')}:${String(b.contentTag ?? '')}:${i}`} className="text-slate-800">
               <td className="pr-3 truncate max-w-[16ch]">{short(b.txHash)}</td>
               <td className="pr-3 text-right">{String(b.blockNumber ?? '')}</td>
               <td className="truncate max-w-[14ch]">{short(b.contentTag)}</td>

@@ -5,9 +5,11 @@ import { PanelShell } from './PanelShell';
 export function PosterStatusPanel({
   result,
   overridden,
+  onRefresh,
 }: {
   result: PanelResult<unknown>;
   overridden?: boolean;
+  onRefresh?: () => void | Promise<void>;
 }) {
   return (
     <PanelShell
@@ -15,6 +17,7 @@ export function PosterStatusPanel({
       endpoint="Poster GET /status"
       status={result.kind}
       overridden={overridden}
+      onRefresh={onRefresh}
     >
       {result.kind === 'ok' ? (
         <pre

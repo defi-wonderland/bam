@@ -94,6 +94,59 @@ export function Dashboard() {
     }
   }, [cfg.config]);
 
+  const readerCfg = { baseUrl: cfg.config.readerUrl };
+  const posterCfg = {
+    baseUrl: cfg.config.posterUrl,
+    authToken: cfg.config.posterAuthToken || undefined,
+  };
+
+  const refreshPosterHealth = useCallback(async () => {
+    const r = await fetchPosterHealth(posterCfg);
+    setData((prev) => (prev ? { ...prev, posterHealth: r } : prev));
+  }, [posterCfg.baseUrl, posterCfg.authToken]);
+
+  const refreshPosterStatus = useCallback(async () => {
+    const r = await fetchPosterStatus(posterCfg);
+    setData((prev) => (prev ? { ...prev, posterStatus: r } : prev));
+  }, [posterCfg.baseUrl, posterCfg.authToken]);
+
+  const refreshPosterPending = useCallback(async () => {
+    const r = await fetchPosterPending(posterCfg, cfg.config.pendingLimit);
+    setData((prev) => (prev ? { ...prev, posterPending: r } : prev));
+  }, [posterCfg.baseUrl, posterCfg.authToken, cfg.config.pendingLimit]);
+
+  const refreshPosterSubmitted = useCallback(async () => {
+    const r = await fetchPosterSubmittedBatches(posterCfg, cfg.config.submittedLimit);
+    setData((prev) => (prev ? { ...prev, posterSubmittedBatches: r } : prev));
+  }, [posterCfg.baseUrl, posterCfg.authToken, cfg.config.submittedLimit]);
+
+  const refreshReaderHealth = useCallback(async () => {
+    const r = await fetchReaderHealth(readerCfg);
+    setData((prev) => (prev ? { ...prev, readerHealth: r } : prev));
+  }, [readerCfg.baseUrl]);
+
+  const refreshReaderBatches = useCallback(async () => {
+    const entries = await Promise.all(
+      cfg.config.contentTags.map(
+        async (tag) => [tag, await fetchReaderBatches(readerCfg, tag, cfg.config.batchesLimit)] as const
+      )
+    );
+    setData((prev) =>
+      prev ? { ...prev, readerBatchesByTag: new Map(entries) } : prev
+    );
+  }, [readerCfg.baseUrl, cfg.config.contentTags, cfg.config.batchesLimit]);
+
+  const refreshReaderMessages = useCallback(async () => {
+    const entries = await Promise.all(
+      cfg.config.contentTags.map(
+        async (tag) => [tag, await fetchReaderMessages(readerCfg, tag, cfg.config.messagesLimit)] as const
+      )
+    );
+    setData((prev) =>
+      prev ? { ...prev, readerMessagesByTag: new Map(entries) } : prev
+    );
+  }, [readerCfg.baseUrl, cfg.config.contentTags, cfg.config.messagesLimit]);
+
   useEffect(() => {
     if (!cfg.mounted) return;
     void refresh();
@@ -147,13 +200,30 @@ export function Dashboard() {
       ) : (
         <>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <PosterHealthPanel result={data.posterHealth} overridden={cfg.flags.posterUrl} />
-            <ReaderHealthPanel result={data.readerHealth} overridden={cfg.flags.readerUrl} />
-            <PosterStatusPanel result={data.posterStatus} overridden={cfg.flags.posterUrl} />
-            <PosterPendingPanel result={data.posterPending} overridden={cfg.flags.posterUrl} />
+            <PosterHealthPanel
+              result={data.posterHealth}
+              overridden={cfg.flags.posterUrl}
+              onRefresh={refreshPosterHealth}
+            />
+            <ReaderHealthPanel
+              result={data.readerHealth}
+              overridden={cfg.flags.readerUrl}
+              onRefresh={refreshReaderHealth}
+            />
+            <PosterStatusPanel
+              result={data.posterStatus}
+              overridden={cfg.flags.posterUrl}
+              onRefresh={refreshPosterStatus}
+            />
+            <PosterPendingPanel
+              result={data.posterPending}
+              overridden={cfg.flags.posterUrl}
+              onRefresh={refreshPosterPending}
+            />
             <PosterSubmittedBatchesPanel
               result={data.posterSubmittedBatches}
               overridden={cfg.flags.posterUrl}
+              onRefresh={refreshPosterSubmitted}
             />
           </div>
 
@@ -162,11 +232,13 @@ export function Dashboard() {
               resultsByTag={data.readerBatchesByTag}
               noTagsConfigured={noTagsConfigured}
               overridden={cfg.flags.readerUrl}
+              onRefresh={refreshReaderBatches}
             />
             <ReaderMessagesPanel
               resultsByTag={data.readerMessagesByTag}
               noTagsConfigured={noTagsConfigured}
               overridden={cfg.flags.readerUrl}
+              onRefresh={refreshReaderMessages}
             />
           </div>
         </>

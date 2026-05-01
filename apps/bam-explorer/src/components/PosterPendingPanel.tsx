@@ -5,17 +5,19 @@ import { PanelShell } from './PanelShell';
 interface PendingItem {
   messageHash?: string;
   contentTag?: string;
-  author?: string;
-  receivedAt?: string | number;
+  sender?: string;
+  ingestedAt?: number;
   [key: string]: unknown;
 }
 
 export function PosterPendingPanel({
   result,
   overridden,
+  onRefresh,
 }: {
   result: PanelResult<unknown>;
   overridden?: boolean;
+  onRefresh?: () => void | Promise<void>;
 }) {
   return (
     <PanelShell
@@ -23,6 +25,7 @@ export function PosterPendingPanel({
       endpoint="Poster GET /pending"
       status={result.kind}
       overridden={overridden}
+      onRefresh={onRefresh}
     >
       {result.kind === 'ok' ? (
         <PendingList data={result.data} />
@@ -49,16 +52,18 @@ function PendingList({ data }: { data: unknown }) {
         <thead className="text-slate-500">
           <tr>
             <th className="text-left font-normal pr-3">messageHash</th>
-            <th className="text-left font-normal pr-3">author</th>
-            <th className="text-left font-normal">contentTag</th>
+            <th className="text-left font-normal pr-3">sender</th>
+            <th className="text-left font-normal pr-3">contentTag</th>
+            <th className="text-left font-normal">ingestedAt</th>
           </tr>
         </thead>
         <tbody>
           {items.slice(0, 50).map((m, i) => (
             <tr key={String(m.messageHash ?? i)} className="text-slate-800">
               <td className="pr-3 truncate max-w-[16ch]">{short(m.messageHash)}</td>
-              <td className="pr-3 truncate max-w-[14ch]">{short(m.author)}</td>
-              <td className="truncate max-w-[14ch]">{short(m.contentTag)}</td>
+              <td className="pr-3 truncate max-w-[14ch]">{short(m.sender)}</td>
+              <td className="pr-3 truncate max-w-[14ch]">{short(m.contentTag)}</td>
+              <td className="whitespace-nowrap">{formatTs(m.ingestedAt)}</td>
             </tr>
           ))}
         </tbody>
@@ -83,4 +88,9 @@ function short(v: unknown): string {
   if (typeof v !== 'string') return '';
   if (v.length <= 12) return v;
   return `${v.slice(0, 6)}…${v.slice(-4)}`;
+}
+
+function formatTs(v: unknown): string {
+  if (typeof v !== 'number' || !Number.isFinite(v)) return '';
+  return new Date(v).toLocaleString();
 }

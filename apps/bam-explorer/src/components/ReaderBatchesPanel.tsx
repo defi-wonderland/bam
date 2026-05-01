@@ -19,10 +19,12 @@ export function ReaderBatchesPanel({
   resultsByTag,
   noTagsConfigured,
   overridden,
+  onRefresh,
 }: {
   resultsByTag: Map<Bytes32, PanelResult<unknown>>;
   noTagsConfigured: boolean;
   overridden?: boolean;
+  onRefresh?: () => void | Promise<void>;
 }) {
   const overallKind = noTagsConfigured ? 'not_configured' : aggregateKind(resultsByTag);
 
@@ -32,6 +34,7 @@ export function ReaderBatchesPanel({
       endpoint="Reader GET /batches"
       status={overallKind}
       overridden={overridden}
+      onRefresh={onRefresh}
     >
       {noTagsConfigured ? (
         <DegradedBody
