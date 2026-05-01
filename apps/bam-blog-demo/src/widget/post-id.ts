@@ -18,7 +18,7 @@
 
 import { keccak256, toBytes, type Hex } from 'viem';
 
-import { POSTS } from '../../posts/_slugs.js';
+import { POSTS } from '../posts.js';
 
 export const POST_ID_NAMESPACE = 'bam-blog-demo.v1';
 

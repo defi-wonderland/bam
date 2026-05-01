@@ -1,41 +1,63 @@
 /**
- * Browser-side typed `fetch` helpers for the four same-origin API
- * routes the demo's dev/prod server (`server.ts`) exposes:
+ * Browser-side typed `fetch` helpers for the demo's read/write
+ * surface.
  *
- *   GET  /api/messages           pending feed for this app's contentTag
- *   POST /api/messages           submit a signed envelope
- *   GET  /api/confirmed-messages confirmed feed for this app's contentTag
- *   POST /api/post-blobble       nudge the Poster's per-tag flush
- *   GET  /api/next-nonce         per-sender next-nonce across all tags
+ * Two modes, decided at build time by the presence of
+ * `VITE_POSTER_URL` and `VITE_READER_URL`:
  *
- * The widget never knows the upstream Poster/Reader URLs — those
- * are server-side env (`POSTER_URL`, `READER_URL`). All paths
- * here are same-origin.
+ *   - **Direct mode** (both env vars set): the widget calls the
+ *     upstream Poster + Reader directly. The bundle is then
+ *     fully self-contained and can be served from any static
+ *     host. Requires the upstream services to send permissive
+ *     CORS headers.
  *
- * Failures are surfaced as `Error` with stable string messages
- * the renderer can map to user-facing text. We do not leak raw
- * fetch / network errors verbatim.
+ *   - **Proxy mode** (env vars empty): the widget calls
+ *     same-origin `/api/*` routes. The companion `server.ts`
+ *     proxies those to the upstreams. This is the default for
+ *     `pnpm dev` and the path other apps in this workspace
+ *     also use.
+ *
+ * The widget consumes the Reader's native row shape
+ * (`messageHash`, `author`, `batchRef`, `blockNumber`) in both
+ * modes — `server.ts` passes the Reader response through
+ * unchanged in proxy mode.
+ *
+ * Failures surface as `Error` with stable string messages.
  */
 
 import type { Hex } from 'viem';
 
+import { BLOG_DEMO_CONTENT_TAG, KNOWN_CONTENT_TAGS } from './content-tag.js';
+
+const POSTER_URL = (
+  (import.meta.env.VITE_POSTER_URL as string | undefined) ?? ''
+).replace(/\/$/, '');
+const READER_URL = (
+  (import.meta.env.VITE_READER_URL as string | undefined) ?? ''
+).replace(/\/$/, '');
+
+const DIRECT_MODE = POSTER_URL.length > 0 && READER_URL.length > 0;
+
 export interface PendingRow {
   readonly sender: Hex;
   readonly nonce: string;
-  /** hex-encoded contents (post-tag-prefix + app payload). */
   readonly contents: Hex;
   readonly messageHash: Hex;
   readonly ingestedAt: number;
 }
 
+/**
+ * Native Reader row shape (also what `server.ts` returns in
+ * proxy mode). The widget normalizes on these field names.
+ */
 export interface ConfirmedRow {
-  readonly message_id: Hex;
-  readonly sender: Hex;
+  readonly messageHash: Hex;
+  readonly author: Hex;
   readonly nonce: string;
   readonly contents: Hex;
   readonly signature: Hex;
-  readonly tx_hash: Hex | null;
-  readonly block_number: number | null;
+  readonly batchRef: Hex | null;
+  readonly blockNumber: number | null;
 }
 
 export interface SubmitArgs {
@@ -52,46 +74,93 @@ export interface SubmitResult {
 }
 
 export async function fetchPending(): Promise<PendingRow[]> {
-  const res = await fetch('/api/messages');
-  if (!res.ok) {
-    throw new Error(`pending fetch failed: ${res.status}`);
-  }
+  const url = DIRECT_MODE
+    ? `${POSTER_URL}/pending?contentTag=${encodeURIComponent(
+        BLOG_DEMO_CONTENT_TAG
+      )}`
+    : '/api/messages';
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`pending fetch failed: ${res.status}`);
   const data = (await res.json()) as { pending?: PendingRow[] };
   return data.pending ?? [];
 }
 
 export async function fetchConfirmed(): Promise<ConfirmedRow[]> {
-  const res = await fetch('/api/confirmed-messages');
-  if (!res.ok) {
-    throw new Error(`confirmed fetch failed: ${res.status}`);
-  }
+  const url = DIRECT_MODE
+    ? `${READER_URL}/messages?contentTag=${encodeURIComponent(
+        BLOG_DEMO_CONTENT_TAG
+      )}&status=confirmed`
+    : '/api/confirmed-messages';
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`confirmed fetch failed: ${res.status}`);
   const data = (await res.json()) as { messages?: ConfirmedRow[] };
-  return data.messages ?? [];
+  // In direct mode, drop rows that don't have a batchRef yet — the
+  // Reader can return such rows during a tx-pending → confirmed
+  // transition. The proxy already filters these.
+  const rows = data.messages ?? [];
+  return DIRECT_MODE ? rows.filter((r) => r.batchRef !== null) : rows;
+}
+
+interface PosterPendingFanout {
+  pending?: Array<{ sender: string; nonce: string | number }>;
+}
+interface ReaderConfirmedFanout {
+  messages?: Array<{ author: string; nonce: string }>;
 }
 
 export async function fetchNextNonce(sender: Hex): Promise<bigint> {
-  const res = await fetch(
-    `/api/next-nonce?sender=${encodeURIComponent(sender)}`
-  );
-  if (!res.ok) {
-    throw new Error(`next-nonce lookup failed: ${res.status}`);
+  if (!DIRECT_MODE) {
+    const res = await fetch(
+      `/api/next-nonce?sender=${encodeURIComponent(sender)}`
+    );
+    if (!res.ok) throw new Error(`next-nonce lookup failed: ${res.status}`);
+    const data = (await res.json()) as { nextNonce?: string };
+    if (typeof data.nextNonce !== 'string') {
+      throw new Error('next-nonce response missing nextNonce');
+    }
+    return BigInt(data.nextNonce);
   }
-  const data = (await res.json()) as { nextNonce?: string };
-  if (typeof data.nextNonce !== 'string') {
-    throw new Error('next-nonce response missing nextNonce');
+
+  // Direct mode: same logic server.ts implements, but client-side.
+  const lc = sender.toLowerCase();
+  let max = -1n;
+
+  const pendingRes = await fetch(`${POSTER_URL}/pending`);
+  if (!pendingRes.ok) {
+    throw new Error(`poster /pending: ${pendingRes.status}`);
   }
-  return BigInt(data.nextNonce);
+  const pendingData = (await pendingRes.json()) as PosterPendingFanout;
+  for (const p of pendingData.pending ?? []) {
+    if (p.sender.toLowerCase() !== lc) continue;
+    const n = parseNonce(p.nonce);
+    if (n !== null && n > max) max = n;
+  }
+
+  for (const tag of KNOWN_CONTENT_TAGS) {
+    const r = await fetch(
+      `${READER_URL}/messages?contentTag=${encodeURIComponent(tag)}&status=confirmed`
+    );
+    if (!r.ok) throw new Error(`reader /messages for ${tag}: ${r.status}`);
+    const data = (await r.json()) as ReaderConfirmedFanout;
+    for (const row of data.messages ?? []) {
+      if (row.author.toLowerCase() !== lc) continue;
+      const n = parseNonce(row.nonce);
+      if (n !== null && n > max) max = n;
+    }
+  }
+  return max + 1n;
 }
 
-/**
- * POST a signed envelope to the Poster (via the same-origin
- * proxy). Returns `{ accepted, reason? }` mirroring the Poster's
- * stable wire shape so the renderer can branch on `reason ===
- * 'stale_nonce'` for the Composer's retry loop without parsing
- * free-form text.
- */
+function parseNonce(v: string | number): bigint | null {
+  try {
+    return BigInt(v);
+  } catch {
+    return null;
+  }
+}
+
 export async function submitMessage(args: SubmitArgs): Promise<SubmitResult> {
-  const body = JSON.stringify({
+  const envelope = {
     contentTag: args.contentTag,
     message: {
       sender: args.sender,
@@ -99,30 +168,27 @@ export async function submitMessage(args: SubmitArgs): Promise<SubmitResult> {
       contents: args.contents,
       signature: args.signature,
     },
-  });
-  const res = await fetch('/api/messages', {
+  };
+  const url = DIRECT_MODE ? `${POSTER_URL}/submit` : '/api/messages';
+  const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body,
+    body: JSON.stringify(envelope),
   });
-  if (res.ok) {
-    return { accepted: true };
-  }
+  if (res.ok) return { accepted: true };
   let reason: string | undefined;
   try {
     const data = (await res.json()) as { reason?: string; error?: string };
     reason = data.reason ?? data.error;
   } catch {
-    // ignore — fall through with no reason
+    // ignore
   }
   return { accepted: false, reason };
 }
 
-/**
- * Tells the Poster to immediately flush this app's pending
- * batch. Best-effort; the Poster runs the submission loop on
- * its own cadence and a flush just nudges it.
- */
 export async function flushBatch(): Promise<void> {
-  await fetch('/api/post-blobble', { method: 'POST' }).catch(() => {});
+  const url = DIRECT_MODE
+    ? `${POSTER_URL}/flush?contentTag=${encodeURIComponent(BLOG_DEMO_CONTENT_TAG)}`
+    : '/api/post-blobble';
+  await fetch(url, { method: 'POST' }).catch(() => {});
 }

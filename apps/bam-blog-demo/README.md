@@ -9,33 +9,39 @@ section under each post.
 The point: **integrating BAM into a static HTML site is one
 `<script type="module">` and one `<div id="comments">`.** The
 post pages are hand-authored HTML, the widget is one ES-module
-bundle, and the dev/prod server is ~250 lines of `node:http`.
-No React, no Next.js, no wagmi.
+bundle, and the entire deploy artifact is a `dist/` directory of
+static files — no Node server. No React, no Next.js, no wagmi.
 
 ## How it works
 
 1. The 5 most recent posts on
    <https://github.com/vbuterin/blog> at authoring time are
-   reproduced as short static HTML excerpts in `posts/<slug>.html`.
-   Each ends with:
+   reproduced as short static HTML excerpts at the project root
+   (`secure-llms.html`, `balance-of-power.html`, …). Each ends
+   with:
 
    ```html
    <div id="comments" data-post-slug="<slug>"></div>
-   <script type="module" src="/comments.js"></script>
+   <script type="module" src="/src/widget/index.ts"></script>
    ```
 
-2. The widget (`src/widget/index.ts` → `dist/comments.js`) reads
-   the slug from the mount node, derives
+   Vite bundles the widget at build time; the script tag is
+   rewritten to a hashed asset.
+
+2. The widget reads the slug from the mount node, derives
    `postIdHash = keccak256("bam-blog-demo.v1:" + slug)`, polls
-   `/api/messages` and `/api/confirmed-messages`, decodes the
-   demo's app-opaque payload, builds a thread tree clamped at 2
-   levels of nesting, and renders to the DOM imperatively.
+   the upstream Poster + Reader directly from the browser,
+   decodes the demo's app-opaque payload, builds a thread tree
+   clamped at 2 levels of nesting, and renders to the DOM
+   imperatively.
 
 3. The widget signs comments with the user's wallet via raw
    `window.ethereum` (`eth_requestAccounts`,
    `eth_signTypedData_v4`). The EIP-712 typed-data shape is
    identical to what `bam-sdk` produces — pinned by
-   `test/typed-data-parity.test.ts`.
+   `test/typed-data-parity.test.ts`. The user only **signs**
+   the message — the Poster pays gas to batch and submit, so a
+   commenter doesn't need any Sepolia ETH.
 
 4. Per-post scoping happens at the application layer: every
    demo comment ships under one `contentTag`
@@ -48,14 +54,15 @@ No React, no Next.js, no wagmi.
 
 |                | `message-in-a-blobble` | `bam-twitter`           | `bam-blog-demo` (this app) |
 | -------------- | ---------------------- | ----------------------- | -------------------------- |
-| Stack          | Next.js + React        | Next.js + React         | Static HTML + ES-module    |
+| Stack          | Next.js + React        | Next.js + React         | Static HTML + Vite-bundled widget |
+| Server tier    | Next.js API routes     | Next.js API routes      | none — pure static deploy  |
 | Wallet         | RainbowKit + wagmi     | RainbowKit + wagmi      | raw `window.ethereum`      |
 | `contentTag`   | `message-in-a-blobble.v1` | `bam-twitter.v1`     | `bam-blog-demo.v1`         |
 | App payload    | post-only              | post + reply            | comment + reply, per post  |
 | Topic routing  | one feed               | one feed                | per-post (post id in payload) |
 | Reply nesting  | n/a                    | unbounded               | clamped at depth 2         |
 | Default port   | `:3000`                | `:3001`                 | `:3002`                    |
-| Comments       | ~3 deps                | ~6 deps                 | 2 runtime deps (`bam-sdk`, `viem`) |
+| Runtime deps   | ~3                     | ~6                      | 2 (`bam-sdk`, `viem`)      |
 
 All three apps share one Poster + one Reader; isolation is by
 `contentTag` alone.
@@ -82,97 +89,101 @@ bytes K+4..   : utf8 content
 
 ## Quick look (against the live fly.dev Poster + Reader)
 
-If you just want to see it working without bringing up the whole
-local stack:
-
 ```bash
 git checkout claude/add-blog-comments-ZUEFb
 pnpm install
 pnpm --filter bam-sdk build
-POSTER_URL=https://bam-poster.fly.dev \
-READER_URL=https://bam-reader.fly.dev \
+
+VITE_POSTER_URL=https://bam-poster.fly.dev \
+VITE_READER_URL=https://bam-reader.fly.dev \
   pnpm --filter bam-blog-demo dev
 # → http://localhost:3002
 ```
 
-`server.ts` proxies `/api/*` to those upstreams, so the browser
-only ever talks to localhost (no CORS headache). All you need
-locally is a Sepolia-funded wallet to post a comment.
+Reading existing comments works without a wallet. To author,
+connect any Ethereum wallet (no Sepolia ETH needed — the user
+only signs; the Poster pays gas to submit).
 
-## Setup
+> **CORS note.** The browser calls `bam-poster.fly.dev` and
+> `bam-reader.fly.dev` directly. They must send
+> `Access-Control-Allow-Origin: *` (or whitelist the deploy
+> origin). If they don't, you'll see CORS errors in the
+> console.
 
-Run all three demos against the shared Poster + Reader:
+## Static deploy
 
-```bash
-# from workspace root
-pnpm install
-pnpm --filter bam-sdk build
-pnpm db:up
-cp .env.local.example .env.local                          # Poster + Reader env
-cp apps/bam-blog-demo/.env.local.example apps/bam-blog-demo/.env.local # this app's env
-
-pnpm dev   # spawns Poster :8787, Reader :8788, blobble :3000, twitter :3001, blog-demo :3002
-```
-
-Or just this app:
+The same env vars at `vite build` time produce a fully static
+`dist/` you can drop on any CDN, S3, Vercel static, Netlify,
+GitHub Pages, IPFS, Cloudflare Pages — anywhere that serves
+files.
 
 ```bash
-pnpm --filter bam-blog-demo dev
-# → http://localhost:3002
+VITE_POSTER_URL=https://bam-poster.fly.dev \
+VITE_READER_URL=https://bam-reader.fly.dev \
+  pnpm --filter bam-blog-demo build
+# → apps/bam-blog-demo/dist/
+#     index.html
+#     secure-llms.html
+#     balance-of-power.html
+#     societies.html
+#     plinko.html
+#     galaxybrain.html
+#     style.css
+#     theme.js
+#     assets/<hashed-bundle>.js
 ```
 
-In dev, `server.ts` starts Vite's build watcher in-process so
-edits under `src/widget/` rebuild `dist/comments.js`
-automatically — one process, no `concurrently` dep.
+That directory **is** the deploy artifact. Roughly 25 KB
+gzipped of widget JS plus six tiny HTML pages.
 
-For prod, `pnpm --filter bam-blog-demo build` produces
-`dist/comments.js` and `pnpm --filter bam-blog-demo start`
-runs the static + proxy server with `NODE_ENV=production`.
+To preview the production build locally:
 
-### Environment variables
+```bash
+pnpm --filter bam-blog-demo preview
+# → http://localhost:3002 serving from dist/
+```
 
-| Variable     | Default                  | Description                            |
-| ------------ | ------------------------ | -------------------------------------- |
-| `POSTER_URL` | `http://localhost:8787`  | Shared `@bam/poster` instance          |
-| `READER_URL` | `http://localhost:8788`  | Shared `bam-reader` instance           |
-| `PORT`       | `3002`                   | Where this app's server listens        |
+## Environment variables
 
-## API routes (server.ts → upstreams)
+| Variable           | Required | Description                                    |
+| ------------------ | -------- | ---------------------------------------------- |
+| `VITE_POSTER_URL`  | yes      | Public URL of the upstream `@bam/poster`       |
+| `VITE_READER_URL`  | yes      | Public URL of the upstream `bam-reader`        |
 
-All five are thin proxies. The Poster and Reader handle the real
-work.
+Both are consumed at build time (and dev-time `vite serve`).
+Vite bakes them into the bundle. There are no runtime env vars
+— this is a static site.
 
-| Route                          | Method | Proxies to                                             |
-| ------------------------------ | ------ | ------------------------------------------------------ |
-| `/api/messages`                | GET    | Poster `/pending?contentTag=BLOG_TAG`                  |
-| `/api/messages`                | POST   | Poster `/submit` (envelope backfilled with `BLOG_TAG`) |
-| `/api/confirmed-messages`      | GET    | Reader `/messages?contentTag=BLOG_TAG&status=confirmed` |
-| `/api/post-blobble`            | POST   | Poster `/flush?contentTag=BLOG_TAG`                    |
-| `/api/next-nonce?sender=0x..`  | GET    | Poster `/pending` (no tag) + Reader `/messages` per known tag |
+## Cross-app coordination
 
-`/api/next-nonce` is the **multi-app coordination point** — same
-shape as `bam-twitter`'s. The Poster's monotonicity check is
-per-sender across all tags, so a per-tag estimate live-locks any
-wallet that has posted in another app on the same Poster. New
-apps sharing this Poster need to be appended to
-`KNOWN_CONTENT_TAGS` in `apps/bam-twitter/src/lib/constants.ts`
-**and** the matching list at the top of `server.ts`.
+The widget computes per-sender next-nonce client-side by walking
+the Poster's `/pending` (no tag filter) plus the Reader's
+`/messages` once per known `contentTag`. The Poster's
+monotonicity check is per sender across all tags, so a per-tag
+estimate would live-lock any wallet that has posted in another
+app on the same Poster.
+
+The list of known tags lives in
+`src/widget/content-tag.ts` — mirror of
+`apps/bam-twitter/src/lib/constants.ts` `KNOWN_CONTENT_TAGS`.
+New apps sharing this Poster need to be appended to both.
 
 ## Smoke test
 
-After `pnpm dev` brings everything up, walk this checklist
-manually before merging — it covers every acceptance criterion
-in `docs/specs/features/001-blog-comments/spec.md`:
+Run `pnpm --filter bam-blog-demo dev` against the live fly.dev
+upstreams (or a local Poster + Reader) and walk this list — it
+covers every acceptance criterion in
+`docs/specs/features/001-blog-comments/spec.md`:
 
 - [ ] **(a)** Open `http://localhost:3002/secure-llms.html`,
-      connect a Sepolia wallet, post a comment. It appears under
-      the post first as `pending` then as `confirmed` after the
-      next batch.
+      connect a wallet, post a comment. It appears first as
+      `pending`, then as `confirmed` after the next Poster
+      batch.
 - [ ] **(b)** Reload the page. The confirmed comment is still
       there.
 - [ ] **(c)** Click *Reply* on the top-level comment, post a
-      reply (depth 1). Click *Reply* on the depth-1 reply, post
-      another (depth 2).
+      reply (depth 1). Click *Reply* on the depth-1 reply,
+      post another (depth 2).
 - [ ] **(d)** On the depth-2 reply, the *Reply* affordance is
       absent — the depth cap is enforced.
 - [ ] **(e)** Open `http://localhost:3002/balance-of-power.html`.
@@ -181,11 +192,10 @@ in `docs/specs/features/001-blog-comments/spec.md`:
       `http://localhost:3000/` (message-in-a-blobble). The
       blog comment is not in either feed.
 - [ ] **(g)** With a wallet that has already posted in
-      `bam-twitter`, submit a blog comment. The Poster does not
-      reject on monotonicity (cross-app nonce coordination
-      works).
-- [ ] **(h)** Stop the Reader (`pnpm --filter bam-reader dev`
-      Ctrl-C) and reload `secure-llms.html`. The widget shows
+      `bam-twitter`, submit a blog comment. The Poster does
+      not reject on monotonicity.
+- [ ] **(h)** Block `bam-reader.fly.dev` (browser devtools
+      → Network → block) and reload. The widget shows
       "Couldn't load comments" — distinct from the empty-state
       "No comments yet — be the first."
 - [ ] **(i)** Disable JavaScript in the browser, reload
@@ -197,25 +207,26 @@ in `docs/specs/features/001-blog-comments/spec.md`:
 The CSS palette, font stack (Inter / system-ui sans-serif),
 container widths (760px markdown body inside a 1200px shell),
 the `<div id="doc" class="container-fluid markdown-body">` page
-structure, and the floated `<small>` byline pattern are taken
-directly from `site/css/main.css` and the published post HTML
-in <https://github.com/vbuterin/blog>. Light/dark mode follows
-the user's `prefers-color-scheme` (no manual toggle in the demo
-— the upstream has one, but it's incidental to the comments
-demo). The widget-rendered classes (`.bam-*`) are mine and
-inherit the same palette so the comments section visually
-belongs to the page.
+structure, the floated `<small>` byline, and the
+`html.dark`-class-toggled dark mode (with localStorage
+persistence and an inline pre-paint script that avoids
+flash-of-wrong-theme) are taken directly from
+`site/css/main.css` and the published post HTML in
+<https://github.com/vbuterin/blog>. The widget-rendered classes
+(`.bam-*`) are mine and inherit the same palette so the
+comments section visually belongs to the page.
 
 ## Stack
 
 - **Static HTML** — 5 hand-authored post pages + index, no
   generator.
-- **Vite** — bundles `src/widget/index.ts` to
-  `dist/comments.js`. Vite is already in the workspace via
-  `vitest`; no new top-level dependency.
+- **Vite** (MPA mode) — bundles `src/widget/index.ts` to a
+  hashed asset and copies `public/*` to the deploy root. Vite
+  is already in the workspace via `vitest`; no new top-level
+  dependency.
 - **`bam-sdk` (browser)** — encoding, EIP-712 types,
   `messageHash` derivation.
-- **`viem`** — `keccak256`, `Hex` types, type-only imports.
+- **`viem`** — `keccak256`, `Hex` types.
 - **No React, Next.js, RainbowKit, wagmi, React Query, or
   Tailwind** — see `docs/specs/features/001-blog-comments/plan.md`
   *Constitution check IX*.

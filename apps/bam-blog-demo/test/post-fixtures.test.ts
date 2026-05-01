@@ -15,9 +15,9 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-import { POSTS } from '../posts/_slugs.js';
+import { POSTS } from '../src/posts.js';
 
-const POSTS_DIR = resolve(__dirname, '..', 'posts');
+const POSTS_DIR = resolve(__dirname, '..');
 
 describe('post fixtures', () => {
   it('declares exactly 5 posts', () => {
@@ -56,13 +56,16 @@ describe('post fixtures', () => {
     }
   });
 
-  it('every post HTML loads /comments.js as an ES module', () => {
+  it('every post HTML loads the widget entry as an ES module', () => {
     for (const { slug } of POSTS) {
       const html = readFileSync(resolve(POSTS_DIR, `${slug}.html`), 'utf8');
-      // Tolerate single or double quotes and any whitespace inside the tag.
+      // Vite's MPA mode resolves and bundles this entry; build
+      // rewrites it to a hashed asset.
       expect(
-        /<script\s+type=["']module["']\s+src=["']\/comments\.js["']/.test(html),
-        `post ${slug} is missing <script type="module" src="/comments.js">`
+        /<script\s+type=["']module["']\s+src=["']\/src\/widget\/index\.ts["']/.test(
+          html
+        ),
+        `post ${slug} is missing <script type="module" src="/src/widget/index.ts">`
       ).toBe(true);
     }
   });

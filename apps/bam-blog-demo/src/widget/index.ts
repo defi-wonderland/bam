@@ -145,8 +145,8 @@ async function poll(c: Controller): Promise<void> {
     for (const r of confirmedRaw) {
       const dm = toDecoded(
         r.contents,
-        r.message_id,
-        r.sender,
+        r.messageHash,
+        r.author,
         r.nonce,
         'confirmed'
       );
