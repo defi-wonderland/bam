@@ -4,21 +4,24 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Vitalik Buterin's website (BAM comments demo)</title>
+    <script>
+      (function () {
+        var s = localStorage.getItem('colorScheme');
+        if (s === 'dark') document.documentElement.classList.add('dark');
+        else if (s === 'light') document.documentElement.classList.add('light');
+      })();
+    </script>
     <link rel="stylesheet" href="/style.css" />
+    <script defer src="/theme.js"></script>
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="Vitalik Buterin's website" />
   </head>
   <body>
     <div id="doc" class="container-fluid">
-      <h1 style="text-align: center">Vitalik Buterin's website</h1>
-      <hr />
-      <div style="text-align: center">
-        <a class="toc-category" href="#">Blockchains</a>
-        <a class="toc-category" href="#">Cryptography</a>
-        <a class="toc-category" href="#">Economics</a>
-        <a class="toc-category" href="#">Fun</a>
-        <a class="toc-category" href="#">General</a>
-        <a class="toc-category" href="#">Math</a>
-        <a class="toc-category" href="#">Philosophy</a>
+      <div id="color-mode-switch" class="color-mode-switch">
+        <button type="button">☾ dark</button>
       </div>
+      <h1 style="text-align: center">Vitalik Buterin's website</h1>
       <hr />
       <ul class="post-list">
         <li>

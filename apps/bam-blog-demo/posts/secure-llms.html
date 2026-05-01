@@ -6,10 +6,26 @@
     <title>
       My self-sovereign / local / private / secure LLM setup, April 2026
     </title>
+    <script>
+      (function () {
+        var s = localStorage.getItem('colorScheme');
+        if (s === 'dark') document.documentElement.classList.add('dark');
+        else if (s === 'light') document.documentElement.classList.add('light');
+      })();
+    </script>
     <link rel="stylesheet" href="/style.css" />
+    <script defer src="/theme.js"></script>
+    <meta name="twitter:card" content="summary" />
+    <meta
+      name="twitter:title"
+      content="My self-sovereign / local / private / secure LLM setup, April 2026"
+    />
   </head>
   <body>
     <div id="doc" class="container-fluid markdown-body">
+      <div id="color-mode-switch" class="color-mode-switch">
+        <button type="button">☾ dark</button>
+      </div>
       <h1 style="margin-bottom: 7px">
         My self-sovereign / local / private / secure LLM setup, April 2026
       </h1>

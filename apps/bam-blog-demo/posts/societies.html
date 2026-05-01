@@ -4,10 +4,23 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Let a thousand societies bloom</title>
+    <script>
+      (function () {
+        var s = localStorage.getItem('colorScheme');
+        if (s === 'dark') document.documentElement.classList.add('dark');
+        else if (s === 'light') document.documentElement.classList.add('light');
+      })();
+    </script>
     <link rel="stylesheet" href="/style.css" />
+    <script defer src="/theme.js"></script>
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="Let a thousand societies bloom" />
   </head>
   <body>
     <div id="doc" class="container-fluid markdown-body">
+      <div id="color-mode-switch" class="color-mode-switch">
+        <button type="button">☾ dark</button>
+      </div>
       <h1 style="margin-bottom: 7px">Let a thousand societies bloom</h1>
       <small style="float: left">2025 Dec 17</small>
       <small style="float: right"><a href="/">See all posts</a></small>

@@ -22,7 +22,7 @@
 }
 
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not(.light) {
     --color-bg: #1c1c1c;
     --color-text: #e5e5e5;
     --color-anchor: #c3a554;
@@ -32,6 +32,17 @@
     --color-code-text: #f7f7f7;
     --color-muted: #b8b8b8;
   }
+}
+
+html.dark {
+  --color-bg: #1c1c1c;
+  --color-text: #e5e5e5;
+  --color-anchor: #c3a554;
+  --color-heading: #fff;
+  --color-divider: #444;
+  --color-code-bg: #2d2d2d;
+  --color-code-text: #f7f7f7;
+  --color-muted: #b8b8b8;
 }
 
 * {
@@ -147,6 +158,29 @@ svg {
   width: 100px;
   padding: 8px 4px;
   text-align: center;
+}
+
+/* Color-scheme toggle — minimal text-based version of the
+   upstream's checkbox/SVG toggle. Same behavior: click flips
+   `html.dark` and persists in localStorage. */
+.color-mode-switch {
+  display: flex;
+  justify-content: flex-end;
+  margin: 0 0 0.5rem 0;
+}
+.color-mode-switch button {
+  font: inherit;
+  font-size: 0.85rem;
+  background: none;
+  border: 1px solid var(--color-divider);
+  color: var(--color-text);
+  padding: 0.2rem 0.6rem;
+  cursor: pointer;
+  border-radius: 4px;
+}
+.color-mode-switch button:hover {
+  border-color: var(--color-anchor);
+  color: var(--color-anchor);
 }
 
 .post-list {
