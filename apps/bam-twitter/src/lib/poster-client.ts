@@ -171,6 +171,21 @@ export async function getHealth(args: { envUrl?: string } = {}): Promise<PosterR
   return rawFetch('GET', '/health', { envUrl: args.envUrl });
 }
 
+/**
+ * `GET /nonce/<sender>`. The sender is path-encoded so any unexpected
+ * characters become a 400 from the Poster rather than a path-traversal
+ * surprise. Caller is responsible for parsing `body.nextNonce` (a
+ * decimal string) — `rawFetch` does not coerce.
+ */
+export async function getNextNonce(args: {
+  sender: string;
+  envUrl?: string;
+}): Promise<PosterResponse> {
+  return rawFetch('GET', `/nonce/${encodeURIComponent(args.sender)}`, {
+    envUrl: args.envUrl,
+  });
+}
+
 export async function flush(args: { contentTag: string; envUrl?: string }): Promise<PosterResponse> {
   return rawFetch('POST', `/flush?contentTag=${encodeURIComponent(args.contentTag)}`, {
     envUrl: args.envUrl,

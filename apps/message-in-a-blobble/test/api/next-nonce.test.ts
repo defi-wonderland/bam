@@ -1,12 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 
-import { MESSAGE_IN_A_BLOBBLE_TAG, TWITTER_TAG } from '@/lib/constants';
-
 const ORIGINAL_FETCH = global.fetch;
 
 const SENDER = '0x' + '11'.repeat(20);
-const OTHER = '0x' + '22'.repeat(20);
+const SENDER_MIXED = '0x' + 'AbCdEf'.repeat(6) + 'AbCd';
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -20,14 +18,12 @@ describe('GET /api/next-nonce', () => {
 
   beforeEach(() => {
     process.env.POSTER_URL = 'http://poster.test';
-    process.env.READER_URL = 'http://reader.test';
     fetchMock = vi.fn();
     global.fetch = fetchMock as unknown as typeof fetch;
   });
   afterEach(() => {
     global.fetch = ORIGINAL_FETCH;
     delete process.env.POSTER_URL;
-    delete process.env.READER_URL;
     vi.resetModules();
   });
 
@@ -40,30 +36,8 @@ describe('GET /api/next-nonce', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('returns max(nonce)+1 unioned across pending and per-tag confirmed', async () => {
-    fetchMock.mockResolvedValueOnce(
-      jsonResponse({
-        pending: [
-          { sender: SENDER, nonce: '3' },
-          { sender: OTHER, nonce: '99' }, // ignored — different sender
-          { sender: SENDER.toUpperCase(), nonce: '5' }, // case-insensitive match
-        ],
-      })
-    );
-    // Reader call per known tag — order matches KNOWN_CONTENT_TAGS.
-    fetchMock.mockResolvedValueOnce(
-      jsonResponse({
-        messages: [
-          { author: SENDER, nonce: '4' },
-          { author: OTHER, nonce: '100' },
-        ],
-      })
-    );
-    fetchMock.mockResolvedValueOnce(
-      jsonResponse({
-        messages: [{ author: SENDER, nonce: '7' }],
-      })
-    );
+  it('proxies the Poster /nonce/<sender> response on success', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ nextNonce: '11' }));
 
     const { GET } = await import('../../src/app/api/next-nonce/route');
     const res = await GET(
@@ -71,37 +45,27 @@ describe('GET /api/next-nonce', () => {
     );
     expect(res.status).toBe(200);
     const body = (await res.json()) as { nextNonce: string };
-    expect(body.nextNonce).toBe('8');
+    expect(body.nextNonce).toBe('11');
 
-    const urls = fetchMock.mock.calls.map((c) => String(c[0]));
-    expect(urls[0]).toContain('http://poster.test/pending');
-    expect(urls.some((u) => u.includes('reader.test/messages') && u.includes(MESSAGE_IN_A_BLOBBLE_TAG))).toBe(true);
-    expect(urls.some((u) => u.includes('reader.test/messages') && u.includes(TWITTER_TAG))).toBe(true);
-    // Each Reader call must include the lower-cased sender as `author` so
-    // the Reader narrows the per-tag scan to this sender's history.
-    const expectedAuthor = encodeURIComponent(SENDER.toLowerCase());
-    const readerCalls = urls.filter((u) => u.includes('reader.test/messages'));
-    expect(readerCalls.length).toBe(2);
-    for (const u of readerCalls) {
-      expect(u).toContain(`author=${expectedAuthor}`);
-    }
-  });
-
-  it('returns 0 for a sender with no history', async () => {
-    // One Response per call — Response bodies can only be consumed once.
-    fetchMock.mockResolvedValueOnce(jsonResponse({ pending: [] }));
-    fetchMock.mockResolvedValueOnce(jsonResponse({ messages: [] }));
-    fetchMock.mockResolvedValueOnce(jsonResponse({ messages: [] }));
-    const { GET } = await import('../../src/app/api/next-nonce/route');
-    const res = await GET(
-      new NextRequest(`http://localhost/api/next-nonce?sender=${SENDER}`)
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const url = String(fetchMock.mock.calls[0][0]);
+    expect(url).toBe(
+      `http://poster.test/nonce/${encodeURIComponent(SENDER.toLowerCase())}`
     );
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { nextNonce: string };
-    expect(body.nextNonce).toBe('0');
   });
 
-  it('returns 502 when the Poster /pending call returns non-200', async () => {
+  it('lower-cases the sender before forwarding to the Poster', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ nextNonce: '0' }));
+    const { GET } = await import('../../src/app/api/next-nonce/route');
+    await GET(
+      new NextRequest(`http://localhost/api/next-nonce?sender=${SENDER_MIXED}`)
+    );
+    const url = String(fetchMock.mock.calls[0][0]);
+    expect(url).toContain(SENDER_MIXED.toLowerCase());
+    expect(url).not.toContain(SENDER_MIXED);
+  });
+
+  it('returns 502 when the Poster returns non-200', async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse({ error: 'oops' }, 500));
     const { GET } = await import('../../src/app/api/next-nonce/route');
     const res = await GET(
@@ -112,9 +76,8 @@ describe('GET /api/next-nonce', () => {
     expect(body.error).toBe('nonce_lookup_failed');
   });
 
-  it('returns 502 when a Reader tag fetch returns non-200', async () => {
-    fetchMock.mockResolvedValueOnce(jsonResponse({ pending: [] }));
-    fetchMock.mockResolvedValueOnce(jsonResponse({ error: 'reader down' }, 503));
+  it('returns 502 when the Poster body is missing nextNonce', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ wrong: 'shape' }));
     const { GET } = await import('../../src/app/api/next-nonce/route');
     const res = await GET(
       new NextRequest(`http://localhost/api/next-nonce?sender=${SENDER}`)

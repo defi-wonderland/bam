@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 
-import { bytesToHex } from 'bam-sdk';
+import { bytesToHex, type Address } from 'bam-sdk';
 
 import type { Poster } from '../types.js';
 import { rejectionToStatus } from './error-map.js';
@@ -207,6 +207,30 @@ export const healthHandler: Handler = async (_req, res, ctx) => {
   const health = await ctx.poster.health();
   const status = health.state === 'unhealthy' ? 503 : health.state === 'degraded' ? 200 : 200;
   return sendJson(res, status, { health });
+};
+
+/**
+ * `0x` + 40 hex chars. Matches what `parseEnvelope` accepts as a sender,
+ * so the route's input contract lines up with the ingest pipeline's.
+ */
+const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
+
+export const nonceHandler: Handler = async (req, res, ctx) => {
+  // Path-param route: `/nonce/<sender>`. The server's dispatch
+  // matches the `/nonce/` prefix and passes the trailing segment
+  // through here in `req.url`.
+  const url = new URL(req.url ?? '/', 'http://local');
+  const sender = url.pathname.slice('/nonce/'.length);
+  if (sender === '' || sender.includes('/')) {
+    return sendJson(res, 400, { error: 'invalid_sender' });
+  }
+  if (!ADDRESS_RE.test(sender)) {
+    return sendJson(res, 400, { error: 'invalid_sender' });
+  }
+  const nextNonce = await ctx.poster.getNextNonce(
+    sender.toLowerCase() as Address
+  );
+  return sendJson(res, 200, { nextNonce });
 };
 
 export const flushHandler: Handler = async (req, res, ctx) => {
