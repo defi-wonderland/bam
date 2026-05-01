@@ -29,7 +29,7 @@ static files — no Node server. No React, no Next.js, no wagmi.
    rewritten to a hashed asset.
 
 2. The widget reads the slug from the mount node, derives
-   `postIdHash = keccak256("bam-blog-demo.v1:" + slug)`, polls
+   `postIdHash = keccak256("bam-blog.v1:" + slug)`, polls
    the upstream Poster + Reader directly from the browser,
    decodes the demo's app-opaque payload, builds a thread tree
    clamped at 2 levels of nesting, and renders to the DOM
@@ -45,7 +45,7 @@ static files — no Node server. No React, no Next.js, no wagmi.
 
 4. Per-post scoping happens at the application layer: every
    demo comment ships under one `contentTag`
-   (`bam-blog-demo.v1`), and the post id rides inside the
+   (`bam-blog.v1`), and the post id rides inside the
    signed `contents` payload. A relay can't re-attribute a
    signed comment to a different post without breaking
    signature verification.
@@ -57,7 +57,7 @@ static files — no Node server. No React, no Next.js, no wagmi.
 | Stack          | Next.js + React        | Next.js + React         | Static HTML + Vite-bundled widget |
 | Server tier    | Next.js API routes     | Next.js API routes      | none — pure static deploy  |
 | Wallet         | RainbowKit + wagmi     | RainbowKit + wagmi      | raw `window.ethereum`      |
-| `contentTag`   | `message-in-a-blobble.v1` | `bam-twitter.v1`     | `bam-blog-demo.v1`         |
+| `contentTag`   | `message-in-a-blobble.v1` | `bam-twitter.v1`     | `bam-blog.v1`              |
 | App payload    | post-only              | post + reply            | comment + reply, per post  |
 | Topic routing  | one feed               | one feed                | per-post (post id in payload) |
 | Reply nesting  | n/a                    | unbounded               | clamped at depth 2         |
@@ -74,7 +74,7 @@ Inside `contents[32:]` (the bytes after the contentTag prefix):
 ```
 byte  0       : version    (uint8)  — currently 0x01
 byte  1       : kind       (uint8)  — 0=comment, 1=reply
-bytes 2..34   : postIdHash (bytes32) — keccak256("bam-blog-demo.v1:" + slug)
+bytes 2..34   : postIdHash (bytes32) — keccak256("bam-blog.v1:" + slug)
 bytes 34..42  : timestamp  (uint64 BE)
 [reply only]
 bytes 42..74  : parentMessageHash (bytes32) — ERC-8180 messageHash

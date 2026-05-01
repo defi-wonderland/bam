@@ -1,7 +1,7 @@
 /**
  * Per-post identifier the comments widget uses to scope a thread to
  * its post. The on-chain `contentTag` is single per app
- * (`bam-blog-demo.v1`); per-post separation lives **inside** the
+ * (`bam-blog.v1`); per-post separation lives **inside** the
  * signed `contents` payload, so a relay cannot re-attribute a
  * comment to a different post without breaking the message
  * signature.
@@ -20,7 +20,7 @@ import { keccak256, toBytes, type Hex } from 'viem';
 
 import { POSTS } from '../posts.js';
 
-export const POST_ID_NAMESPACE = 'bam-blog-demo.v1';
+export const POST_ID_NAMESPACE = 'bam-blog.v1';
 
 /**
  * Returns the bytes32 post id for `slug`.

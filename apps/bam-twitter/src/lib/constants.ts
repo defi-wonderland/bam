@@ -27,9 +27,9 @@ export const TWITTER_TAG =
 export const MESSAGE_IN_A_BLOBBLE_TAG =
   '0x323eee4675c068805a324c1a3a36805d446179434138f2f0872ac3f81b2e6591' as const;
 
-/** `keccak256(utf8("bam-blog-demo.v1"))` — see `apps/bam-blog-demo/src/widget/content-tag.ts`. */
+/** `keccak256(utf8("bam-blog.v1"))` — see `apps/bam-blog-demo/src/widget/content-tag.ts`. */
 export const BAM_BLOG_DEMO_TAG =
-  '0xafe64111cc3b6a387f1cf4d4deb29d300bebc1748ff4d039459a6af86c6dab4b' as const;
+  '0xece35f4f2613ebd3630cf9589826bea0e719af7b937e1844faf22115152afc1a' as const;
 
 export const KNOWN_CONTENT_TAGS = [
   TWITTER_TAG,

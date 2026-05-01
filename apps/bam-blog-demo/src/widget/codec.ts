@@ -12,7 +12,7 @@
  *
  *   byte  0      : version    (uint8) — currently 0x01
  *   byte  1      : kind       (uint8) — 0=comment, 1=reply
- *   bytes 2..34  : postIdHash (bytes32) — keccak256("bam-blog-demo.v1:" + slug)
+ *   bytes 2..34  : postIdHash (bytes32) — keccak256("bam-blog.v1:" + slug)
  *   bytes 34..42 : timestamp  (uint64 BE, Unix seconds)
  *   [reply only]
  *   bytes 42..74 : parentMessageHash (bytes32) — ERC-8180 messageHash

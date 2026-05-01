@@ -18,20 +18,20 @@ import {
 
 const PINNED: Record<string, `0x${string}`> = {
   'secure-llms':
-    '0x40a0424bf67a54fd4c2d7f7401bbd9654a68010ddc4c1c2f34deb6a15b038d88',
+    '0x21c2b8410a883bb4e6b839335a033e843ec096d49db34d824384ff7df62b2897',
   'balance-of-power':
-    '0x9e505f5876eb2de178d906ba88db9a056b47ca34780639858087ba1b320dc83b',
+    '0x96bb94efa50808cd4212ab11d14930d45244cc37eb01173ff1af61c8685497a4',
   societies:
-    '0x0501f43f5aaa41d4ccaf0d3abb9dedd6da901d9f1510deb4be54d466146da50f',
+    '0xe2373ef954935f13aee50eaada57bf5ccdad4886b2beab2f940e7e4e584186e2',
   plinko:
-    '0xd730893ef63c900a32eb6f04f109ea52503af60acb33064c4123db4fdb0b5baf',
+    '0xc3929321af2b67eb9fa9ad01044f387d4e32872ec86ff6bf5f6327c222756f55',
   galaxybrain:
-    '0xa75cec610ade5eaf5860faa186320753189f7b92d1af417cfa9c4ae45c8ba5b9',
+    '0x7e87bafe0d063dc325059b2e414dfbbcb14e070a3badff531872864faffe7438',
 };
 
 describe('post-id', () => {
   it('namespace is the v1 string', () => {
-    expect(POST_ID_NAMESPACE).toBe('bam-blog-demo.v1');
+    expect(POST_ID_NAMESPACE).toBe('bam-blog.v1');
   });
 
   it('matches the spec formula keccak256(NAMESPACE + ":" + slug)', () => {

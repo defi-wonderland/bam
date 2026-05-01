@@ -18,7 +18,7 @@ import {
 
 describe('content-tag', () => {
   it('namespace is the v1 string', () => {
-    expect(CONTENT_TAG_NAMESPACE).toBe('bam-blog-demo.v1');
+    expect(CONTENT_TAG_NAMESPACE).toBe('bam-blog.v1');
   });
 
   it('BLOG_DEMO_CONTENT_TAG matches keccak256(utf8(NAMESPACE))', () => {
@@ -29,7 +29,7 @@ describe('content-tag', () => {
 
   it('BLOG_DEMO_CONTENT_TAG is the pinned bytes32 literal', () => {
     expect(BLOG_DEMO_CONTENT_TAG.toLowerCase()).toBe(
-      '0xafe64111cc3b6a387f1cf4d4deb29d300bebc1748ff4d039459a6af86c6dab4b'
+      '0xece35f4f2613ebd3630cf9589826bea0e719af7b937e1844faf22115152afc1a'
     );
   });
 
