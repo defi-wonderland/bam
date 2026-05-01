@@ -24,6 +24,7 @@ Built by [Wonderland](https://wonderland.xyz).
 | [`message-in-a-blobble`](apps/message-in-a-blobble) | Demo — sign messages with ECDSA in the browser; the app proxies submission to `@bam/poster` and confirmed reads to `bam-reader` |
 | [`bam-twitter`](apps/bam-twitter) | Twitter-style demo — posts and replies sharing the same Poster + Reader as `message-in-a-blobble`; isolated by a distinct `contentTag` |
 | [`bam-sdk-test`](apps/bam-sdk-test) | Playground — surfaces the `bam-sdk/browser` API one section at a time (hex, message, ECDSA, BLS, batch, exposure, BPE, compression) |
+| [`bam-explorer`](apps/bam-explorer) | Read-only monitoring dashboard — surfaces every Reader and Poster read endpoint (health, status, pending, submitted batches, confirmed batches/messages per `contentTag`) on one server-rendered page, with per-batch drill-down |
 
 ## Getting Started
 
