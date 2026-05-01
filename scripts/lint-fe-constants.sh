@@ -18,10 +18,11 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PACKAGES=("packages/bam-poster/src" "packages/bam-reader/src")
 # Patterns: literal multiplications and assignments + the bare 4096
-# literal anywhere outside an import. The 31/32 patterns use a
-# negative lookahead alternative (either non-digit OR end-of-line)
-# so a literal at EOL is still caught.
-FORBIDDEN_RE='\* 31([^0-9]|$)|\* 32([^0-9]|$)|= 31([^0-9]|$)|= 32([^0-9]|$)|\b4096\b'
+# literal anywhere outside an import. `*31`, `* 31`, `*  31` (and the
+# `=` variants) all need to fire — `[[:space:]]*` lets the operator
+# touch the digit or sit any number of spaces/tabs away. The
+# (non-digit | EOL) alternative keeps a literal at EOL caught.
+FORBIDDEN_RE='\*[[:space:]]*31([^0-9]|$)|\*[[:space:]]*32([^0-9]|$)|=[[:space:]]*31([^0-9]|$)|=[[:space:]]*32([^0-9]|$)|\b4096\b'
 
 violations=0
 for pkg in "${PACKAGES[@]}"; do

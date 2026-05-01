@@ -19,6 +19,8 @@ export interface StoreTxnPendingRow {
   contents: Uint8Array;
   signature: Uint8Array;
   messageHash: Bytes32;
+  /** Chain this Poster instance is wired to. Required so `markReorged` can chain-scope the cascade. */
+  chainId: number;
   ingestedAt: number;
   ingestSeq: number;
 }
@@ -192,6 +194,13 @@ export interface MessageRow {
   status: MessageStatus;
   /** FK to `batches.tx_hash`. Null until the message is submitted or observed. */
   batchRef: Bytes32 | null;
+  /**
+   * Chain this row belongs to. `null` only on rows written before the
+   * `chain_id` column was added (single-chain legacy stores); the app
+   * always populates it on new writes. `markReorged` uses this to
+   * chain-scope the cascade.
+   */
+  chainId: number | null;
   /** Poster-side ingest time, ms since epoch. Null on Reader-observed rows. */
   ingestedAt: number | null;
   /** Poster-side per-tag ingest counter. Null on Reader-observed rows. */

@@ -352,6 +352,7 @@ export async function processBatch(
         messageHash: v.messageHash,
         status: 'confirmed',
         batchRef: opts.event.txHash,
+        chainId: opts.chainId,
         ingestedAt: null,
         ingestSeq: null,
         blockNumber: opts.event.blockNumber,

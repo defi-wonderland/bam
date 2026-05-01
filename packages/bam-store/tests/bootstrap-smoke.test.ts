@@ -27,6 +27,7 @@ async function exerciseFullCycle(store: PostgresBamStore): Promise<void> {
       contents: new Uint8Array(40),
       signature: new Uint8Array(65),
       messageHash: ('0x' + '77'.repeat(32)) as Bytes32,
+      chainId: 1,
       ingestedAt: 1_000,
       ingestSeq: 1,
     });

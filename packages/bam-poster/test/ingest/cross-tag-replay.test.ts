@@ -74,6 +74,7 @@ describe('cross-tag attribution replay', () => {
       allowlistedTags: allowlist,
       maxMessageSizeBytes: 120_000,
       maxContentsSizeBytes: 100_000,
+      chainId: 1,
       now: () => new Date(0),
     });
     return { pipeline, state, store };
@@ -136,6 +137,7 @@ describe('cross-tag attribution replay', () => {
           allowlistedTags: [TAG_A, TAG_B],
           maxMessageSizeBytes: 120_000,
           maxContentsSizeBytes: 100_000,
+          chainId: 1,
           now: () => new Date(0),
         }),
       };

@@ -57,6 +57,7 @@ export const messages = pgTable(
     messageId: text('message_id'),
     status: text('status').notNull(),
     batchRef: text('batch_ref'),
+    chainId: bigint('chain_id', { mode: 'number' }),
     ingestedAt: bigint('ingested_at', { mode: 'number' }),
     ingestSeq: bigint('ingest_seq', { mode: 'number' }),
     blockNumber: bigint('block_number', { mode: 'number' }),

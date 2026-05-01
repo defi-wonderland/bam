@@ -129,6 +129,7 @@ export class ReorgWatcher {
           messageHash: m.messageHash,
           status: 'pending',
           batchRef: null,
+          chainId: this.opts.chainId,
           ingestedAt,
           ingestSeq: seq,
           blockNumber: null,

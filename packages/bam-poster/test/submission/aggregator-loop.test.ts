@@ -65,6 +65,7 @@ async function ingest(
         contents,
         signature,
         messageHash,
+        chainId: CHAIN_ID,
         ingestedAt: Date.now() + i,
         ingestSeq,
       });

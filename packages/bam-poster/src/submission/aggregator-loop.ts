@@ -207,6 +207,7 @@ export class AggregatorLoop {
               messageHash: m.messageHash,
               status: 'confirmed',
               batchRef: outcome.txHash,
+              chainId: this.opts.chainId,
               ingestedAt: row.ingestedAt,
               ingestSeq: row.ingestSeq,
               blockNumber: outcome.blockNumber,

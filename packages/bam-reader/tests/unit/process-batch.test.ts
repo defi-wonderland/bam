@@ -232,6 +232,7 @@ describe('processBatch', () => {
         messageHash: ('0x' + 'ee'.repeat(32)) as Bytes32,
         status: 'confirmed',
         batchRef: ('0x' + 'fe'.repeat(32)) as Bytes32,
+        chainId: 1,
         ingestedAt: null,
         ingestSeq: null,
         blockNumber: 99,

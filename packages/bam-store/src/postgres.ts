@@ -80,6 +80,7 @@ interface RawMessage {
   messageId: string | null;
   status: string;
   batchRef: string | null;
+  chainId: number | null;
   ingestedAt: number | null;
   ingestSeq: number | null;
   blockNumber: number | null;
@@ -115,6 +116,7 @@ function mapMessage(raw: RawMessage): MessageRow {
     messageHash: raw.messageHash as Bytes32,
     status: raw.status as MessageStatus,
     batchRef: raw.batchRef as Bytes32 | null,
+    chainId: raw.chainId,
     ingestedAt: raw.ingestedAt,
     ingestSeq: raw.ingestSeq,
     blockNumber: raw.blockNumber,
@@ -143,11 +145,12 @@ function mapBatch(raw: RawBatch): BatchRow {
 }
 
 function mapPending(raw: RawMessage): StoreTxnPendingRow {
-  // `insertPending` always writes ingestedAt + ingestSeq, but the columns
-  // are nullable to accommodate observed-only rows that never went through
-  // the pending pool. A pending row missing either is a write-path bug,
-  // not a state we should silently coerce to 0.
-  if (raw.ingestedAt === null || raw.ingestSeq === null) {
+  // `insertPending` always writes ingestedAt + ingestSeq + chainId,
+  // but those columns are nullable to accommodate observed-only rows
+  // (no ingest metadata) and legacy rows from before chain_id existed.
+  // A pending row missing any of them is a write-path bug, not a state
+  // we should silently coerce to 0.
+  if (raw.ingestedAt === null || raw.ingestSeq === null || raw.chainId === null) {
     throw new Error(
       `mapPending: pending row (${raw.author}, ${raw.nonce}) has null ingest metadata`
     );
@@ -159,6 +162,7 @@ function mapPending(raw: RawMessage): StoreTxnPendingRow {
     contents: asUint8(raw.contents),
     signature: asUint8(raw.signature),
     messageHash: raw.messageHash as Bytes32,
+    chainId: raw.chainId,
     ingestedAt: raw.ingestedAt,
     ingestSeq: raw.ingestSeq,
   };
@@ -300,6 +304,7 @@ function makeTxn(tx: DrizzleDb): StoreTxn {
         messageId: null,
         status: 'pending',
         batchRef: null,
+        chainId: row.chainId,
         ingestedAt: row.ingestedAt,
         ingestSeq: row.ingestSeq,
         blockNumber: null,
@@ -461,12 +466,13 @@ function makeTxn(tx: DrizzleDb): StoreTxn {
       await tx.execute(sql`
         INSERT INTO messages
           (author, nonce, content_tag, contents, signature, message_hash,
-           message_id, status, batch_ref, ingested_at, ingest_seq,
+           message_id, status, batch_ref, chain_id, ingested_at, ingest_seq,
            block_number, tx_index, message_index_within_batch)
         VALUES (${author}, ${nonce}, ${row.contentTag},
                 ${row.contents}, ${row.signature},
                 ${row.messageHash}, ${row.messageId}, ${row.status},
-                ${row.batchRef}, ${row.ingestedAt}, ${row.ingestSeq},
+                ${row.batchRef}, ${row.chainId},
+                ${row.ingestedAt}, ${row.ingestSeq},
                 ${row.blockNumber}, ${row.txIndex},
                 ${row.messageIndexWithinBatch})
         ON CONFLICT (author, nonce) DO UPDATE SET
@@ -477,6 +483,7 @@ function makeTxn(tx: DrizzleDb): StoreTxn {
           message_id                 = EXCLUDED.message_id,
           status                     = EXCLUDED.status,
           batch_ref                  = EXCLUDED.batch_ref,
+          chain_id                   = EXCLUDED.chain_id,
           ingested_at                = EXCLUDED.ingested_at,
           ingest_seq                 = EXCLUDED.ingest_seq,
           block_number               = EXCLUDED.block_number,
@@ -502,19 +509,20 @@ function makeTxn(tx: DrizzleDb): StoreTxn {
           `markReorged: no batch for chain_id=${chainId} tx_hash=${txHash}`
         );
       }
-      // KNOWN LIMITATION: the `messages` table has no `chain_id`
-      // column (PK is `(author, nonce)`), so this cascade cannot be
-      // truly chain-scoped. If two chains share a confirmed batch
-      // under the same `txHash`, the cascade will hit messages on
-      // both. In practice tx hashes don't collide across chains and
-      // the substrate is deployed per-chain, so this is a latent
-      // multi-chain hazard rather than an active bug. Properly
-      // scoping requires adding `messages.chain_id` (follow-up).
+      // Chain-scope the cascade so a (vanishingly unlikely) shared
+      // `txHash` across chains can't bleed reorg state across them.
+      // Legacy rows from before `chain_id` was added carry NULL and
+      // do not match — they belong to a single-chain era and are not
+      // a reorg target anyway.
       await tx
         .update(messagesT)
         .set({ status: 'reorged' })
         .where(
-          and(eq(messagesT.batchRef, txHash), eq(messagesT.status, 'confirmed'))
+          and(
+            eq(messagesT.batchRef, txHash),
+            eq(messagesT.chainId, chainId),
+            eq(messagesT.status, 'confirmed')
+          )
         );
     },
 

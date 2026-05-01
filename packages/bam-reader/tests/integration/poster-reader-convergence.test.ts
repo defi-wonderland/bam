@@ -119,6 +119,7 @@ describe('Poster + Reader convergence', () => {
             messageHash: sm.messageHash,
             status: 'confirmed',
             batchRef: TX_HASH,
+            chainId: CHAIN_ID,
             ingestedAt: POSTER_INGESTED_AT,
             ingestSeq: i + 1,
             blockNumber: 100,

@@ -170,6 +170,7 @@ export async function createPoster(
       allowlistedTags,
       maxMessageSizeBytes: maxMessageSize,
       maxContentsSizeBytes: maxContentsSize,
+      chainId: config.chainId,
       now,
     });
 

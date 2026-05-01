@@ -72,6 +72,7 @@ function mkPipeline(store: BamStore): IngestPipeline {
     allowlistedTags: [TAG],
     maxMessageSizeBytes: 120_000,
     maxContentsSizeBytes: 100_000,
+    chainId: 1,
     now: () => new Date(0),
   });
 }

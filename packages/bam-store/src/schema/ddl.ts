@@ -29,6 +29,7 @@ export const SQL_CREATE_DDL: readonly string[] = [
     message_id                  TEXT,
     status                      TEXT NOT NULL,
     batch_ref                   TEXT,
+    chain_id                    BIGINT,
     ingested_at                 BIGINT,
     ingest_seq                  BIGINT,
     block_number                BIGINT,
@@ -36,6 +37,13 @@ export const SQL_CREATE_DDL: readonly string[] = [
     message_index_within_batch  BIGINT,
     PRIMARY KEY (author, nonce)
   )`,
+  // In-place upgrade for stores bootstrapped before chain_id existed.
+  // Idempotent: a fresh `CREATE TABLE` above already includes the
+  // column, and `ADD COLUMN IF NOT EXISTS` is a no-op on those.
+  // Existing rows on an upgraded store are left as NULL — they belong
+  // to a single-chain era and `markReorged`'s scope filter excludes
+  // them, which is the correct behavior.
+  `ALTER TABLE messages ADD COLUMN IF NOT EXISTS chain_id BIGINT`,
   `CREATE INDEX IF NOT EXISTS idx_messages_tag_status_seq
     ON messages (content_tag, status, ingest_seq)`,
   `CREATE INDEX IF NOT EXISTS idx_messages_batch_ref

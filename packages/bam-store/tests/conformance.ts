@@ -39,6 +39,7 @@ function messageRow(overrides: Partial<MessageRow> = {}): MessageRow {
     messageHash: MHASH_1,
     status: 'pending',
     batchRef: null,
+    chainId: 1,
     ingestedAt: null,
     ingestSeq: null,
     blockNumber: null,
@@ -144,6 +145,7 @@ export function runConformance(make: StoreFactory): void {
           contents: new Uint8Array(40),
           signature: new Uint8Array(65),
           messageHash: mhash,
+          chainId: 1,
           ingestedAt: 1_000,
           ingestSeq: 1,
         })
@@ -170,6 +172,7 @@ export function runConformance(make: StoreFactory): void {
           contents: new Uint8Array(40),
           signature: new Uint8Array(65),
           messageHash: mhash,
+          chainId: 1,
           ingestedAt: 1_000,
           ingestSeq: 1,
         })
@@ -538,6 +541,7 @@ export function runConformance(make: StoreFactory): void {
           contents: new Uint8Array(40),
           signature: new Uint8Array(65),
           messageHash: MHASH_1,
+          chainId: 1,
           ingestedAt: 1_000,
           ingestSeq: 1,
         });
