@@ -56,6 +56,19 @@ describe('post fixtures', () => {
     }
   });
 
+  it('every post HTML pins data-site-id="bam-blog-demo"', () => {
+    // The pin is what makes dev / preview / prod see the same
+    // threads — without it, the widget falls back to
+    // window.location.hostname which differs per environment.
+    for (const { slug } of POSTS) {
+      const html = readFileSync(resolve(POSTS_DIR, `${slug}.html`), 'utf8');
+      expect(
+        html.includes('data-site-id="bam-blog-demo"'),
+        `post ${slug} is missing data-site-id="bam-blog-demo"`
+      ).toBe(true);
+    }
+  });
+
   it('every post HTML loads /widget.js (the stable embed URL)', () => {
     for (const { slug } of POSTS) {
       const html = readFileSync(resolve(POSTS_DIR, `${slug}.html`), 'utf8');

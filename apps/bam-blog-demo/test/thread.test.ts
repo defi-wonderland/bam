@@ -17,9 +17,9 @@ import { describe, expect, it } from 'vitest';
 import type { Hex } from 'viem';
 
 import { buildThread, type DecodedMessage } from '../src/widget/thread.js';
-import { slugToPostIdHash } from '../src/widget/post-id.js';
+import { derivePostIdHash } from '../src/widget/post-id.js';
 
-const POST_A = slugToPostIdHash('secure-llms');
+const POST_A = derivePostIdHash({ siteId: 'bam-blog-demo', postId: 'secure-llms' });
 
 let _hashCounter = 0;
 function fakeHash(): Hex {

@@ -41,7 +41,7 @@ import {
   signTypedData as walletSignTypedData,
   switchChain as walletSwitchChain,
 } from './eth.js';
-import { slugToPostIdHash } from './post-id.js';
+import { derivePostIdHash, resolveSiteId } from './post-id.js';
 import {
   fetchConfirmed,
   fetchNextNonce,
@@ -59,6 +59,7 @@ const MAX_STALE_NONCE_RETRIES = 8;
 
 interface Controller {
   state: RenderState;
+  siteId: string;
   postId: string;
   postIdHash: Hex;
   mount: HTMLElement;
@@ -366,7 +367,12 @@ async function bootstrapOne(mount: HTMLElement, postId: string): Promise<void> {
   if (mount.dataset.bamMounted === '1') return;
   mount.dataset.bamMounted = '1';
 
-  const postIdHash = slugToPostIdHash(postId);
+  // siteId is the explicit `data-site-id` attribute if present,
+  // else `window.location.hostname`. The pair (siteId, postId)
+  // determines the post-id hash, so two different sites with the
+  // same `data-post-id="my-post"` see independent threads.
+  const siteId = resolveSiteId(mount);
+  const postIdHash = derivePostIdHash({ siteId, postId });
 
   const c: Controller = {
     state: {
@@ -381,6 +387,7 @@ async function bootstrapOne(mount: HTMLElement, postId: string): Promise<void> {
         replyTo: null,
       },
     },
+    siteId,
     postId,
     postIdHash,
     mount,

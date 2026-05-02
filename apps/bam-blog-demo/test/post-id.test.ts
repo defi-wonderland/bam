@@ -1,77 +1,92 @@
 /**
- * Pins the namespace string and the per-slug postIdHash values that
- * the demo's widget uses for per-post scoping. If any of these
- * change, the comments under existing confirmed messages would
- * silently disappear (the new hash wouldn't match the old payload).
- * The pinned table is the regression guard.
+ * Pins the new post-id derivation and the per-(site, post) hashes
+ * the demo's pages produce. If any of these change, comments
+ * authored before the change become invisible to the new code
+ * (the hash inside their signed `contents` no longer matches what
+ * the widget computes for the mount), so the pinned table is the
+ * regression guard.
  */
 
-import { describe, it, expect } from 'vitest';
-import { keccak256, toBytes } from 'viem';
+import { describe, expect, it } from 'vitest';
+import type { Hex } from 'viem';
 
-import {
-  KNOWN_POST_IDS,
-  POST_ID_NAMESPACE,
-  postIdHashToSlug,
-  slugToPostIdHash,
-} from '../src/widget/post-id.js';
+import { derivePostIdHash, resolveSiteId } from '../src/widget/post-id.js';
 
-const PINNED: Record<string, `0x${string}`> = {
+const DEMO_SITE = 'bam-blog-demo';
+
+const PINNED: Record<string, Hex> = {
   'secure-llms':
-    '0x21c2b8410a883bb4e6b839335a033e843ec096d49db34d824384ff7df62b2897',
+    '0xa9416e37e9366296b230b33181b98b2b8c18d5bdf6e3bbcb09b15fbbf95cd648',
   'balance-of-power':
-    '0x96bb94efa50808cd4212ab11d14930d45244cc37eb01173ff1af61c8685497a4',
+    '0xd72c1df9992c56a763e64262dad7356825ebd0fc603982b3ede430ee6af33f21',
   societies:
-    '0xe2373ef954935f13aee50eaada57bf5ccdad4886b2beab2f940e7e4e584186e2',
+    '0x3f50bbdc394cc70340f4b183ca0986b43916cddb69a31447fd496b6d7dbd72f3',
   plinko:
-    '0xc3929321af2b67eb9fa9ad01044f387d4e32872ec86ff6bf5f6327c222756f55',
+    '0x2f4c621531bb48ead455f0d5ce2c530bb5f7232808362504ee3c232f5704ae94',
   galaxybrain:
-    '0x7e87bafe0d063dc325059b2e414dfbbcb14e070a3badff531872864faffe7438',
+    '0x9b6d8a8b8d6ea124a2c0d7ae5aa3d2aa01f613a0cb0458ff28cb6d495264acba',
 };
 
-describe('post-id', () => {
-  it('namespace is the v1 string', () => {
-    expect(POST_ID_NAMESPACE).toBe('bam-blog.v1');
-  });
-
-  it('matches the spec formula keccak256(NAMESPACE + ":" + slug)', () => {
-    for (const [slug, pinned] of Object.entries(PINNED)) {
-      expect(
-        keccak256(toBytes(`${POST_ID_NAMESPACE}:${slug}`)).toLowerCase(),
-        `formula mismatch for ${slug}`
-      ).toBe(pinned);
+describe('derivePostIdHash', () => {
+  it('matches the pinned hash for every demo (siteId, postId) pair', () => {
+    for (const [postId, pinned] of Object.entries(PINNED)) {
+      expect(derivePostIdHash({ siteId: DEMO_SITE, postId }).toLowerCase()).toBe(
+        pinned
+      );
     }
   });
 
-  it('slugToPostIdHash returns the pinned hash for every known slug', () => {
-    for (const [slug, pinned] of Object.entries(PINNED)) {
-      expect(slugToPostIdHash(slug).toLowerCase()).toBe(pinned);
-    }
+  it('the same postId on a different site produces a different hash', () => {
+    const a = derivePostIdHash({ siteId: 'site-a.com', postId: 'my-post' });
+    const b = derivePostIdHash({ siteId: 'site-b.com', postId: 'my-post' });
+    expect(a).not.toBe(b);
   });
 
-  it('rejects an empty slug', () => {
-    expect(() => slugToPostIdHash('')).toThrow(RangeError);
+  it('siteId is case-insensitive (DNS hostname semantics)', () => {
+    const a = derivePostIdHash({ siteId: 'Example.COM', postId: 'p' });
+    const b = derivePostIdHash({ siteId: 'example.com', postId: 'p' });
+    expect(a).toBe(b);
   });
 
-  it('KNOWN_POST_IDS contains exactly the 5 pinned hashes', () => {
-    expect(KNOWN_POST_IDS.size).toBe(5);
-    for (const [slug, pinned] of Object.entries(PINNED)) {
-      expect(KNOWN_POST_IDS.get(pinned)).toBe(slug);
-    }
+  it('postId is case-sensitive (host-controlled, opaque)', () => {
+    const a = derivePostIdHash({ siteId: 'x', postId: 'My-Post' });
+    const b = derivePostIdHash({ siteId: 'x', postId: 'my-post' });
+    expect(a).not.toBe(b);
   });
 
-  it('postIdHashToSlug round-trips and is case-insensitive', () => {
-    for (const [slug, pinned] of Object.entries(PINNED)) {
-      expect(postIdHashToSlug(pinned)).toBe(slug);
-      expect(postIdHashToSlug(pinned.toUpperCase() as `0x${string}`)).toBe(slug);
-    }
+  it('rejects empty siteId and empty postId', () => {
+    expect(() => derivePostIdHash({ siteId: '', postId: 'p' })).toThrow();
+    expect(() => derivePostIdHash({ siteId: 's', postId: '' })).toThrow();
   });
 
-  it('postIdHashToSlug returns null for an unknown hash', () => {
-    expect(
-      postIdHashToSlug(
-        '0x0000000000000000000000000000000000000000000000000000000000000000'
-      )
-    ).toBeNull();
+  it('length-prefixing prevents (siteId, postId) split collisions', () => {
+    // Without length-prefix, ("ab", "cd") and ("abc", "d") would
+    // hash the same concatenation. With it, they don't.
+    const left = derivePostIdHash({ siteId: 'ab', postId: 'cd' });
+    const right = derivePostIdHash({ siteId: 'abc', postId: 'd' });
+    expect(left).not.toBe(right);
+  });
+});
+
+describe('resolveSiteId', () => {
+  function fakeMount(attrs: Record<string, string> = {}): HTMLElement {
+    const node: Partial<HTMLElement> = {
+      getAttribute: (name: string) => attrs[name] ?? null,
+    };
+    return node as HTMLElement;
+  }
+
+  it('returns the data-site-id attribute when present, lowercased', () => {
+    expect(resolveSiteId(fakeMount({ 'data-site-id': 'My-Site.com' }))).toBe(
+      'my-site.com'
+    );
+  });
+
+  it('falls back to a non-empty default when no attribute and no window', () => {
+    // In the vitest node env, `window` is absent; the helper
+    // should still produce a string, not throw.
+    const out = resolveSiteId(fakeMount());
+    expect(typeof out).toBe('string');
+    expect(out.length).toBeGreaterThan(0);
   });
 });

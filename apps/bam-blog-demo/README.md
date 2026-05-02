@@ -19,9 +19,43 @@ The integration surface is two lines of HTML:
 That's it. The widget self-mounts on every `[data-bam-comments]`
 element on the page (so a single page can carry multiple comment
 threads if you want), reads `data-post-id` from each mount,
-hashes it (`keccak256("bam-blog.v1:" + postId)`) to derive
-per-post scoping that rides inside the signed `contents`
+derives a `postIdHash` that rides inside the signed `contents`
 payload, and renders the thread under the mount.
+
+### Site isolation
+
+By default the widget derives the post-id hash from the **pair**
+`(siteId, postId)`, where `siteId` is `window.location.hostname`
+at mount time. Two different sites that happen to pick the same
+`data-post-id="my-post"` see independent threads — no cross-site
+collisions.
+
+Pin a stable `data-site-id` if you care about thread continuity
+across hostnames (e.g. `www.x.com` ↔ `x.com`, or staging ↔ prod):
+
+```html
+<div data-bam-comments
+     data-site-id="myblog.com"
+     data-post-id="my-post"></div>
+```
+
+The exact preimage is:
+
+```
+keccak256(
+  contentTag (32B) ‖ uint16BE(len(siteId)) ‖ utf8(siteId.toLowerCase()) ‖
+                    uint16BE(len(postId)) ‖ utf8(postId)
+)
+```
+
+`siteId` is lowercased (DNS hostname semantics); `postId` is
+case-sensitive (host-controlled, opaque). The length-prefix
+prevents `(siteId="ab", postId="cd")` from colliding with
+`(siteId="abc", postId="d")` on a shared concatenation.
+
+The demo's 5 pages pin `data-site-id="bam-blog-demo"` so dev,
+preview, and prod all derive the same hashes against the live
+fly.dev Poster + Reader.
 
 Styles ship inlined in the bundle (scoped via CSS variables on
 `[data-bam-comments]`), so no extra stylesheet is needed. Hosts
