@@ -1,29 +1,27 @@
 /**
- * Widget entrypoint. Bundled by Vite into `dist/comments.js` and
- * loaded by every post page via:
+ * Embeddable BAM comments widget. Snippet for a host page:
  *
- *   <div id="comments" data-post-slug="<slug>"></div>
- *   <script type="module" src="/comments.js"></script>
+ *   <div data-bam-comments data-post-id="my-post-slug"></div>
+ *   <script src="https://<host>/widget.js" defer></script>
  *
- * Lifecycle, in order:
+ * Auto-mounts on every `[data-bam-comments]` element on the page;
+ * the same script can drive multiple comment threads on one page
+ * (e.g., a list of articles each with its own thread).
  *
- *   1. Find `#comments[data-post-slug]`. Bail if missing or the
- *      slug is not in `KNOWN_POST_IDS` (silent — same posture as
- *      the thread builder dropping unknown post ids).
- *   2. Render the connect button + an empty thread placeholder
- *      while the first poll runs.
- *   3. Poll `/api/messages` (pending) and
- *      `/api/confirmed-messages` (confirmed) on a fixed interval,
- *      decode each row's `contents` via the codec, drop ones
- *      whose `postIdHash` doesn't match this post, hand the rest
- *      to `buildThreads`, and re-render.
- *   4. On submit: estimate next-nonce, encode + sign + submit; on
- *      `stale_nonce`, re-fetch and retry up to a small bound; on
- *      anything else, surface an error and ask the user to
- *      retry — the signed message is **not** retained.
+ * The host's `data-post-id` is hashed
+ * (`keccak256("bam-blog.v1:" + postId)`) to derive the per-post
+ * scoping that rides inside the signed `contents` payload. Hosts
+ * can use any string they like for the post id; collisions
+ * happen only if two embedders share a slug, which keccak makes
+ * effectively zero-risk.
  *
- * No React, no wagmi, no React Query. Just a setInterval and a
- * full re-render on every state change.
+ * The widget bakes its upstream Poster + Reader URLs in at build
+ * time via `VITE_POSTER_URL` / `VITE_READER_URL`. Browser calls
+ * upstreams directly — they must allow CORS.
+ *
+ * Styles ship inline (`widget.css` imported as a string and
+ * injected once into `<head>`), so a host doesn't need to load
+ * any extra stylesheet.
  */
 
 import type { Hex } from 'viem';
@@ -43,7 +41,7 @@ import {
   signTypedData as walletSignTypedData,
   switchChain as walletSwitchChain,
 } from './eth.js';
-import { slugToPostIdHash, postIdHashToSlug } from './post-id.js';
+import { slugToPostIdHash } from './post-id.js';
 import {
   fetchConfirmed,
   fetchNextNonce,
@@ -51,17 +49,18 @@ import {
   flushBatch,
   submitMessage,
 } from './poster-reader.js';
-import { buildThreads, type DecodedMessage } from './thread.js';
+import { buildThread, type DecodedMessage } from './thread.js';
 import { buildBamTypedData } from './typed-data.js';
 import { render, type ComposerState, type RenderState } from './render.js';
+import widgetCss from './widget.css?inline';
 
 const POLL_INTERVAL_MS = 5000;
 const MAX_STALE_NONCE_RETRIES = 8;
 
 interface Controller {
   state: RenderState;
+  postId: string;
   postIdHash: Hex;
-  slug: string;
   mount: HTMLElement;
 }
 
@@ -109,9 +108,10 @@ async function connectWallet(c: Controller): Promise<void> {
     c.state = { ...c.state, connected: addr };
     rerender(c);
   } catch (err) {
-    const text = err instanceof WalletError
-      ? walletErrorText(err)
-      : 'Could not connect wallet.';
+    const text =
+      err instanceof WalletError
+        ? walletErrorText(err)
+        : 'Could not connect wallet.';
     c.state = withComposer(c.state, { errorText: text });
     rerender(c);
   }
@@ -144,6 +144,7 @@ async function poll(c: Controller): Promise<void> {
     ]);
     const decoded: DecodedMessage[] = [];
     const seenHashes = new Set<string>();
+    const wantHash = c.postIdHash.toLowerCase();
     // Confirmed first; on duplicate hash, prefer confirmed.
     for (const r of confirmedRaw) {
       const dm = toDecoded(
@@ -154,6 +155,7 @@ async function poll(c: Controller): Promise<void> {
         'confirmed'
       );
       if (dm === null) continue;
+      if (dm.postIdHash.toLowerCase() !== wantHash) continue;
       seenHashes.add(dm.messageHash.toLowerCase());
       decoded.push(dm);
     }
@@ -167,12 +169,13 @@ async function poll(c: Controller): Promise<void> {
         'pending'
       );
       if (dm === null) continue;
+      if (dm.postIdHash.toLowerCase() !== wantHash) continue;
       decoded.push(dm);
     }
-    const threads = buildThreads(decoded);
+    const thread = buildThread(decoded);
     c.state = {
       ...c.state,
-      thread: threads.get(c.slug) ?? null,
+      thread: thread.roots.length > 0 ? thread : null,
       loaded: true,
       loadError: false,
     };
@@ -231,10 +234,6 @@ async function submit(c: Controller): Promise<void> {
   rerender(c);
 
   try {
-    // Domain chainId in the typed-data must match the Poster's
-    // expected chainId or the recovered signer differs and the
-    // submission rejects with bad_signature. Prompt the wallet to
-    // switch if it isn't on Sepolia already.
     let chainId: number;
     try {
       chainId = await getChainId();
@@ -300,7 +299,6 @@ async function submit(c: Controller): Promise<void> {
           replyTo: null,
         });
         rerender(c);
-        // Best-effort: nudge the Poster's flush loop, then refresh.
         void flushBatch();
         await poll(c);
         return;
@@ -348,17 +346,27 @@ function bytesToHex(b: Uint8Array): Hex {
       .join('')) as Hex;
 }
 
-async function bootstrap(): Promise<void> {
-  const mount = document.getElementById('comments');
-  if (mount === null) return;
-  const slug = mount.getAttribute('data-post-slug');
-  if (slug === null) return;
-  const postIdHash = slugToPostIdHash(slug);
-  if (postIdHashToSlug(postIdHash) === null) {
-    // Should be impossible because slugToPostIdHash succeeded, but
-    // belt-and-suspenders against build-time slug drift.
-    return;
-  }
+/**
+ * Inject the widget's stylesheet into the host document the
+ * first time any instance mounts. Idempotent — repeat calls
+ * are no-ops.
+ */
+let cssInjected = false;
+function injectCss(): void {
+  if (cssInjected) return;
+  const style = document.createElement('style');
+  style.setAttribute('data-bam-comments-css', '');
+  style.textContent = widgetCss;
+  document.head.appendChild(style);
+  cssInjected = true;
+}
+
+async function bootstrapOne(mount: HTMLElement, postId: string): Promise<void> {
+  // Idempotent: refuse to mount twice on the same node.
+  if (mount.dataset.bamMounted === '1') return;
+  mount.dataset.bamMounted = '1';
+
+  const postIdHash = slugToPostIdHash(postId);
 
   const c: Controller = {
     state: {
@@ -373,8 +381,8 @@ async function bootstrap(): Promise<void> {
         replyTo: null,
       },
     },
+    postId,
     postIdHash,
-    slug,
     mount,
   };
 
@@ -385,7 +393,7 @@ async function bootstrap(): Promise<void> {
       c.state = { ...c.state, connected: existing };
     }
   } catch {
-    // Wallet not present or restrictive; render with no connection.
+    // Wallet not present or restrictive.
   }
 
   rerender(c);
@@ -398,4 +406,18 @@ async function bootstrap(): Promise<void> {
   setInterval(() => void poll(c), POLL_INTERVAL_MS);
 }
 
-void bootstrap();
+function bootstrapAll(): void {
+  injectCss();
+  const mounts = document.querySelectorAll<HTMLElement>('[data-bam-comments]');
+  for (const m of mounts) {
+    const postId = m.getAttribute('data-post-id');
+    if (postId === null || postId === '') continue;
+    void bootstrapOne(m, postId);
+  }
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', bootstrapAll);
+} else {
+  bootstrapAll();
+}

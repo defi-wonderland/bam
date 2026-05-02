@@ -1,23 +1,25 @@
 /**
- * Thread builder behavior:
- *   - groups by postIdHash (one of the 5 known posts)
- *   - drops unknown postIdHash silently
- *   - hides orphan replies (parent missing or under a different post)
+ * Thread builder behavior, post-refactor (single-tree API):
+ *   - returns roots from a flat list of messages already scoped to
+ *     one post by the caller
+ *   - hides orphan replies (parent missing in the bucket)
  *   - clamps `displayDepth` at 2 even when wire-level chain is deeper
  *   - breaks cycles in `parentMessageHash` chains
  *   - emits stable ordering by (timestamp asc, messageHash asc)
+ *
+ * Filtering by post id is the controller's responsibility (see
+ * `src/widget/index.ts`); the builder treats the input as a single
+ * bucket. Tests mix post ids only to confirm the builder doesn't
+ * itself drop on a closed-set check.
  */
 
 import { describe, expect, it } from 'vitest';
 import type { Hex } from 'viem';
 
-import { buildThreads, type DecodedMessage } from '../src/widget/thread.js';
+import { buildThread, type DecodedMessage } from '../src/widget/thread.js';
 import { slugToPostIdHash } from '../src/widget/post-id.js';
 
 const POST_A = slugToPostIdHash('secure-llms');
-const POST_B = slugToPostIdHash('balance-of-power');
-const UNKNOWN_POST =
-  '0x0000000000000000000000000000000000000000000000000000000000000000' as Hex;
 
 let _hashCounter = 0;
 function fakeHash(): Hex {
@@ -65,30 +67,24 @@ function reply(args: {
   };
 }
 
-describe('buildThreads', () => {
-  it('returns an empty map for an empty input', () => {
-    expect(buildThreads([]).size).toBe(0);
+describe('buildThread', () => {
+  it('returns no roots for an empty input', () => {
+    expect(buildThread([]).roots).toEqual([]);
   });
 
-  it('drops messages whose postIdHash is not in KNOWN_POST_IDS', () => {
-    const threads = buildThreads([
-      comment({ postIdHash: UNKNOWN_POST, timestamp: 1 }),
+  it('any postIdHash is acceptable — caller filters', () => {
+    const arbitrary =
+      '0xdeadbeef' + '00'.repeat(28) as Hex;
+    const t = buildThread([
+      comment({ postIdHash: arbitrary, timestamp: 1, content: 'hi' }),
     ]);
-    expect(threads.size).toBe(0);
-  });
-
-  it('groups by post; one comment under each of two posts', () => {
-    const a = comment({ postIdHash: POST_A, timestamp: 1, content: 'in A' });
-    const b = comment({ postIdHash: POST_B, timestamp: 1, content: 'in B' });
-    const threads = buildThreads([a, b]);
-    expect(threads.get('secure-llms')?.roots[0].message.content).toBe('in A');
-    expect(threads.get('balance-of-power')?.roots[0].message.content).toBe('in B');
+    expect(t.roots).toHaveLength(1);
+    expect(t.roots[0].message.content).toBe('hi');
   });
 
   it('a single comment becomes one root with displayDepth 0', () => {
     const a = comment({ postIdHash: POST_A, timestamp: 1 });
-    const threads = buildThreads([a]);
-    const t = threads.get('secure-llms')!;
+    const t = buildThread([a]);
     expect(t.roots).toHaveLength(1);
     expect(t.roots[0].displayDepth).toBe(0);
     expect(t.roots[0].children).toHaveLength(0);
@@ -101,7 +97,7 @@ describe('buildThreads', () => {
       timestamp: 2,
       parentMessageHash: root.messageHash,
     });
-    const t = buildThreads([root, r]).get('secure-llms')!;
+    const t = buildThread([root, r]);
     expect(t.roots[0].children).toHaveLength(1);
     expect(t.roots[0].children[0].displayDepth).toBe(1);
     expect(t.roots[0].children[0].message.messageHash).toBe(r.messageHash);
@@ -119,7 +115,7 @@ describe('buildThreads', () => {
       timestamp: 3,
       parentMessageHash: r1.messageHash,
     });
-    const t = buildThreads([root, r1, r2]).get('secure-llms')!;
+    const t = buildThread([root, r1, r2]);
     expect(t.roots[0].children[0].children[0].displayDepth).toBe(2);
   });
 
@@ -140,32 +136,20 @@ describe('buildThreads', () => {
       timestamp: 4,
       parentMessageHash: r2.messageHash,
     });
-    const t = buildThreads([root, r1, r2, r3]).get('secure-llms')!;
+    const t = buildThread([root, r1, r2, r3]);
     const deepest = t.roots[0].children[0].children[0].children[0];
     expect(deepest.message.messageHash).toBe(r3.messageHash);
     expect(deepest.displayDepth).toBe(2);
   });
 
-  it('hides a reply whose parent is missing', () => {
+  it('hides a reply whose parent is missing from the bucket', () => {
     const r = reply({
       postIdHash: POST_A,
       timestamp: 2,
       parentMessageHash: ('0x' + 'ff'.repeat(32)) as Hex,
     });
-    const threads = buildThreads([r]);
-    expect(threads.size).toBe(0);
-  });
-
-  it('hides a reply whose parent is in a different post bucket', () => {
-    const inA = comment({ postIdHash: POST_A, timestamp: 1 });
-    const replyInB = reply({
-      postIdHash: POST_B,
-      timestamp: 2,
-      parentMessageHash: inA.messageHash,
-    });
-    const threads = buildThreads([inA, replyInB]);
-    expect(threads.has('balance-of-power')).toBe(false);
-    expect(threads.get('secure-llms')?.roots).toHaveLength(1);
+    const t = buildThread([r]);
+    expect(t.roots).toEqual([]);
   });
 
   it('does not loop or crash on a self-referencing reply', () => {
@@ -176,8 +160,8 @@ describe('buildThreads', () => {
       timestamp: 1,
       parentMessageHash: self,
     });
-    expect(() => buildThreads([r])).not.toThrow();
-    expect(buildThreads([r]).size).toBe(0);
+    expect(() => buildThread([r])).not.toThrow();
+    expect(buildThread([r]).roots).toEqual([]);
   });
 
   it('does not loop or crash on a 2-cycle', () => {
@@ -195,29 +179,35 @@ describe('buildThreads', () => {
       timestamp: 2,
       parentMessageHash: a,
     });
-    const threads = buildThreads([ra, rb]);
-    expect(threads.size).toBe(0);
+    expect(buildThread([ra, rb]).roots).toEqual([]);
   });
 
   it('sorts roots and children by (timestamp asc, messageHash asc)', () => {
     const c1 = comment({ postIdHash: POST_A, timestamp: 5 });
     const c2 = comment({ postIdHash: POST_A, timestamp: 1 });
     const c3 = comment({ postIdHash: POST_A, timestamp: 5 }); // tie with c1
-    const t = buildThreads([c1, c2, c3]).get('secure-llms')!;
+    const t = buildThread([c1, c2, c3]);
     expect(t.roots.map((r) => r.message.timestamp)).toEqual([1, 5, 5]);
     // tie-breaker: messageHash ascending — c1 was generated before c3.
-    expect(t.roots[1].message.messageHash.toLowerCase() < t.roots[2].message.messageHash.toLowerCase()).toBe(true);
+    expect(
+      t.roots[1].message.messageHash.toLowerCase() <
+        t.roots[2].message.messageHash.toLowerCase()
+    ).toBe(true);
   });
 
   it('keeps both pending and confirmed messages in the same tree', () => {
-    const root = comment({ postIdHash: POST_A, timestamp: 1, status: 'confirmed' });
+    const root = comment({
+      postIdHash: POST_A,
+      timestamp: 1,
+      status: 'confirmed',
+    });
     const r = reply({
       postIdHash: POST_A,
       timestamp: 2,
       parentMessageHash: root.messageHash,
       status: 'pending',
     });
-    const t = buildThreads([root, r]).get('secure-llms')!;
+    const t = buildThread([root, r]);
     expect(t.roots[0].message.status).toBe('confirmed');
     expect(t.roots[0].children[0].message.status).toBe('pending');
   });

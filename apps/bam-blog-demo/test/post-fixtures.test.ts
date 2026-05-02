@@ -42,30 +42,29 @@ describe('post fixtures', () => {
     }
   });
 
-  it('every post HTML contains the comments mount node', () => {
+  it('every post HTML contains the embed mount marker', () => {
     for (const { slug } of POSTS) {
       const html = readFileSync(resolve(POSTS_DIR, `${slug}.html`), 'utf8');
       expect(
-        html.includes(`data-post-slug="${slug}"`),
-        `post ${slug} is missing data-post-slug="${slug}"`
+        /data-bam-comments\b/.test(html),
+        `post ${slug} is missing data-bam-comments`
       ).toBe(true);
       expect(
-        html.includes('id="comments"'),
-        `post ${slug} is missing id="comments"`
+        html.includes(`data-post-id="${slug}"`),
+        `post ${slug} is missing data-post-id="${slug}"`
       ).toBe(true);
     }
   });
 
-  it('every post HTML loads the widget entry as an ES module', () => {
+  it('every post HTML loads /widget.js (the stable embed URL)', () => {
     for (const { slug } of POSTS) {
       const html = readFileSync(resolve(POSTS_DIR, `${slug}.html`), 'utf8');
-      // Vite's MPA mode resolves and bundles this entry; build
-      // rewrites it to a hashed asset.
+      // External embedders use this same script tag; in dev a Vite
+      // middleware aliases /widget.js to the source entry, in build
+      // it resolves to the lib-mode bundle.
       expect(
-        /<script\s+type=["']module["']\s+src=["']\/src\/widget\/index\.ts["']/.test(
-          html
-        ),
-        `post ${slug} is missing <script type="module" src="/src/widget/index.ts">`
+        /<script\s+src=["']\/widget\.js["']\s+defer\s*>/.test(html),
+        `post ${slug} is missing <script src="/widget.js" defer>`
       ).toBe(true);
     }
   });

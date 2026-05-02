@@ -6,34 +6,70 @@ Third demo app on the BAM protocol. Where
 recreates a Vitalik-style static blog with a BAM-backed comments
 section under each post.
 
-The point: **integrating BAM into a static HTML site is one
-`<script type="module">` and one `<div id="comments">`.** The
-post pages are hand-authored HTML, the widget is one ES-module
-bundle, and the entire deploy artifact is a `dist/` directory of
-static files — no Node server. No React, no Next.js, no wagmi.
+## Embedding the comments widget
+
+The widget is a single `widget.js` you drop on any static page.
+The integration surface is two lines of HTML:
+
+```html
+<div data-bam-comments data-post-id="my-post-slug"></div>
+<script src="https://<your-host>/widget.js" defer></script>
+```
+
+That's it. The widget self-mounts on every `[data-bam-comments]`
+element on the page (so a single page can carry multiple comment
+threads if you want), reads `data-post-id` from each mount,
+hashes it (`keccak256("bam-blog.v1:" + postId)`) to derive
+per-post scoping that rides inside the signed `contents`
+payload, and renders the thread under the mount.
+
+Styles ship inlined in the bundle (scoped via CSS variables on
+`[data-bam-comments]`), so no extra stylesheet is needed. Hosts
+can override the palette by setting variables in their own CSS:
+
+```css
+[data-bam-comments] {
+  --bam-color-anchor: #c3a554;
+  --bam-color-text: #222;
+}
+```
+
+Light / dark mode follows `prefers-color-scheme` by default; add
+`class="bam-light"` or `class="bam-dark"` to the mount to force
+a mode.
+
+The bundle is `~28 KB` gzipped and includes `bam-sdk/browser` +
+`viem`. It calls the upstream Poster + Reader directly from the
+browser (URLs baked in at `vite build`), so the upstreams must
+allow CORS.
 
 ## How it works
 
 1. The 5 most recent posts on
    <https://github.com/vbuterin/blog> at authoring time are
    reproduced as short static HTML excerpts at the project root
-   (`secure-llms.html`, `balance-of-power.html`, …). Each ends
-   with:
+   (`secure-llms.html`, `balance-of-power.html`, …) and act as
+   the canonical embedder of the widget — same snippet a
+   third-party site would use.
+
+2. Each post page ends with:
 
    ```html
-   <div id="comments" data-post-slug="<slug>"></div>
-   <script type="module" src="/src/widget/index.ts"></script>
+   <div data-bam-comments data-post-id="<slug>"></div>
+   <script src="/widget.js" defer></script>
    ```
 
-   Vite bundles the widget at build time; the script tag is
-   rewritten to a hashed asset.
+   In dev (`vite serve`), a tiny middleware aliases `/widget.js`
+   to the source entry so HMR works on a single URL. In build
+   (`vite build`), `dist/widget.js` is produced as a stable
+   unhashed lib-mode bundle and the same URL resolves to it.
 
-2. The widget reads the slug from the mount node, derives
-   `postIdHash = keccak256("bam-blog.v1:" + slug)`, polls
-   the upstream Poster + Reader directly from the browser,
-   decodes the demo's app-opaque payload, builds a thread tree
-   clamped at 2 levels of nesting, and renders to the DOM
-   imperatively.
+3. The widget reads `data-post-id` from each mount, derives
+   `postIdHash = keccak256("bam-blog.v1:" + postId)`, polls the
+   upstream Poster + Reader directly from the browser, filters
+   to messages whose `postIdHash` matches the mounted post,
+   builds a thread tree clamped at 2 levels of nesting, and
+   renders to the DOM imperatively.
 
 3. The widget signs comments with the user's wallet via raw
    `window.ethereum` (`eth_requestAccounts`,
@@ -128,13 +164,15 @@ VITE_READER_URL=https://bam-reader.fly.dev \
 #     societies.html
 #     plinko.html
 #     galaxybrain.html
-#     style.css
-#     theme.js
-#     assets/<hashed-bundle>.js
+#     style.css      ← host page styles
+#     theme.js       ← host page dark-mode toggle
+#     widget.js      ← the embeddable widget (stable URL)
 ```
 
-That directory **is** the deploy artifact. Roughly 25 KB
-gzipped of widget JS plus six tiny HTML pages.
+That directory **is** the deploy artifact. `widget.js` alone
+(~28 KB gzipped) is the only file an external embedder needs;
+the HTML files and `style.css` are just the demo's own pages
+showing what an embedder might look like.
 
 To preview the production build locally:
 
@@ -204,26 +242,30 @@ covers every acceptance criterion in
 
 ## Visual parity with vitalik.eth.limo
 
-The CSS palette, font stack (Inter / system-ui sans-serif),
-container widths (760px markdown body inside a 1200px shell),
-the `<div id="doc" class="container-fluid markdown-body">` page
+For the demo's own pages: the CSS palette, font stack (Inter /
+system-ui sans-serif), container widths (760px markdown body
+inside a 1200px shell), the
+`<div id="doc" class="container-fluid markdown-body">` page
 structure, the floated `<small>` byline, and the
 `html.dark`-class-toggled dark mode (with localStorage
-persistence and an inline pre-paint script that avoids
-flash-of-wrong-theme) are taken directly from
-`site/css/main.css` and the published post HTML in
-<https://github.com/vbuterin/blog>. The widget-rendered classes
-(`.bam-*`) are mine and inherit the same palette so the
-comments section visually belongs to the page.
+persistence and an inline pre-paint script) are taken directly
+from `site/css/main.css` and the published post HTML in
+<https://github.com/vbuterin/blog>. None of that ships in
+`widget.js` — third-party hosts get only the widget's
+self-scoped `[data-bam-comments]` palette, which inherits the
+host page's font and adapts to its color scheme.
 
 ## Stack
 
 - **Static HTML** — 5 hand-authored post pages + index, no
-  generator.
-- **Vite** (MPA mode) — bundles `src/widget/index.ts` to a
-  hashed asset and copies `public/*` to the deploy root. Vite
-  is already in the workspace via `vitest`; no new top-level
-  dependency.
+  generator. They're the canonical embedder of the widget,
+  using the same snippet a third-party site would.
+- **Vite** (lib mode) — bundles `src/widget/index.ts` →
+  `dist/widget.js` (stable, unhashed). A small in-project
+  plugin aliases `/widget.js` → source in dev so the same URL
+  works in both modes; another copies the demo's HTML and
+  `public/*` to `dist/` after build. Vite is already in the
+  workspace via `vitest`; no new top-level dependency.
 - **`bam-sdk` (browser)** — encoding, EIP-712 types,
   `messageHash` derivation.
 - **`viem`** — `keccak256`, `Hex` types.

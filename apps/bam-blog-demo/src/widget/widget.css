@@ -1,0 +1,183 @@
+/* Self-contained styles for the BAM comments widget. Inlined into
+   the widget bundle and injected as a <style> tag at mount time so
+   third-party hosts don't have to ship a separate stylesheet.
+
+   All rules are scoped to `[data-bam-comments]` (the mount root)
+   or to elements inside a `.bam-*` class, so nothing leaks into
+   the host page.
+
+   The widget reads its colors from CSS variables — light mode by
+   default, an `@media (prefers-color-scheme: dark)` block for OS
+   preference, and a `.bam-light` / `.bam-dark` override scheme so
+   a host can force a mode by adding the class to the mount.
+   Override any variable from outside to retheme:
+
+     [data-bam-comments] { --bam-color-anchor: #c3a554; }
+*/
+
+[data-bam-comments] {
+  --bam-color-bg: transparent;
+  --bam-color-text: #333;
+  --bam-color-anchor: #337ab7;
+  --bam-color-muted: #6b6b6b;
+  --bam-color-divider: #cdcdcd;
+  --bam-color-pending: #b07300;
+  --bam-color-error: #c0392b;
+  --bam-color-input-bg: #fff;
+
+  font-family: inherit;
+  color: var(--bam-color-text);
+  line-height: 1.6;
+  background: var(--bam-color-bg);
+}
+
+@media (prefers-color-scheme: dark) {
+  [data-bam-comments]:not(.bam-light) {
+    --bam-color-text: #e5e5e5;
+    --bam-color-anchor: #c3a554;
+    --bam-color-muted: #b8b8b8;
+    --bam-color-divider: #444;
+    --bam-color-input-bg: #1c1c1c;
+  }
+}
+
+[data-bam-comments].bam-dark {
+  --bam-color-text: #e5e5e5;
+  --bam-color-anchor: #c3a554;
+  --bam-color-muted: #b8b8b8;
+  --bam-color-divider: #444;
+  --bam-color-input-bg: #1c1c1c;
+}
+
+[data-bam-comments] *,
+[data-bam-comments] *::before,
+[data-bam-comments] *::after {
+  box-sizing: border-box;
+}
+
+.bam-status {
+  color: var(--bam-color-muted);
+  font-size: 0.95rem;
+  margin: 0.5rem 0;
+}
+.bam-status--error {
+  color: var(--bam-color-error);
+}
+
+.bam-connect {
+  margin: 0 0 1.25rem 0;
+  font-size: 0.95rem;
+  color: var(--bam-color-muted);
+}
+.bam-connect button,
+.bam-composer button,
+.bam-comment__reply-btn {
+  font: inherit;
+  background: none;
+  border: 1px solid var(--bam-color-divider);
+  color: var(--bam-color-text);
+  padding: 0.4rem 0.9rem;
+  cursor: pointer;
+  border-radius: 4px;
+}
+.bam-connect button:hover,
+.bam-composer button:hover,
+.bam-comment__reply-btn:hover {
+  border-color: var(--bam-color-anchor);
+  color: var(--bam-color-anchor);
+}
+.bam-connect button:disabled,
+.bam-composer button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.bam-composer {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 0 0 1.5rem 0;
+}
+.bam-composer textarea {
+  font: inherit;
+  width: 100%;
+  min-height: 4.5rem;
+  padding: 0.6rem;
+  border: 1px solid var(--bam-color-divider);
+  background: var(--bam-color-input-bg);
+  color: var(--bam-color-text);
+  resize: vertical;
+  border-radius: 4px;
+}
+.bam-composer__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+.bam-composer__chars {
+  font-size: 0.85rem;
+  color: var(--bam-color-muted);
+}
+.bam-composer__chars--warn {
+  color: var(--bam-color-pending);
+}
+.bam-composer__chars--bad {
+  color: var(--bam-color-error);
+}
+.bam-composer__error {
+  color: var(--bam-color-error);
+  font-size: 0.9rem;
+}
+
+.bam-thread {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+.bam-thread .bam-thread {
+  margin-top: 0.75rem;
+  padding-left: 1.25rem;
+  border-left: 2px solid var(--bam-color-divider);
+}
+
+.bam-comment__head {
+  display: flex;
+  gap: 0.6rem;
+  align-items: baseline;
+  font-size: 0.85rem;
+  color: var(--bam-color-muted);
+  margin-bottom: 0.35rem;
+}
+.bam-comment__addr {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.bam-comment__badge--pending {
+  color: var(--bam-color-pending);
+  border: 1px solid var(--bam-color-pending);
+  border-radius: 2px;
+  padding: 0 0.4em;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.bam-comment__body {
+  white-space: pre-wrap;
+  margin: 0 0 0.4rem 0;
+}
+.bam-comment__actions {
+  font-size: 0.85rem;
+}
+.bam-comment__reply-btn {
+  padding: 0.15rem 0.6rem;
+  font-size: 0.8rem;
+}
+
+.bam-empty {
+  color: var(--bam-color-muted);
+  font-style: italic;
+  margin: 1rem 0;
+}
