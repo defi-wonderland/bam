@@ -22,6 +22,11 @@ implementing.
 - Live upstreams: `https://bam-poster.fly.dev`,
   `https://bam-reader.fly.dev`. The widget calls them directly from
   the browser at runtime; assume CORS is open (verify, don't proxy).
+- The Poster exposes `GET /nonce/<sender>` (added in PR #42) as the
+  authoritative cross-tag next-nonce source. The widget calls it
+  directly — there is **no** client-side fan-out across sibling
+  apps' `contentTag`s, and **no** `KNOWN_CONTENT_TAGS` list to
+  maintain.
 - `bam-sdk` already has `"sideEffects": false` and a split
   `eip712.ts` so `import { EIP712_TYPES, computeECDSADigest } from
   'bam-sdk/browser'` does not pull in `@noble/bls12-381` or
@@ -75,9 +80,11 @@ implementing.
 contentTag = keccak256(utf8("bam-comments.v1"))
 ```
 
-Add this tag to `apps/bam-twitter/src/lib/constants.ts`
-`KNOWN_CONTENT_TAGS` so cross-app per-sender nonce coordination
-keeps working for wallets posting in multiple demos.
+This is the only `contentTag` the widget submits under and the
+only one it filters reads against. No need to register the tag
+with sibling apps — cross-tag nonce coordination is handled by
+the Poster's `/nonce/<sender>` endpoint (see *Per-sender nonce*
+below).
 
 `postIdHash` (32B, lives inside the signed `contents` payload — not
 on-chain):
@@ -158,17 +165,27 @@ bytes K+4..   : utf-8 content
   `busy`; do **not** retain the signed message client-side
   (the user must re-sign).
 
-## Cross-app per-sender nonce
+## Per-sender nonce
 
-The Poster's monotonicity check is per-sender across all
-`contentTag`s. Compute next-nonce client-side by walking:
-- Poster `/pending` (no tag filter) — one call.
-- Reader `/messages?contentTag=X&status=confirmed` — one call per
-  known tag.
+The Poster's monotonicity check is per-sender across every
+`contentTag` it serves. Use its dedicated endpoint as the source
+of truth — one call, one PK lookup, authoritative:
 
-`KNOWN_CONTENT_TAGS` lives next to `BAM_COMMENTS_TAG` in the widget
-package — mirror of `apps/bam-twitter/src/lib/constants.ts`. New
-apps sharing the Poster get appended to both lists.
+```
+GET ${VITE_POSTER_URL}/nonce/${sender.toLowerCase()}
+→ 200 { nextNonce: string }   (decimal uint64 as string)
+```
+
+On any non-200, treat the response as a hard error and surface a
+typed failure to the user — do **not** fall back to scanning
+`/pending` or the Reader's `/messages`. An underestimated
+`nextNonce` round-trips through the Composer's `stale_nonce`
+retry loop and exhausts on a stuck max; failing fast surfaces
+the upstream problem instead of hiding it behind wallet popups.
+
+No `KNOWN_CONTENT_TAGS` list, no fan-out, no per-tag walk.
+Adding a new BAM app sharing this Poster does not require any
+change to the widget.
 
 ## Bundle budget
 
@@ -227,10 +244,12 @@ fix it in `bam-sdk` rather than working around in the widget.
 
 1. Skim `apps/bam-twitter` and the existing
    `claude/add-blog-comments-ZUEFb` branch's `apps/bam-blog-demo`
-   for shape only — **don't copy structure**, just confirm wire
-   format and the `bam-twitter` `KNOWN_CONTENT_TAGS` pattern.
+   for shape only — **don't copy structure**, just confirm the
+   wire-format conventions (envelope + `contents[32:]`).
 2. Read `docs/specs/erc-8180.md` if you need a refresher on the
-   envelope.
+   envelope. Read `packages/bam-poster/src/surfaces/nonce.ts` and
+   its HTTP route to understand the `/nonce/<sender>` shape the
+   widget consumes.
 3. Build the package first (codec → post-id → content-tag → thread
    → eth → typed-data → poster-reader → render → index). Tests
    alongside each module — interleave, don't batch.
