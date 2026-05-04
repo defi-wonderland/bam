@@ -1,11 +1,9 @@
 /**
  * Pins `BLOG_DEMO_CONTENT_TAG` to `keccak256(utf8(CONTENT_TAG_NAMESPACE))`.
- *
- * This is the cross-app coordination point: bumping the namespace
- * (or the hash) without updating
- * `apps/bam-twitter/src/lib/constants.ts` `KNOWN_CONTENT_TAGS`
- * desynchronizes the per-sender nonce computation. The pin is the
- * regression guard.
+ * Bumping either side without the other invalidates every existing
+ * comment (the bytes32 carried in `contents[0..32]` would no longer
+ * match the value the widget computes), so the pin is the regression
+ * guard.
  */
 
 import { describe, expect, it } from 'vitest';

@@ -27,7 +27,7 @@
 
 import type { Hex } from 'viem';
 
-import { BLOG_DEMO_CONTENT_TAG, KNOWN_CONTENT_TAGS } from './content-tag.js';
+import { BLOG_DEMO_CONTENT_TAG } from './content-tag.js';
 
 const POSTER_URL = (
   (import.meta.env.VITE_POSTER_URL as string | undefined) ?? ''
@@ -101,62 +101,26 @@ export async function fetchConfirmed(): Promise<ConfirmedRow[]> {
   return DIRECT_MODE ? rows.filter((r) => r.batchRef !== null) : rows;
 }
 
-interface PosterPendingFanout {
-  pending?: Array<{ sender: string; nonce: string | number }>;
-}
-interface ReaderConfirmedFanout {
-  messages?: Array<{ author: string; nonce: string }>;
-}
-
+/**
+ * Per-sender next-nonce. One Poster call to `/nonce/<sender>`,
+ * which reads the per-sender tracker the monotonicity check uses
+ * — authoritative across every contentTag the Poster serves, so
+ * the widget no longer has to enumerate sibling apps' tags.
+ *
+ * Both modes (direct + same-origin proxy) hit the same endpoint
+ * shape: `{ nextNonce: string }`.
+ */
 export async function fetchNextNonce(sender: Hex): Promise<bigint> {
-  if (!DIRECT_MODE) {
-    const res = await fetch(
-      `/api/next-nonce?sender=${encodeURIComponent(sender)}`
-    );
-    if (!res.ok) throw new Error(`next-nonce lookup failed: ${res.status}`);
-    const data = (await res.json()) as { nextNonce?: string };
-    if (typeof data.nextNonce !== 'string') {
-      throw new Error('next-nonce response missing nextNonce');
-    }
-    return BigInt(data.nextNonce);
+  const url = DIRECT_MODE
+    ? `${POSTER_URL}/nonce/${encodeURIComponent(sender.toLowerCase())}`
+    : `/api/next-nonce?sender=${encodeURIComponent(sender)}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`next-nonce lookup failed: ${res.status}`);
+  const data = (await res.json()) as { nextNonce?: string };
+  if (typeof data.nextNonce !== 'string') {
+    throw new Error('next-nonce response missing nextNonce');
   }
-
-  // Direct mode: same logic server.ts implements, but client-side.
-  const lc = sender.toLowerCase();
-  let max = -1n;
-
-  const pendingRes = await fetch(`${POSTER_URL}/pending`);
-  if (!pendingRes.ok) {
-    throw new Error(`poster /pending: ${pendingRes.status}`);
-  }
-  const pendingData = (await pendingRes.json()) as PosterPendingFanout;
-  for (const p of pendingData.pending ?? []) {
-    if (p.sender.toLowerCase() !== lc) continue;
-    const n = parseNonce(p.nonce);
-    if (n !== null && n > max) max = n;
-  }
-
-  for (const tag of KNOWN_CONTENT_TAGS) {
-    const r = await fetch(
-      `${READER_URL}/messages?contentTag=${encodeURIComponent(tag)}&status=confirmed`
-    );
-    if (!r.ok) throw new Error(`reader /messages for ${tag}: ${r.status}`);
-    const data = (await r.json()) as ReaderConfirmedFanout;
-    for (const row of data.messages ?? []) {
-      if (row.author.toLowerCase() !== lc) continue;
-      const n = parseNonce(row.nonce);
-      if (n !== null && n > max) max = n;
-    }
-  }
-  return max + 1n;
-}
-
-function parseNonce(v: string | number): bigint | null {
-  try {
-    return BigInt(v);
-  } catch {
-    return null;
-  }
+  return BigInt(data.nextNonce);
 }
 
 export async function submitMessage(args: SubmitArgs): Promise<SubmitResult> {

@@ -41,6 +41,7 @@ import {
   type ReconcileRpcClient,
 } from './startup/reconcile.js';
 import { listPending } from './surfaces/pending.js';
+import { getNextNonce } from './surfaces/nonce.js';
 import { listSubmittedBatches } from './surfaces/submitted.js';
 import { readStatus, type StatusRpcReader } from './surfaces/status.js';
 import { readHealth } from './surfaces/health.js';
@@ -316,6 +317,9 @@ export async function createPoster(
             ? { ...q, contentTag: canonicalTag(q.contentTag) }
             : q
         );
+      },
+      async getNextNonce(sender: Address): Promise<bigint> {
+        return getNextNonce(store, sender);
       },
       async status(): Promise<Status> {
         return readStatus({

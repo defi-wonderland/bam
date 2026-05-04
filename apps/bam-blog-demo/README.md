@@ -226,19 +226,15 @@ Both are consumed at build time (and dev-time `vite serve`).
 Vite bakes them into the bundle. There are no runtime env vars
 — this is a static site.
 
-## Cross-app coordination
+## Cross-app nonce coordination
 
-The widget computes per-sender next-nonce client-side by walking
-the Poster's `/pending` (no tag filter) plus the Reader's
-`/messages` once per known `contentTag`. The Poster's
-monotonicity check is per sender across all tags, so a per-tag
-estimate would live-lock any wallet that has posted in another
-app on the same Poster.
-
-The list of known tags lives in
-`src/widget/content-tag.ts` — mirror of
-`apps/bam-twitter/src/lib/constants.ts` `KNOWN_CONTENT_TAGS`.
-New apps sharing this Poster need to be appended to both.
+The widget asks the Poster for `GET /nonce/<sender>` directly.
+That endpoint reads the per-sender nonce tracker the
+monotonicity check writes to (atomically on accept), so the
+answer is authoritative across every `contentTag` the Poster
+serves. The widget no longer has to enumerate sibling apps'
+tags — adding a new BAM app sharing this Poster is a no-op
+here.
 
 ## Smoke test
 
