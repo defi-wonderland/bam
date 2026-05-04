@@ -42,6 +42,19 @@ importers:
         specifier: ^1.2.0
         version: 1.6.1(@types/node@25.5.0)(happy-dom@15.11.7)(jsdom@29.0.2(@noble/hashes@1.8.0))
 
+  apps/bam-blog-demo:
+    dependencies:
+      bam-comments:
+        specifier: workspace:*
+        version: link:../../packages/bam-comments
+    devDependencies:
+      vite:
+        specifier: ^5.4.0
+        version: 5.4.21(@types/node@25.5.0)
+      vitest:
+        specifier: ^1.2.0
+        version: 1.6.1(@types/node@25.5.0)(happy-dom@15.11.7)(jsdom@29.0.2(@noble/hashes@1.8.0))
+
   apps/bam-sdk-test:
     dependencies:
       bam-sdk:

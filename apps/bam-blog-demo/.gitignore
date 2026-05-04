@@ -1,0 +1,4 @@
+dist/
+node_modules/
+public/widget.js
+public/widget.js.map
