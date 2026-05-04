@@ -343,6 +343,15 @@ export interface Poster {
   submit(message: Uint8Array, hint?: SubmitHint): Promise<SubmitResult>;
   listPending(query?: PendingQuery): Promise<Pending[]>;
   listSubmittedBatches(query?: SubmittedBatchesQuery): Promise<SubmittedBatch[]>;
+  /**
+   * `lastNonce + 1` for `sender` from the nonce tracker, or `0n` if the
+   * sender has never had a message accepted. Authoritative across every
+   * contentTag served by this Poster — the monotonicity check is
+   * per-sender, not per-tag, so callers building a "sign with this
+   * nonce" UX should ask the Poster directly instead of reconstructing
+   * the value from per-tag pending + confirmed views.
+   */
+  getNextNonce(sender: Address): Promise<bigint>;
   status(): Promise<Status>;
   health(): Promise<Health>;
   start(): Promise<void>;

@@ -13,6 +13,7 @@ import type { Poster } from '../types.js';
 import {
   flushHandler,
   healthHandler,
+  nonceHandler,
   pendingHandler,
   statusHandler,
   submitHandler,
@@ -38,6 +39,14 @@ export interface HttpServerOptions {
 interface BoundRoute {
   method: 'GET' | 'POST';
   path: string;
+  /**
+   * When true, `path` is treated as a prefix and matches any pathname
+   * starting with `path + '/'` (e.g. `path: '/nonce'` matches
+   * `/nonce/0xabc…`). The handler is responsible for parsing the
+   * trailing segment from `req.url`. Used for path-param style routes
+   * — every other endpoint here is exact-match.
+   */
+  prefix?: boolean;
   handler: Handler;
 }
 
@@ -45,15 +54,18 @@ const ROUTES: BoundRoute[] = [
   { method: 'POST', path: '/submit', handler: submitHandler },
   { method: 'GET', path: '/pending', handler: pendingHandler },
   { method: 'GET', path: '/submitted-batches', handler: submittedHandler },
+  { method: 'GET', path: '/nonce', prefix: true, handler: nonceHandler },
   { method: 'GET', path: '/status', handler: statusHandler },
   { method: 'GET', path: '/health', handler: healthHandler },
   { method: 'POST', path: '/flush', handler: flushHandler },
 ];
 
 /**
- * Thin Node `http.createServer` router — no framework dep for 6
- * endpoints. Paths are exact-match; query strings pass through to the
- * handler.
+ * Thin Node `http.createServer` router — no framework dep for the
+ * Poster's small endpoint surface. Paths are exact-match by default;
+ * a route may opt into prefix matching via `BoundRoute.prefix` for the
+ * one path-param endpoint (`/nonce/<sender>`). Query strings pass
+ * through to the handler unchanged.
  */
 export class HttpServer {
   private readonly server: Server;
@@ -98,9 +110,11 @@ export class HttpServer {
       }
 
       const url = new URL(req.url ?? '/', 'http://local');
-      const route = ROUTES.find(
-        (r) => r.method === req.method && r.path === url.pathname
-      );
+      const route = ROUTES.find((r) => {
+        if (r.method !== req.method) return false;
+        if (r.prefix) return url.pathname.startsWith(r.path + '/');
+        return r.path === url.pathname;
+      });
       if (!route) {
         res.statusCode = 404;
         res.setHeader('Content-Type', 'application/json');
