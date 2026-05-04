@@ -104,12 +104,22 @@ export {
   splitContents,
 } from './message.js';
 
-// ERC-8180 scheme-0x01 ECDSA (EIP-712) signing surface.
+// ERC-8180 scheme-0x01 EIP-712 typed-data primitives.
+//
+// Re-exported from `./eip712.js` (not `./signatures.js`) so a browser
+// consumer that imports only these four symbols gets a tree-shaken
+// bundle free of `@noble/bls12-381` / `@noble/secp256k1`. This is
+// load-bearing for the `bam-comments` widget's 15 kB gzip budget;
+// `"sideEffects": false` on this package's package.json is what lets
+// the bundler drop `signatures.js` entirely.
 export {
   EIP712_DOMAIN_NAME,
   EIP712_DOMAIN_VERSION,
   EIP712_TYPES,
   computeECDSADigest,
+} from './eip712.js';
+
+export {
   signECDSA,
   signECDSAWithKey,
   verifyECDSA,
