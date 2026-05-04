@@ -89,8 +89,16 @@ describe('post-id', () => {
     });
 
     it('rejects non-32-byte contentTag', () => {
+      // Cast through `unknown` because the parameter is the literal
+      // `BAM_COMMENTS_TAG` type; this test exercises the runtime
+      // length guard, which has to remain even in cases the type
+      // system would otherwise have ruled out.
       expect(() =>
-        derivePostIdHash('0xdead' as `0x${string}`, 'example.com', 'p')
+        derivePostIdHash(
+          '0xdead' as unknown as typeof BAM_COMMENTS_TAG,
+          'example.com',
+          'p'
+        )
       ).toThrow();
     });
   });

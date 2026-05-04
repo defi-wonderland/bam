@@ -5,9 +5,16 @@
  * force a mode, otherwise we follow `prefers-color-scheme`.
  */
 
+/*
+ * Defaults inherit from the host page (`font-family: inherit`,
+ * `background: transparent`) so the widget blends into whatever
+ * typography + theming the embedder already has. Hosts that want
+ * card-like chrome can set `--bam-color-bg` and `--bam-radius`
+ * themselves; we keep the defaults out of the way.
+ */
 [data-bam-comments] {
-  --bam-color-bg: #ffffff;
-  --bam-color-fg: #0f172a;
+  --bam-color-bg: transparent;
+  --bam-color-fg: inherit;
   --bam-color-muted: #64748b;
   --bam-color-border: #e2e8f0;
   --bam-color-accent: #2563eb;
@@ -15,29 +22,31 @@
   --bam-color-pending-bg: #fef3c7;
   --bam-color-pending-fg: #92400e;
   --bam-color-error: #dc2626;
-  --bam-radius: 8px;
-  --bam-pad: 12px;
+  --bam-radius: 0;
+  --bam-pad: 0;
 
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
-    "Helvetica Neue", Arial, sans-serif;
-  font-size: 14px;
-  line-height: 1.45;
+  font-family: inherit;
+  font-size: inherit;
+  line-height: 1.5;
   color: var(--bam-color-fg);
   background: var(--bam-color-bg);
-  border: 1px solid var(--bam-color-border);
   border-radius: var(--bam-radius);
   padding: var(--bam-pad);
   box-sizing: border-box;
 }
 
+/*
+ * Dark mode adjusts the widget's *own* chrome (muted text, borders,
+ * pending badge) but leaves `--bam-color-fg` as `inherit` so the
+ * host's body colour still drives comment text. A host that needs
+ * a different baseline can override `--bam-color-fg` directly.
+ */
 @media (prefers-color-scheme: dark) {
   [data-bam-comments]:not(.bam-light) {
-    --bam-color-bg: #0b1220;
-    --bam-color-fg: #e2e8f0;
     --bam-color-muted: #94a3b8;
-    --bam-color-border: #1e293b;
-    --bam-color-accent: #3b82f6;
-    --bam-color-accent-fg: #f8fafc;
+    --bam-color-border: #334155;
+    --bam-color-accent: #60a5fa;
+    --bam-color-accent-fg: #0b1220;
     --bam-color-pending-bg: #422006;
     --bam-color-pending-fg: #fef3c7;
     --bam-color-error: #f87171;
@@ -45,12 +54,10 @@
 }
 
 [data-bam-comments].bam-dark {
-  --bam-color-bg: #0b1220;
-  --bam-color-fg: #e2e8f0;
   --bam-color-muted: #94a3b8;
-  --bam-color-border: #1e293b;
-  --bam-color-accent: #3b82f6;
-  --bam-color-accent-fg: #f8fafc;
+  --bam-color-border: #334155;
+  --bam-color-accent: #60a5fa;
+  --bam-color-accent-fg: #0b1220;
   --bam-color-pending-bg: #422006;
   --bam-color-pending-fg: #fef3c7;
   --bam-color-error: #f87171;

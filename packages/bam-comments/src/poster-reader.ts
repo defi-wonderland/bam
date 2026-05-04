@@ -56,10 +56,29 @@ export async function getNextNonce(sender: `0x${string}`): Promise<bigint> {
   if (typeof v !== 'string') {
     throw new UpstreamError('shape', 'nextNonce missing or not a string');
   }
+  // The endpoint contract is "decimal uint64 as string"; reject
+  // anything else (hex, leading sign, scientific) so an upstream
+  // contract drift surfaces here rather than silently producing a
+  // wrong nonce that would fail `stale_nonce` repeatedly.
+  if (!/^[0-9]+$/.test(v)) {
+    throw new UpstreamError('shape', `nextNonce not a decimal uint64: ${v}`);
+  }
+  return BigInt(v);
+}
+
+/**
+ * Best-effort nudge to the Poster's batch loop after a successful
+ * submit. The Poster batches autonomously on its own schedule, so
+ * this is purely a latency optimisation — the call's outcome is
+ * intentionally swallowed (the comment will still confirm even if
+ * /flush is unreachable or the Poster bounces this request).
+ */
+export async function flushBatch(contentTag: `0x${string}`): Promise<void> {
+  const url = `${POSTER_URL}/flush?contentTag=${encodeURIComponent(contentTag)}`;
   try {
-    return BigInt(v);
+    await fetch(url, { method: 'POST' });
   } catch {
-    throw new UpstreamError('shape', `nextNonce not a base-10 integer: ${v}`);
+    /* swallowed: see jsdoc */
   }
 }
 
@@ -152,10 +171,19 @@ export interface ListMessagesArgs {
 
 interface ReaderRow {
   messageHash: string;
-  sender: string;
+  /** Reader names this `author`; Poster's `/pending` names it `sender`. */
+  sender?: string;
+  author?: string;
   nonce: string;
   contents: string;
   status?: string;
+  /**
+   * Set once the Reader has linked this message to an on-chain batch.
+   * Confirmed rows can briefly arrive with `batchRef === null` during
+   * the tx-pending → confirmed transition; we drop those upstream of
+   * decoding so they don't render as half-confirmed ghosts.
+   */
+  batchRef?: string | null;
   /** Fallback timestamp surfaced by the Reader for sort-order debugging. */
   acceptedAt?: number;
 }
@@ -195,10 +223,17 @@ export async function listMessages(
 }
 
 function decodeRow(row: ReaderRow, pending: boolean): DecodedMessage | null {
+  // The Reader marks a row "confirmed" the moment its tx is included
+  // but populates `batchRef` after a second pass; treat such rows as
+  // not-yet-renderable so we don't briefly de-duplicate them against
+  // their own pending mirror under a stale messageHash.
+  if (!pending && row.batchRef === null) return null;
   try {
     const contents = hexToBytes(row.contents);
     const { envelope } = decodeCommentContents(contents);
-    const sender = row.sender as `0x${string}`;
+    const senderField = row.sender ?? row.author;
+    if (typeof senderField !== 'string') return null;
+    const sender = senderField as `0x${string}`;
     const nonce = BigInt(row.nonce);
     const messageHash = (computeMessageHash(sender, nonce, contents)) as `0x${string}`;
     const parentMessageHash =

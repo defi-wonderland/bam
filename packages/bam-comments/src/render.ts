@@ -17,14 +17,17 @@ import {
   ensureSepolia,
   getProvider,
   onAccountsChanged,
+  readExistingAccount,
   requestAccount,
   requireProvider,
   signTypedData,
   SEPOLIA_CHAIN_ID,
   WalletError,
+  type Eip1193Provider,
 } from './eth.js';
 import { buildTypedData } from './typed-data.js';
 import {
+  flushBatch,
   getNextNonce,
   listForPost,
   submitMessage,
@@ -122,6 +125,23 @@ export function mountInstance(target: HTMLElement): () => void {
     });
   };
 
+  /**
+   * Wire `accountsChanged` exactly once per mount. Both the connect
+   * button and the silent-bootstrap path call this — without it, a
+   * widget that boots with a remembered account would never observe
+   * the user disconnecting or switching accounts in the wallet.
+   */
+  function wireAccountsChanged(provider: Eip1193Provider): void {
+    if (cleanupAccountsChanged !== null) return;
+    cleanupAccountsChanged = onAccountsChanged(provider, (next) => {
+      state.account = next;
+      // Drop any in-flight composer; signing as a different account
+      // mid-draft is never what the user wanted.
+      if (next === null) state.composing = null;
+      render();
+    });
+  }
+
   async function onConnect() {
     state.error = null;
     try {
@@ -129,10 +149,7 @@ export function mountInstance(target: HTMLElement): () => void {
       const account = await requestAccount(provider);
       await ensureSepolia(provider);
       state.account = account;
-      cleanupAccountsChanged = onAccountsChanged(provider, (accs) => {
-        state.account = (accs[0]?.toLowerCase() ?? null) as `0x${string}` | null;
-        render();
-      });
+      wireAccountsChanged(provider);
       render();
     } catch (err) {
       state.error = describeError(err);
@@ -144,8 +161,11 @@ export function mountInstance(target: HTMLElement): () => void {
     if (state.composing === null || state.submitting) return;
     const draft = state.composing.draft.trim();
     if (draft.length === 0) return;
-    if (draft.length > COMMENT_MAX_CHARS) {
-      state.error = `comment too long (max ${COMMENT_MAX_CHARS} chars)`;
+    // Code-point count, not UTF-16 code units — `"😀".length === 2`
+    // would otherwise let a 280-character emoji string fail the cap
+    // a user wouldn't expect.
+    if ([...draft].length > COMMENT_MAX_CHARS) {
+      state.error = `comment too long (max ${COMMENT_MAX_CHARS} characters)`;
       render();
       return;
     }
@@ -165,6 +185,11 @@ export function mountInstance(target: HTMLElement): () => void {
       state.composing = null;
       state.submitting = false;
       render();
+      // Best-effort nudge to the Poster's batch loop so the comment
+      // confirms in seconds rather than waiting for the next batch
+      // window. Failure is swallowed inside flushBatch — a comment
+      // confirms regardless.
+      void flushBatch(BAM_COMMENTS_TAG);
       void refresh();
     } catch (err) {
       state.submitting = false;
@@ -217,22 +242,18 @@ export function mountInstance(target: HTMLElement): () => void {
 
   // Initial provider check: surface a passive prompt to connect, but
   // don't auto-prompt — clicking the connect button is the user's
-  // explicit consent.
+  // explicit consent. Wire `accountsChanged` either way so that a
+  // user who connects out-of-band (e.g. via another widget on the
+  // page) shows up here without a page reload.
   const provider = getProvider();
   if (provider !== null) {
-    // Best-effort: if the wallet remembers an authorisation, surface
-    // the connected account immediately so the composer is enabled.
-    void provider
-      .request({ method: 'eth_accounts' })
-      .then((accs) => {
-        if (Array.isArray(accs) && accs.length > 0) {
-          state.account = (accs[0] as string).toLowerCase() as `0x${string}`;
-          render();
-        }
-      })
-      .catch(() => {
-        /* no-op: not authorised yet */
-      });
+    wireAccountsChanged(provider);
+    void readExistingAccount(provider).then((existing) => {
+      if (existing !== null && state.account === null) {
+        state.account = existing;
+        render();
+      }
+    });
   }
 
   void refresh();
@@ -278,9 +299,13 @@ function renderInto(
     threadEl(state, hooks)
   );
 
+  // Don't move focus into a disabled textarea — that happens during
+  // the brief `submitting` window when the textarea is greyed out;
+  // pulling focus there steals it from whatever the user tabbed to
+  // while waiting for the wallet to sign.
   if (focusSnapshot !== null) {
     const next = target.querySelector<HTMLTextAreaElement>('.bam-textarea');
-    if (next !== null) {
+    if (next !== null && !next.disabled) {
       next.focus();
       try {
         next.setSelectionRange(focusSnapshot.start, focusSnapshot.end);

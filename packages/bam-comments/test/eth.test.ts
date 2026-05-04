@@ -4,6 +4,8 @@ import {
   WalletError,
   mapProviderError,
   normalizeEcdsaV,
+  onAccountsChanged,
+  readExistingAccount,
   requireProvider,
   requestAccount,
   signTypedData,
@@ -153,6 +155,22 @@ describe('signTypedData', () => {
     ).rejects.toMatchObject({ code: 'bad_signature_shape' });
   });
 
+  it('throws bad_signature_shape on truncated hex', async () => {
+    const provider = stub(async () => '0xdead');
+    await expect(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      signTypedData(provider, account, td as any)
+    ).rejects.toMatchObject({ code: 'bad_signature_shape' });
+  });
+
+  it('throws bad_signature_shape on non-hex characters in payload', async () => {
+    const provider = stub(async () => '0x' + 'zz'.repeat(65));
+    await expect(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      signTypedData(provider, account, td as any)
+    ).rejects.toMatchObject({ code: 'bad_signature_shape' });
+  });
+
   it('maps user rejection (4001) to request_rejected', async () => {
     const provider = stub(async () => {
       throw { code: 4001, message: 'denied' };
@@ -161,5 +179,91 @@ describe('signTypedData', () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       signTypedData(provider, account, td as any)
     ).rejects.toMatchObject({ code: 'request_rejected' });
+  });
+});
+
+describe('onAccountsChanged', () => {
+  function eventfulStub(): {
+    provider: Eip1193Provider;
+    fire: (accounts: unknown) => void;
+    listeners: number;
+  } {
+    const handlers: ((...args: unknown[]) => void)[] = [];
+    const provider: Eip1193Provider = {
+      request: async () => undefined,
+      on: (_evt, handler) => {
+        handlers.push(handler);
+      },
+      removeListener: (_evt, handler) => {
+        const i = handlers.indexOf(handler);
+        if (i >= 0) handlers.splice(i, 1);
+      },
+    };
+    return {
+      provider,
+      fire: (accounts) => handlers.forEach((h) => h(accounts)),
+      get listeners() {
+        return handlers.length;
+      },
+    };
+  }
+
+  it('reports the first account, lowercased, as Hex', () => {
+    const { provider, fire } = eventfulStub();
+    let received: `0x${string}` | null | undefined;
+    onAccountsChanged(provider, (a) => {
+      received = a;
+    });
+    fire(['0xABCDEF0000000000000000000000000000000001']);
+    expect(received).toBe('0xabcdef0000000000000000000000000000000001');
+  });
+
+  it('reports null on empty array (disconnect)', () => {
+    const { provider, fire } = eventfulStub();
+    let received: `0x${string}` | null | undefined = '0xseed' as never;
+    onAccountsChanged(provider, (a) => {
+      received = a;
+    });
+    fire([]);
+    expect(received).toBeNull();
+  });
+
+  it('cleanup removes the listener', () => {
+    const stub = eventfulStub();
+    const off = onAccountsChanged(stub.provider, () => {});
+    expect(stub.listeners).toBe(1);
+    off();
+    expect(stub.listeners).toBe(0);
+  });
+
+  it('returns a no-op cleanup when provider has no on()', () => {
+    const provider: Eip1193Provider = { request: async () => undefined };
+    const off = onAccountsChanged(provider, () => {});
+    expect(off).not.toThrow;
+    off(); // must not throw
+  });
+});
+
+describe('readExistingAccount', () => {
+  it('returns the lowercased first account when wallet remembers a connection', async () => {
+    const provider = stub(async (method) => {
+      expect(method).toBe('eth_accounts');
+      return ['0xABCDEF0000000000000000000000000000000001'];
+    });
+    expect(await readExistingAccount(provider)).toBe(
+      '0xabcdef0000000000000000000000000000000001'
+    );
+  });
+
+  it('returns null on empty array (no remembered connection)', async () => {
+    const provider = stub(async () => []);
+    expect(await readExistingAccount(provider)).toBeNull();
+  });
+
+  it('returns null when the request rejects (does not propagate)', async () => {
+    const provider = stub(async () => {
+      throw { code: 4100, message: 'unauth' };
+    });
+    expect(await readExistingAccount(provider)).toBeNull();
   });
 });

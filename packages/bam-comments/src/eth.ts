@@ -92,12 +92,19 @@ export async function ensureSepolia(provider: Eip1193Provider): Promise<void> {
   }
 }
 
+const SIGNATURE_HEX_RE = /^0x[0-9a-fA-F]{130}$/;
+
 /**
  * Sign EIP-712 typed data via `eth_signTypedData_v4`. Returns a
  * 0x-prefixed 65-byte hex string with `v ∈ {27, 28}` — viem's encoder
  * sometimes returns `v ∈ {0, 1}`, so we always normalise via
  * `normalizeEcdsaV` to keep the wire format byte-identical to what
  * `bam-sdk`'s `signECDSA` produces.
+ *
+ * Pre-checked with `SIGNATURE_HEX_RE` so a wallet returning
+ * non-canonical hex (truncated, mixed in non-hex, missing `0x`)
+ * fails fast with a typed `bad_signature_shape` rather than
+ * surfacing as a length error after `hexToBytes`.
  */
 export async function signTypedData(
   provider: Eip1193Provider,
@@ -109,8 +116,11 @@ export async function signTypedData(
     account,
     json,
   ]);
-  if (typeof sig !== 'string' || !sig.startsWith('0x')) {
-    throw new WalletError('bad_signature_shape', `got ${typeof sig}`);
+  if (typeof sig !== 'string' || !SIGNATURE_HEX_RE.test(sig)) {
+    throw new WalletError(
+      'bad_signature_shape',
+      `expected 65-byte hex signature, got ${typeof sig === 'string' ? `${sig.length}-char string` : typeof sig}`
+    );
   }
   return normalizeEcdsaV(sig as `0x${string}`);
 }
@@ -177,22 +187,46 @@ async function callOrThrow<T>(
 }
 
 /**
- * Subscribe to `accountsChanged`. Returns a cleanup function. Some
- * minimal providers don't implement `on` at all; the unsubscriber is
- * a no-op in that case.
+ * Subscribe to `accountsChanged`. The handler receives the active
+ * account or `null` when the wallet emits an empty array
+ * (disconnect). Returns a cleanup function. Some minimal providers
+ * don't implement `on` at all; the unsubscriber is a no-op in that
+ * case.
  */
 export function onAccountsChanged(
   provider: Eip1193Provider,
-  cb: (accounts: string[]) => void
+  cb: (account: `0x${string}` | null) => void
 ): () => void {
   if (typeof provider.on !== 'function') return () => {};
   const handler = (a: unknown) => {
-    if (Array.isArray(a)) cb(a as string[]);
+    if (!Array.isArray(a)) return;
+    const first = a[0];
+    cb(typeof first === 'string' ? (first.toLowerCase() as `0x${string}`) : null);
   };
   provider.on('accountsChanged', handler);
   return () => {
     provider.removeListener?.('accountsChanged', handler);
   };
+}
+
+/**
+ * Read the currently authorised account without prompting the user.
+ * `eth_accounts` returns `[]` when the wallet has no remembered
+ * connection for this origin — we map both that and a missing
+ * provider to `null` so the bootstrap path stays branch-free.
+ */
+export async function readExistingAccount(
+  provider: Eip1193Provider
+): Promise<`0x${string}` | null> {
+  try {
+    const accs = await provider.request({ method: 'eth_accounts' });
+    if (Array.isArray(accs) && accs.length > 0 && typeof accs[0] === 'string') {
+      return accs[0].toLowerCase() as `0x${string}`;
+    }
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 export function requireProvider(): Eip1193Provider {
