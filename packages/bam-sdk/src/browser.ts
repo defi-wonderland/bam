@@ -104,12 +104,19 @@ export {
   splitContents,
 } from './message.js';
 
-// ERC-8180 scheme-0x01 ECDSA (EIP-712) signing surface.
+// ERC-8180 scheme-0x01 typed-data shape — pulled from `eip712.ts`
+// directly (not via `signatures.js`) so consumers that only need the
+// constants don't drag @noble/secp256k1 / @noble/bls12-381 into
+// their bundle.
 export {
   EIP712_DOMAIN_NAME,
   EIP712_DOMAIN_VERSION,
   EIP712_TYPES,
   computeECDSADigest,
+} from './eip712.js';
+
+// ERC-8180 scheme-0x01 ECDSA (EIP-712) signing surface.
+export {
   signECDSA,
   signECDSAWithKey,
   verifyECDSA,

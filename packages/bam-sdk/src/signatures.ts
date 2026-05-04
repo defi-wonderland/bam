@@ -15,7 +15,7 @@ import * as secp256k1 from '@noble/secp256k1';
 import { hmac } from '@noble/hashes/hmac';
 import { sha256 } from '@noble/hashes/sha256';
 import { keccak_256 } from '@noble/hashes/sha3';
-import { encodeAbiParameters, hashTypedData, keccak256 as viemKeccak256, type WalletClient } from 'viem';
+import { encodeAbiParameters, keccak256 as viemKeccak256, type WalletClient } from 'viem';
 
 import type { Address, BAMMessage, Bytes32, HexBytes } from './types.js';
 import { ECDSA_POP_DOMAIN } from './constants.js';
@@ -23,9 +23,17 @@ import { SignatureError } from './errors.js';
 import { bytesToHex, hexToBytes } from './message.js';
 
 // Configure @noble/secp256k1 to use @noble/hashes for HMAC-SHA256
-// (required for synchronous signing).
-secp256k1.etc.hmacSha256Sync = (k: Uint8Array, ...m: Uint8Array[]) =>
-  hmac(sha256, k, secp256k1.etc.concatBytes(...m));
+// (required for synchronous signing). Run once, lazily, from the
+// only call sites that need it — keeping the file's top level
+// effect-free so consumers can tree-shake `signatures.ts` away
+// when only its constants (e.g. EIP712_TYPES) are imported.
+let secp256k1HmacInit = false;
+function ensureSecp256k1Hmac(): void {
+  if (secp256k1HmacInit) return;
+  secp256k1.etc.hmacSha256Sync = (k: Uint8Array, ...m: Uint8Array[]) =>
+    hmac(sha256, k, secp256k1.etc.concatBytes(...m));
+  secp256k1HmacInit = true;
+}
 
 // ── Internal helpers ─────────────────────────────────────────────────────
 
@@ -62,52 +70,23 @@ export type ECDSASignature = Uint8Array;
 // ECDSA — scheme 0x01 (EIP-712 over BAMMessage)
 // ═════════════════════════════════════════════════════════════════════════
 
-/**
- * EIP-712 domain fields BAM uses for scheme 0x01.
- *
- * `chainId` is supplied per call so a single signer can sign for
- * multiple deployments. `verifyingContract` is intentionally absent: a
- * BAM self-publication claim is not a transaction targeted at a specific
- * contract, and embedding one would imply a relationship that doesn't
- * exist at the protocol layer. Some hardware wallets warn on the
- * omission; this is an accepted UX cost documented in the SDK README.
- */
-export const EIP712_DOMAIN_NAME = 'BAM';
-export const EIP712_DOMAIN_VERSION = '1';
+// EIP-712 typed-data names + computeECDSADigest moved to ./eip712.ts so
+// browser bundles that only need the typed-data shape can import them
+// without dragging @noble/secp256k1 / @noble/bls12-381 into their
+// dependency graph. Re-exported below for back-compat.
+export {
+  EIP712_DOMAIN_NAME,
+  EIP712_DOMAIN_VERSION,
+  EIP712_TYPES,
+  computeECDSADigest,
+} from './eip712.js';
 
-/**
- * EIP-712 typed-data schema for a BAM message.
- */
-export const EIP712_TYPES = {
-  BAMMessage: [
-    { name: 'sender', type: 'address' },
-    { name: 'nonce', type: 'uint64' },
-    { name: 'contents', type: 'bytes' },
-  ],
-} as const;
-
-/**
- * Compute the EIP-712 digest a scheme-0x01 signer signs. Chain-bound
- * by construction: the same `BAMMessage` on a different `chainId`
- * yields a different digest, so cross-chain signature replay is not
- * reachable.
- */
-export function computeECDSADigest(message: BAMMessage, chainId: number): Bytes32 {
-  return hashTypedData({
-    domain: {
-      name: EIP712_DOMAIN_NAME,
-      version: EIP712_DOMAIN_VERSION,
-      chainId,
-    },
-    types: EIP712_TYPES,
-    primaryType: 'BAMMessage',
-    message: {
-      sender: message.sender,
-      nonce: message.nonce,
-      contents: bytesToHex(message.contents) as `0x${string}`,
-    },
-  });
-}
+import {
+  EIP712_DOMAIN_NAME,
+  EIP712_DOMAIN_VERSION,
+  EIP712_TYPES,
+  computeECDSADigest,
+} from './eip712.js';
 
 /**
  * Headless ECDSA signing: sign the EIP-712 digest of `message` on
@@ -120,6 +99,7 @@ export function signECDSAWithKey(
   chainId: number
 ): `0x${string}` {
   try {
+    ensureSecp256k1Hmac();
     const digest = computeECDSADigest(message, chainId);
     const digestBytes = hexToBytes(digest);
     const privBytes = hexToBytes(privateKey);
