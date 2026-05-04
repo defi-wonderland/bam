@@ -66,22 +66,6 @@ export async function getNextNonce(sender: `0x${string}`): Promise<bigint> {
   return BigInt(v);
 }
 
-/**
- * Best-effort nudge to the Poster's batch loop after a successful
- * submit. The Poster batches autonomously on its own schedule, so
- * this is purely a latency optimisation — the call's outcome is
- * intentionally swallowed (the comment will still confirm even if
- * /flush is unreachable or the Poster bounces this request).
- */
-export async function flushBatch(contentTag: `0x${string}`): Promise<void> {
-  const url = `${POSTER_URL}/flush?contentTag=${encodeURIComponent(contentTag)}`;
-  try {
-    await fetch(url, { method: 'POST' });
-  } catch {
-    /* swallowed: see jsdoc */
-  }
-}
-
 export interface SubmitArgs {
   contentTag: `0x${string}`;
   sender: `0x${string}`;

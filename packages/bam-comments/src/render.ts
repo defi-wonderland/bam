@@ -27,7 +27,6 @@ import {
 } from './eth.js';
 import { buildTypedData } from './typed-data.js';
 import {
-  flushBatch,
   getNextNonce,
   listForPost,
   submitMessage,
@@ -182,14 +181,14 @@ export function mountInstance(target: HTMLElement): () => void {
       await ensureSepolia(provider);
       await submitOnce(account, draft, state.composing.parent);
       // Optimistic clear; the next poll picks up the pending row.
+      // We deliberately don't POST /flush here — BAM's whole point
+      // is amortising blob costs across many authors per batch, so
+      // a per-submit flush would defeat aggregation. The comment
+      // sits in `pending` (visible with a badge in the UI) until
+      // the Poster's natural batch tick rolls it on-chain.
       state.composing = null;
       state.submitting = false;
       render();
-      // Best-effort nudge to the Poster's batch loop so the comment
-      // confirms in seconds rather than waiting for the next batch
-      // window. Failure is swallowed inside flushBatch — a comment
-      // confirms regardless.
-      void flushBatch(BAM_COMMENTS_TAG);
       void refresh();
     } catch (err) {
       state.submitting = false;

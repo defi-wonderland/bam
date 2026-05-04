@@ -92,3 +92,14 @@ The widget only talks to `window.ethereum` directly:
 `eth_requestAccounts`, `eth_chainId`, `wallet_switchEthereumChain`,
 `eth_signTypedData_v4`, plus `accountsChanged`. No `wagmi`, no
 `viem`'s wallet adapters. Only Sepolia (`11155111`) is supported.
+
+## Confirmation latency
+
+A submitted comment shows up immediately with a `pending` badge and
+confirms when the Poster's aggregator bundles it into the next
+batch. The widget does **not** call `/flush` per submit — that
+endpoint nudges the aggregator's tick, and one tick per comment
+would defeat the whole point of BAM aggregation (amortising blob
+costs across many authors per batch). Operators that want a
+shorter window should tune the Poster's batching policy
+deployment-side, not in the widget.
