@@ -176,10 +176,13 @@ const MAX_CONTENTS_HEX_CHARS = MAX_CONTENTS_BYTES * 2;
 // public API.
 export function decodeText(contents: unknown): string | null {
   if (typeof contents !== 'string' || !contents.startsWith('0x')) return null;
+  // Bound the work *before* the slice / regex / Uint8Array
+  // allocation: a 128 KB Reader row would otherwise allocate a
+  // 128 KB substring just to reject it. Checking `contents.length`
+  // directly (with the "0x" prefix accounted for) keeps the
+  // oversize path allocation-free.
+  if (contents.length > MAX_CONTENTS_HEX_CHARS + 2) return null;
   const hex = contents.slice(2);
-  // Bound the work *before* the regex test or the Uint8Array
-  // allocation, so an oversized payload can't blow up the renderer.
-  if (hex.length > MAX_CONTENTS_HEX_CHARS) return null;
   if (hex.length % 2 !== 0) return null;
   // Strict hex check: `parseInt` returns `NaN` on non-hex chars,
   // which then coerces to `0` when assigned into a `Uint8Array` and
