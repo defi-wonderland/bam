@@ -161,11 +161,25 @@ const utf8 = new TextDecoder('utf-8', { fatal: true });
  * where the trailing bytes form a valid length-prefixed UTF-8 string.
  * Returns null if no candidate fits.
  */
+// Cap on the input `contents` to keep `decodeText` cheap. Reader
+// rows can carry up to a full blob (~128 KB) but the apps in this
+// repo all fit comfortably in well under 16 KB (32-byte tag + small
+// preamble + length-prefixed UTF-8 capped at 4096). With up to 200
+// rendered rows per panel, decoding every row through a regex +
+// full byte materialization on a 100 KB payload would stall the
+// dashboard. A 16 KB cap (32 KB hex chars + "0x") is generous for
+// every codec in this repo and short enough to render fast.
+const MAX_CONTENTS_BYTES = 16_384;
+const MAX_CONTENTS_HEX_CHARS = MAX_CONTENTS_BYTES * 2;
+
 // Exported for test/decode-text.test.ts; not part of the panel's
 // public API.
 export function decodeText(contents: unknown): string | null {
   if (typeof contents !== 'string' || !contents.startsWith('0x')) return null;
   const hex = contents.slice(2);
+  // Bound the work *before* the regex test or the Uint8Array
+  // allocation, so an oversized payload can't blow up the renderer.
+  if (hex.length > MAX_CONTENTS_HEX_CHARS) return null;
   if (hex.length % 2 !== 0) return null;
   // Strict hex check: `parseInt` returns `NaN` on non-hex chars,
   // which then coerces to `0` when assigned into a `Uint8Array` and

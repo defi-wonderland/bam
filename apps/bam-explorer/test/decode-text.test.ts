@@ -97,3 +97,30 @@ describe('decodeText — declines obviously-bad payloads', () => {
     expect(decodeText(buildContents(payload))).toBeNull();
   });
 });
+
+describe('decodeText — bounds work on oversized input', () => {
+  it('returns null without allocating when contents exceeds the size cap', () => {
+    // 16 KB of hex bytes is the cap; 16 KB + 1 byte (= 32 KB + 2
+    // hex chars) is over. The function must reject this *before*
+    // the regex or the Uint8Array allocation runs.
+    const overCap = 16_384 + 1;
+    const hugeHex = '0x' + '00'.repeat(overCap);
+    const startedAt = Date.now();
+    expect(decodeText(hugeHex)).toBeNull();
+    // Generous bound — not a real perf test, just a tripwire if a
+    // future regression makes the function materialize the whole
+    // buffer first.
+    expect(Date.now() - startedAt).toBeLessThan(50);
+  });
+
+  it('decodes payloads at exactly the cap', () => {
+    // 16 KB total: 32-byte tag + (16384 - 32 - 4) zero preamble +
+    // u32 length 0 + zero-length tail.
+    const tail = new Uint8Array([0, 0, 0, 0]);
+    const preamble = new Uint8Array(16_384 - 32 - tail.length);
+    const payload = new Uint8Array(preamble.length + tail.length);
+    payload.set(preamble, 0);
+    payload.set(tail, preamble.length);
+    expect(decodeText(buildContents(payload))).toBe('');
+  });
+});
