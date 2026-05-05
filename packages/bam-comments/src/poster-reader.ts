@@ -155,7 +155,16 @@ export interface ListMessagesArgs {
 
 interface ReaderRow {
   messageHash: string;
-  /** Reader names this `author`; Poster's `/pending` names it `sender`. */
+  /**
+   * The signing EOA. The two upstreams expose the same address under
+   * different field names: the Poster's `/pending` returns `sender`
+   * (matching the ERC-8180 message-hash input
+   * `keccak256(sender ‖ nonce ‖ contents)`); the Reader's `/messages`
+   * returns `author` (matching ERC-8180's batch encoding, where the
+   * on-chain decoder exposes a per-batch `authors[]`). Same value,
+   * different framing — we accept both rather than fork the row
+   * shape.
+   */
   sender?: string;
   author?: string;
   nonce: string;
