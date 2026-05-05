@@ -90,12 +90,20 @@ describe('mountInstance — failure containment', () => {
       'data-site-id': 'demo.example',
     });
     const firstChildCountBefore = el.children.length;
-    mountInstance(el);
-    const childrenAfterFirst = el.children.length;
-    expect(childrenAfterFirst).toBeGreaterThan(firstChildCountBefore);
-    // Second call: idempotent no-op, returns immediately, doesn't
-    // re-render or duplicate state.
-    mountInstance(el);
-    expect(el.children.length).toBe(childrenAfterFirst);
+    // A successful mount kicks off a 5s polling interval, so we
+    // must capture and call the destroy callback at the end of
+    // the test — otherwise the timer (and its background fetch
+    // attempts) leak into the rest of the suite.
+    const destroy = mountInstance(el);
+    try {
+      const childrenAfterFirst = el.children.length;
+      expect(childrenAfterFirst).toBeGreaterThan(firstChildCountBefore);
+      // Second call: idempotent no-op, returns immediately, doesn't
+      // re-render or duplicate state.
+      mountInstance(el);
+      expect(el.children.length).toBe(childrenAfterFirst);
+    } finally {
+      destroy();
+    }
   });
 });
