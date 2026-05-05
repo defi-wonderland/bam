@@ -68,18 +68,41 @@ export type OverrideKey =
   | 'batchesLimitRaw'
   | 'messagesLimitRaw';
 
+const VALID_OVERRIDE_KEYS: ReadonlySet<OverrideKey> = new Set<OverrideKey>([
+  'readerUrl',
+  'posterUrl',
+  'posterAuthToken',
+  'contentTagsRaw',
+  'pendingLimitRaw',
+  'submittedLimitRaw',
+  'batchesLimitRaw',
+  'messagesLimitRaw',
+]);
+
 function readStoredOverrides(): StoredOverrides {
   if (typeof window === 'undefined') return {};
+  let parsed: unknown;
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (raw === null) return {};
-    const parsed = JSON.parse(raw);
-    if (typeof parsed !== 'object' || parsed === null) return {};
-    return parsed as StoredOverrides;
+    parsed = JSON.parse(raw);
   } catch {
     // Corrupt JSON — fall back to env defaults rather than crash.
     return {};
   }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return {};
+  // Validate field-by-field: a hand-edited localStorage entry could
+  // hold non-string values (numbers, nested objects), and downstream
+  // consumers — `parseContentTags`, `parsePanelLimit`, the URL
+  // resolvers — only handle strings. Drop anything that doesn't fit
+  // rather than letting a runtime cast smuggle bad data through.
+  const out: StoredOverrides = {};
+  for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+    if (!VALID_OVERRIDE_KEYS.has(k as OverrideKey)) continue;
+    if (typeof v !== 'string') continue;
+    (out as Record<string, string>)[k] = v;
+  }
+  return out;
 }
 
 function writeStoredOverrides(o: StoredOverrides): void {

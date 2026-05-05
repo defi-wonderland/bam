@@ -101,7 +101,7 @@ function BatchesList({ data }: { data: unknown }) {
     <div data-testid="reader-batches-ok" className="overflow-x-auto">
       <p className="text-xs text-slate-500 mb-1">{items.length} batches</p>
       <ul className="space-y-1">
-        {items.slice(0, 50).map((b, i) => {
+        {items.map((b, i) => {
           const txHash = typeof b.txHash === 'string' ? b.txHash : null;
           const linkable = txHash !== null && isHex32(txHash);
           const display = (

@@ -182,6 +182,40 @@ describe('Dashboard — override active indicator', () => {
   });
 });
 
+describe('Dashboard — per-panel refresh bumps fetchedAt (regression: qodo bug #3)', () => {
+  it('clicking a per-panel ↻ updates the header freshness', async () => {
+    vi.stubEnv('NEXT_PUBLIC_DEFAULT_READER_URL', 'http://r');
+    vi.stubEnv('NEXT_PUBLIC_DEFAULT_POSTER_URL', 'http://p');
+    setAllOk();
+
+    render(<Dashboard />);
+    await waitFor(() => {
+      expect(screen.queryByTestId('freshness')).not.toBeNull();
+    });
+    const before = screen
+      .getAllByTestId('freshness')[0]
+      .getAttribute('data-fetched-at');
+    expect(before).not.toBeNull();
+
+    // Wait at least 2 ms so the new Date.now() differs.
+    await new Promise((r) => setTimeout(r, 5));
+
+    // The dashboard renders one ↻ per panel; click the first one.
+    const refreshButtons = screen.getAllByTestId('panel-refresh-button');
+    expect(refreshButtons.length).toBeGreaterThan(0);
+    await act(async () => {
+      (refreshButtons[0] as HTMLButtonElement).click();
+    });
+
+    await waitFor(() => {
+      const after = screen
+        .getAllByTestId('freshness')[0]
+        .getAttribute('data-fetched-at');
+      expect(after).not.toBe(before);
+    });
+  });
+});
+
 describe('Dashboard — freshness + refresh (gate G-7)', () => {
   it('renders the global freshness indicator', async () => {
     vi.stubEnv('NEXT_PUBLIC_DEFAULT_READER_URL', 'http://r');

@@ -58,7 +58,7 @@ function PendingList({ data }: { data: unknown }) {
           </tr>
         </thead>
         <tbody>
-          {items.slice(0, 50).map((m, i) => (
+          {items.map((m, i) => (
             <tr key={String(m.messageHash ?? i)} className="text-slate-800">
               <td className="pr-3 truncate max-w-[16ch]">{short(m.messageHash)}</td>
               <td className="pr-3 truncate max-w-[14ch]">{short(m.sender)}</td>

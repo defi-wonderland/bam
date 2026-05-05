@@ -57,7 +57,7 @@ function SubmittedList({ data }: { data: unknown }) {
           </tr>
         </thead>
         <tbody>
-          {items.slice(0, 50).map((b, i) => (
+          {items.map((b, i) => (
             <tr key={`${String(b.txHash ?? '')}:${String(b.contentTag ?? '')}:${i}`} className="text-slate-800">
               <td className="pr-3 truncate max-w-[16ch]">{short(b.txHash)}</td>
               <td className="pr-3 text-right">{String(b.blockNumber ?? '')}</td>

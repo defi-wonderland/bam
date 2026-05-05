@@ -135,4 +135,40 @@ describe('useExplorerConfig — corrupt storage', () => {
     const { result } = renderHook(() => useExplorerConfig());
     expect(result.current.config.readerUrl).toBe('http://r.example');
   });
+
+  it('drops non-string fields rather than letting them through', async () => {
+    vi.stubEnv('NEXT_PUBLIC_DEFAULT_READER_URL', 'http://r.example');
+    // Hand-edited / corrupt entry: number where a string is expected.
+    window.localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({ readerUrl: 42, posterUrl: 'http://override-poster' })
+    );
+    const { useExplorerConfig } = await importHook();
+    const { result } = renderHook(() => useExplorerConfig());
+    // The numeric `readerUrl` was dropped → env default.
+    expect(result.current.config.readerUrl).toBe('http://r.example');
+    expect(result.current.flags.readerUrl).toBe(false);
+    // The valid string override is preserved.
+    expect(result.current.config.posterUrl).toBe('http://override-poster');
+    expect(result.current.flags.posterUrl).toBe(true);
+  });
+
+  it('drops a top-level array', async () => {
+    vi.stubEnv('NEXT_PUBLIC_DEFAULT_READER_URL', 'http://r.example');
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(['readerUrl', 'http://x']));
+    const { useExplorerConfig } = await importHook();
+    const { result } = renderHook(() => useExplorerConfig());
+    expect(result.current.config.readerUrl).toBe('http://r.example');
+  });
+
+  it('ignores unknown keys', async () => {
+    window.localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({ readerUrl: 'http://ok', evil: 'x'.repeat(10_000) })
+    );
+    const { useExplorerConfig } = await importHook();
+    const { result } = renderHook(() => useExplorerConfig());
+    expect(result.current.config.readerUrl).toBe('http://ok');
+    expect((result.current.rawOverrides as Record<string, unknown>).evil).toBeUndefined();
+  });
 });

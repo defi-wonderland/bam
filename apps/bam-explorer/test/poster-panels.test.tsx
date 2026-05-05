@@ -56,6 +56,34 @@ describe('Poster panels — render distinct accessible state per kind', () => {
     },
   ];
 
+  it('Pending and Submitted panels render every returned row (no hardcoded slice)', () => {
+    const pending = Array.from({ length: 73 }, (_, i) => ({
+      messageHash: '0x' + String(i).padStart(2, '0').repeat(32).slice(0, 64),
+    }));
+    const batches = Array.from({ length: 73 }, (_, i) => ({
+      txHash: '0x' + String(i).padStart(2, '0').repeat(32).slice(0, 64),
+      blockNumber: 1000 + i,
+      contentTag: '0x' + 'aa'.repeat(32),
+    }));
+    render(
+      <PosterPendingPanel
+        result={{ kind: 'ok', data: { pending }, fetchedAt: FETCHED_AT }}
+      />
+    );
+    expect(
+      document.querySelectorAll('[data-testid="poster-pending-ok"] tbody tr').length
+    ).toBe(73);
+    cleanup();
+    render(
+      <PosterSubmittedBatchesPanel
+        result={{ kind: 'ok', data: { batches }, fetchedAt: FETCHED_AT }}
+      />
+    );
+    expect(
+      document.querySelectorAll('[data-testid="poster-submitted-ok"] tbody tr').length
+    ).toBe(73);
+  });
+
   for (const { name, Component, okData, okTestId } of panels) {
     describe(name, () => {
       const seenTexts = new Set<string>();

@@ -2,11 +2,11 @@ import type { NotConfiguredReason, PanelResult } from '../lib/panel-result';
 
 const NOT_CONFIGURED_COPY: Record<NotConfiguredReason, string> = {
   reader_url_not_configured:
-    'READER_URL is not set on this Explorer. Set it to the Reader’s base URL.',
+    'No Reader URL configured. Open Settings to enter one (or set NEXT_PUBLIC_DEFAULT_READER_URL at build time).',
   poster_url_not_configured:
-    'POSTER_URL is not set on this Explorer. Set it to the Poster’s base URL.',
+    'No Poster URL configured. Open Settings to enter one (or set NEXT_PUBLIC_DEFAULT_POSTER_URL at build time).',
   no_content_tags:
-    'EXPLORER_CONTENT_TAGS is empty. Add one or more 0x-prefixed bytes32 tags to surface Reader-list panels.',
+    'No content tags configured. Open Settings to add 0x-prefixed bytes32 tags (or set NEXT_PUBLIC_DEFAULT_CONTENT_TAGS at build time).',
 };
 
 export function DegradedBody({

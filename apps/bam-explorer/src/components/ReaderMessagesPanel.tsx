@@ -110,7 +110,7 @@ function MessagesList({ data }: { data: unknown }) {
           </tr>
         </thead>
         <tbody>
-          {items.slice(0, 50).map((m, i) => {
+          {items.map((m, i) => {
             const text = decodeText(m.contents);
             return (
               <tr key={String(m.messageHash ?? i)} className="text-slate-800">
@@ -161,10 +161,18 @@ const utf8 = new TextDecoder('utf-8', { fatal: true });
  * where the trailing bytes form a valid length-prefixed UTF-8 string.
  * Returns null if no candidate fits.
  */
-function decodeText(contents: unknown): string | null {
+// Exported for test/decode-text.test.ts; not part of the panel's
+// public API.
+export function decodeText(contents: unknown): string | null {
   if (typeof contents !== 'string' || !contents.startsWith('0x')) return null;
   const hex = contents.slice(2);
   if (hex.length % 2 !== 0) return null;
+  // Strict hex check: `parseInt` returns `NaN` on non-hex chars,
+  // which then coerces to `0` when assigned into a `Uint8Array` and
+  // silently corrupts the byte stream. Reject the whole string
+  // instead so a malformed input renders as "(undecoded)" rather
+  // than as plausible-looking-but-wrong text.
+  if (!/^[0-9a-fA-F]*$/.test(hex)) return null;
   const bytes = new Uint8Array(hex.length / 2);
   for (let i = 0; i < bytes.length; i++) {
     bytes[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
@@ -174,7 +182,10 @@ function decodeText(contents: unknown): string | null {
   for (let p = 0; p + 4 <= app.length; p++) {
     const len =
       (app[p] * 0x1000000 + (app[p + 1] << 16) + (app[p + 2] << 8) + app[p + 3]) >>> 0;
-    if (len === 0 || len > 4096) continue;
+    // Empty UTF-8 (`len === 0`) is valid — decode it as the empty
+    // string rather than skipping the offset. Cap at 4096 to bound
+    // wasted work on garbage payloads.
+    if (len > 4096) continue;
     if (p + 4 + len !== app.length) continue;
     try {
       return utf8.decode(app.subarray(p + 4, p + 4 + len));

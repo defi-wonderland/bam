@@ -132,4 +132,19 @@ describe('ReaderMessagesPanel — same shape as ReaderBatchesPanel', () => {
     expect(screen.getByTestId('reader-messages-empty')).toBeTruthy();
     expect(screen.queryByTestId('panel-not-configured')).toBeNull();
   });
+
+  it('renders all returned items (no hardcoded slice cap)', () => {
+    // Build 73 messages: more than the old hardcoded 50, well within
+    // the upstream limit. Asserts the panel renders every one.
+    const messages = Array.from({ length: 73 }, (_, i) => ({
+      messageHash: '0x' + String(i).padStart(2, '0').repeat(32).slice(0, 64),
+      author: '0x' + 'aa'.repeat(20),
+    }));
+    const m = new Map<Bytes32, PanelResult<unknown>>([
+      [TAG_A, { kind: 'ok', data: { messages }, fetchedAt: FETCHED_AT }],
+    ]);
+    render(<ReaderMessagesPanel resultsByTag={m} noTagsConfigured={false} />);
+    const rows = document.querySelectorAll('[data-testid="reader-messages-ok"] tbody tr');
+    expect(rows.length).toBe(73);
+  });
 });

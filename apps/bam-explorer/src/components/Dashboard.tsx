@@ -100,29 +100,35 @@ export function Dashboard() {
     authToken: cfg.config.posterAuthToken || undefined,
   };
 
+  // Per-panel refresh helpers. Each one updates its panel's slice of
+  // `data` AND bumps `fetchedAt` so the header freshness indicator
+  // reflects the most recent user-triggered refresh — not just the
+  // last full-dashboard load.
   const refreshPosterHealth = useCallback(async () => {
     const r = await fetchPosterHealth(posterCfg);
-    setData((prev) => (prev ? { ...prev, posterHealth: r } : prev));
+    setData((prev) => (prev ? { ...prev, posterHealth: r, fetchedAt: Date.now() } : prev));
   }, [posterCfg.baseUrl, posterCfg.authToken]);
 
   const refreshPosterStatus = useCallback(async () => {
     const r = await fetchPosterStatus(posterCfg);
-    setData((prev) => (prev ? { ...prev, posterStatus: r } : prev));
+    setData((prev) => (prev ? { ...prev, posterStatus: r, fetchedAt: Date.now() } : prev));
   }, [posterCfg.baseUrl, posterCfg.authToken]);
 
   const refreshPosterPending = useCallback(async () => {
     const r = await fetchPosterPending(posterCfg, cfg.config.pendingLimit);
-    setData((prev) => (prev ? { ...prev, posterPending: r } : prev));
+    setData((prev) => (prev ? { ...prev, posterPending: r, fetchedAt: Date.now() } : prev));
   }, [posterCfg.baseUrl, posterCfg.authToken, cfg.config.pendingLimit]);
 
   const refreshPosterSubmitted = useCallback(async () => {
     const r = await fetchPosterSubmittedBatches(posterCfg, cfg.config.submittedLimit);
-    setData((prev) => (prev ? { ...prev, posterSubmittedBatches: r } : prev));
+    setData((prev) =>
+      prev ? { ...prev, posterSubmittedBatches: r, fetchedAt: Date.now() } : prev
+    );
   }, [posterCfg.baseUrl, posterCfg.authToken, cfg.config.submittedLimit]);
 
   const refreshReaderHealth = useCallback(async () => {
     const r = await fetchReaderHealth(readerCfg);
-    setData((prev) => (prev ? { ...prev, readerHealth: r } : prev));
+    setData((prev) => (prev ? { ...prev, readerHealth: r, fetchedAt: Date.now() } : prev));
   }, [readerCfg.baseUrl]);
 
   const refreshReaderBatches = useCallback(async () => {
@@ -132,7 +138,7 @@ export function Dashboard() {
       )
     );
     setData((prev) =>
-      prev ? { ...prev, readerBatchesByTag: new Map(entries) } : prev
+      prev ? { ...prev, readerBatchesByTag: new Map(entries), fetchedAt: Date.now() } : prev
     );
   }, [readerCfg.baseUrl, cfg.config.contentTags, cfg.config.batchesLimit]);
 
@@ -143,7 +149,7 @@ export function Dashboard() {
       )
     );
     setData((prev) =>
-      prev ? { ...prev, readerMessagesByTag: new Map(entries) } : prev
+      prev ? { ...prev, readerMessagesByTag: new Map(entries), fetchedAt: Date.now() } : prev
     );
   }, [readerCfg.baseUrl, cfg.config.contentTags, cfg.config.messagesLimit]);
 
