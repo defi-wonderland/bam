@@ -69,13 +69,13 @@ contract BLSExposerTest is Test {
     // HELPERS
     // ═══════════════════════════════════════════════════════════════════════════════
 
-    /// @dev Build a message in the wire format: [author(20)][timestamp(4)][nonce(2)][contents...]
-    function _buildMessage(address author, uint32 timestamp, uint16 nonce, bytes memory contents)
+    /// @dev Build a message in the wire format: [sender(20)][timestamp(4)][nonce(2)][contents...]
+    function _buildMessage(address sender, uint32 timestamp, uint16 nonce, bytes memory contents)
         internal
         pure
         returns (bytes memory)
     {
-        return abi.encodePacked(author, timestamp, nonce, contents);
+        return abi.encodePacked(sender, timestamp, nonce, contents);
     }
 
     /// @dev Build calldata exposure params with a batch containing one message at offset 0
@@ -103,12 +103,12 @@ contract BLSExposerTest is Test {
     }
 
     /// @dev Compute the expected messageId per ERC-BAM
-    function _computeMessageId(address author, uint64 nonce, bytes32 contentHash)
+    function _computeMessageId(address sender, uint64 nonce, bytes32 contentHash)
         internal
         pure
         returns (bytes32)
     {
-        return keccak256(abi.encodePacked(author, nonce, contentHash));
+        return keccak256(abi.encodePacked(sender, nonce, contentHash));
     }
 
     /// @dev Compute the expected domain separator
@@ -249,17 +249,17 @@ contract BLSExposerTest is Test {
     }
 
     function test_messageId_formulaMatchesSpec() public {
-        // ERC-BAM: messageId = keccak256(abi.encodePacked(author, nonce, contentHash))
-        // where author is address (20B), nonce is uint64 (8B), contentHash is bytes32 (32B)
+        // ERC-BAM: messageId = keccak256(abi.encodePacked(sender, nonce, contentHash))
+        // where sender is address (20B), nonce is uint64 (8B), contentHash is bytes32 (32B)
 
-        address author = ALICE;
+        address sender = ALICE;
         uint64 nonce = 42;
         bytes32 contentHash = keccak256("some batch data");
 
-        bytes32 expectedId = keccak256(abi.encodePacked(author, nonce, contentHash));
+        bytes32 expectedId = keccak256(abi.encodePacked(sender, nonce, contentHash));
 
         // All fixed-size: 20 + 8 + 32 = 60 bytes
-        bytes memory packed = abi.encodePacked(author, nonce, contentHash);
+        bytes memory packed = abi.encodePacked(sender, nonce, contentHash);
         assertEq(packed.length, 60);
         assertEq(keccak256(packed), expectedId);
     }

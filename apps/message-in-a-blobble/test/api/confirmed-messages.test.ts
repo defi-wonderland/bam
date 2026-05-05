@@ -9,7 +9,7 @@ const TX_HASH = ('0x' + 'aa'.repeat(32)) as const;
 function readerMessage(over: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     messageId: '0x' + '99'.repeat(32),
-    author: '0x' + '11'.repeat(20),
+    sender: '0x' + '11'.repeat(20),
     nonce: '1',
     contentTag: MESSAGE_IN_A_BLOBBLE_TAG,
     contents: '0xdeadbeef',
@@ -42,7 +42,7 @@ describe('GET /api/confirmed-messages — Reader proxy', () => {
         JSON.stringify({
           messages: [
             readerMessage({ nonce: '1' }),
-            readerMessage({ nonce: '2', author: '0x' + '22'.repeat(20) }),
+            readerMessage({ nonce: '2', sender: '0x' + '22'.repeat(20) }),
           ],
         }),
         {

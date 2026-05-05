@@ -53,7 +53,7 @@ export function clampReorgWindow(n: number): number {
  *     queue. The submission loop will pick them up again.
  *
  * Nonce monotonicity is NOT re-validated on re-enqueue: the
- * per-author `last_nonce` tracker is monotonic over time and doesn't
+ * per-sender `last_nonce` tracker is monotonic over time and doesn't
  * regress on reorg. Re-enqueue identity is `(sender, nonce,
  * contents)`; a fresh ingest with the same `(sender, nonce)` cannot
  * exist here because it would have been rejected as `stale_nonce` at
@@ -116,12 +116,12 @@ export class ReorgWatcher {
       );
       const ingestedAt = this.opts.now().getTime();
       for (const m of ordered) {
-        const existing = await txn.getByAuthorNonce(m.author, m.nonce);
+        const existing = await txn.getBySenderNonce(m.sender, m.nonce);
         if (existing !== null && existing.status === 'pending') continue;
         const seq = await txn.nextIngestSeq(batch.contentTag);
         await txn.upsertObserved({
           messageId: null,
-          author: m.author,
+          sender: m.sender,
           nonce: m.nonce,
           contentTag: batch.contentTag,
           contents: new Uint8Array(m.contents),

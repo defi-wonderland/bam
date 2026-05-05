@@ -544,29 +544,29 @@ export class BAMClient {
   // ═══════════════════════════════════════════════════════════════════════════════
 
   /**
-   * Check if an author is registered in the BLS registry
+   * Check if a sender is registered in the BLS registry
    */
-  async isAuthorRegistered(author: Address): Promise<boolean> {
+  async isSenderRegistered(sender: Address): Promise<boolean> {
     const registry = await this.getBLSRegistryAddress();
     return this.publicClient.readContract({
       address: registry as `0x${string}`,
       abi: BLS_REGISTRY_ABI,
       functionName: 'isRegistered',
-      args: [author as `0x${string}`],
+      args: [sender as `0x${string}`],
     });
   }
 
   /**
-   * Get author's BLS public key
+   * Get sender's BLS public key
    * @returns BLS public key hex or null if not registered
    */
-  async getAuthorPublicKey(author: Address): Promise<`0x${string}` | null> {
+  async getSenderPublicKey(sender: Address): Promise<`0x${string}` | null> {
     const registry = await this.getBLSRegistryAddress();
     const key = await this.publicClient.readContract({
       address: registry as `0x${string}`,
       abi: BLS_REGISTRY_ABI,
       functionName: 'getKey',
-      args: [author as `0x${string}`],
+      args: [sender as `0x${string}`],
     });
     if (key === '0x' || key.length <= 2) return null;
     return key;

@@ -65,7 +65,7 @@ export function bytesToHex(bytes: Uint8Array): string {
  * ECDSA's EIP-712 digest (which additionally binds chainId via the
  * signing domain).
  *
- * @param sender   20-byte message author address.
+ * @param sender   20-byte message sender address.
  * @param nonce    uint64 per-sender monotonic nonce.
  * @param contents Message content bytes. Length MUST be ≥ 32; the first 32
  *                 bytes are the ERC-8179 `contentTag` under BAM's
@@ -112,8 +112,6 @@ export function computeMessageHashForMessage(message: BAMMessage): Bytes32 {
  * calldata batches. Only computable after the batch a message lands in
  * has been assembled.
  *
- * Note: the ERC's own wording uses `author` for the first field; BAM's
- * SDK uses `sender` throughout.
  */
 export function computeMessageId(
   sender: Address,

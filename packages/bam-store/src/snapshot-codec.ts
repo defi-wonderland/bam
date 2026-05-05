@@ -16,7 +16,7 @@ import type { BatchMessageSnapshotEntry } from './types.js';
 import { decodeNonce, encodeNonce } from './nonce-codec.js';
 
 interface EncodedEntry {
-  author: string;
+  sender: string;
   nonce: string;
   messageId: string;
   messageHash: string;
@@ -26,7 +26,7 @@ interface EncodedEntry {
 export function encodeMessageSnapshot(entries: BatchMessageSnapshotEntry[]): string {
   if (entries.length === 0) return '[]';
   const out: EncodedEntry[] = entries.map((e) => ({
-    author: e.author.toLowerCase(),
+    sender: e.sender.toLowerCase(),
     nonce: encodeNonce(e.nonce),
     messageId: e.messageId,
     messageHash: e.messageHash,
@@ -39,7 +39,7 @@ export function decodeMessageSnapshot(text: string): BatchMessageSnapshotEntry[]
   if (text === '' || text === '[]') return [];
   const parsed = JSON.parse(text) as EncodedEntry[];
   return parsed.map((e) => ({
-    author: e.author as Address,
+    sender: e.sender as Address,
     nonce: decodeNonce(e.nonce),
     messageId: e.messageId as Bytes32,
     messageHash: e.messageHash as Bytes32,

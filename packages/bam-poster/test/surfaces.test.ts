@@ -76,7 +76,7 @@ async function seedBatch(
       submitter: null,
       l1IncludedAtUnixSec: null,
       messageSnapshot: msgs.map((m, i) => ({
-        author: SENDER,
+        sender: SENDER,
         nonce: BigInt(m.nonce),
         messageId: (('0x' + (m.nonce + 1000).toString(16).padStart(64, '0')) as Bytes32),
         messageHash: (('0x' + m.nonce.toString(16).padStart(64, '0')) as Bytes32),
@@ -89,7 +89,7 @@ async function seedBatch(
       contents.fill(0xaa, 0, 32);
       await txn.upsertObserved({
         messageId: (('0x' + (m.nonce + 1000).toString(16).padStart(64, '0')) as Bytes32),
-        author: SENDER,
+        sender: SENDER,
         nonce: BigInt(m.nonce),
         contentTag,
         contents,

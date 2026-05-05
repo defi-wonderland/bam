@@ -51,7 +51,7 @@ export const BYTES32_SIZE = 32;
 /** Individual message header size (fixed portion) */
 export const MESSAGE_HEADER_SIZE = 33;
 
-/** Compact batch header fixed size (excluding author table) */
+/** Compact batch header fixed size (excluding sender table) */
 export const BATCH_HEADER_FIXED_SIZE = 95;
 
 /** Exposure batch header fixed size: magic(4) + version(1) + flags(1) + msgCount(2) + blsSig(48) */

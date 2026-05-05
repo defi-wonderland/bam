@@ -215,16 +215,16 @@ describe('processBatch', () => {
     expect(events.find((e) => e.kind === 'batch_decode_failed')).toBeTruthy();
   });
 
-  it('continues past a substrate (author, nonce) conflict and preserves the prior row', async () => {
+  it('continues past a substrate (sender, nonce) conflict and preserves the prior row', async () => {
     const store = await createMemoryStore();
     const counters = emptyCounters();
     const m1 = makeSignedMessage(1n, new Uint8Array([1]));
 
-    // Pre-populate the substrate with a *different-bytes* row at (m1.author, 1).
+    // Pre-populate the substrate with a *different-bytes* row at (m1.sender, 1).
     await store.withTxn(async (txn) => {
       await txn.upsertObserved({
         messageId: ('0x' + '11'.repeat(32)) as Bytes32,
-        author: m1.message.sender,
+        sender: m1.message.sender,
         nonce: 1n,
         contentTag: TAG_A,
         contents: encodeContents(TAG_A, new Uint8Array([99])),
@@ -270,7 +270,7 @@ describe('processBatch', () => {
     );
     // Prior row (with 0xee... messageHash) preserved; m2 landed; m1 rejected.
     expect(allRows.length).toBe(2);
-    const prior = allRows.find((r) => r.author === m1.message.sender);
+    const prior = allRows.find((r) => r.sender === m1.message.sender);
     expect(prior?.messageHash).toBe(('0x' + 'ee'.repeat(32)) as Bytes32);
     expect(events.find((e) => e.kind === 'message_conflict')).toBeTruthy();
   });

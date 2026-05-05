@@ -9,7 +9,7 @@
       "name": "content_too_long_chars",
       "description": "Message exceeds 280 character limit",
       "input": {
-        "author": "0x1111111111111111111111111111111111111111",
+        "sender": "0x1111111111111111111111111111111111111111",
         "timestamp": 1706400000,
         "nonce": 0,
         "content": "This message is intentionally over 280 characters to test the validation. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur.",
@@ -25,7 +25,7 @@
       "name": "content_too_long_bytes",
       "description": "Message within character limit but exceeds byte limit",
       "input": {
-        "author": "0x1111111111111111111111111111111111111111",
+        "sender": "0x1111111111111111111111111111111111111111",
         "timestamp": 1706400000,
         "nonce": 0,
         "content": "🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍",
@@ -40,9 +40,9 @@
     },
     {
       "name": "invalid_address_format",
-      "description": "Author address is not a valid Ethereum address",
+      "description": "Sender address is not a valid Ethereum address",
       "input": {
-        "author": "not_an_address",
+        "sender": "not_an_address",
         "timestamp": 1706400000,
         "nonce": 0,
         "content": "Valid content",
@@ -57,7 +57,7 @@
       "name": "invalid_address_length",
       "description": "Address is hex but wrong length",
       "input": {
-        "author": "0x1234",
+        "sender": "0x1234",
         "timestamp": 1706400000,
         "nonce": 0,
         "content": "Valid content",
@@ -72,7 +72,7 @@
       "name": "negative_timestamp",
       "description": "Timestamp is negative",
       "input": {
-        "author": "0x1111111111111111111111111111111111111111",
+        "sender": "0x1111111111111111111111111111111111111111",
         "timestamp": -1,
         "nonce": 0,
         "content": "Valid content",
@@ -87,7 +87,7 @@
       "name": "future_timestamp",
       "description": "Timestamp is too far in the future",
       "input": {
-        "author": "0x1111111111111111111111111111111111111111",
+        "sender": "0x1111111111111111111111111111111111111111",
         "timestamp": 9999999999,
         "nonce": 0,
         "content": "Valid content",
@@ -103,7 +103,7 @@
       "name": "nonce_too_large",
       "description": "Nonce exceeds uint16 maximum (65535)",
       "input": {
-        "author": "0x1111111111111111111111111111111111111111",
+        "sender": "0x1111111111111111111111111111111111111111",
         "timestamp": 1706400000,
         "nonce": 65536,
         "content": "Valid content",
@@ -118,7 +118,7 @@
       "name": "negative_nonce",
       "description": "Negative nonce value",
       "input": {
-        "author": "0x1111111111111111111111111111111111111111",
+        "sender": "0x1111111111111111111111111111111111111111",
         "timestamp": 1706400000,
         "nonce": -1,
         "content": "Valid content",
@@ -133,7 +133,7 @@
       "name": "invalid_signature_type",
       "description": "Signature type is not 'bls' or 'ecdsa'",
       "input": {
-        "author": "0x1111111111111111111111111111111111111111",
+        "sender": "0x1111111111111111111111111111111111111111",
         "timestamp": 1706400000,
         "nonce": 0,
         "content": "Valid content",
@@ -148,7 +148,7 @@
       "name": "invalid_replyTo_format",
       "description": "replyTo is not a valid bytes32 hash",
       "input": {
-        "author": "0x1111111111111111111111111111111111111111",
+        "sender": "0x1111111111111111111111111111111111111111",
         "timestamp": 1706400000,
         "nonce": 0,
         "content": "Valid content",
@@ -164,7 +164,7 @@
       "name": "invalid_utf8",
       "description": "Content contains invalid UTF-8 sequences",
       "input": {
-        "author": "0x1111111111111111111111111111111111111111",
+        "sender": "0x1111111111111111111111111111111111111111",
         "timestamp": 1706400000,
         "nonce": 0,
         "contentBytes": "0x48656c6c6fffc280776f726c64",
@@ -179,7 +179,7 @@
     },
     {
       "name": "batch_too_many_authors",
-      "description": "Batch exceeds 256 author limit",
+      "description": "Batch exceeds 256 sender limit",
       "input": {
         "baseTimestamp": 1706400000,
         "authorCount": 257,
@@ -192,7 +192,7 @@
     },
     {
       "name": "batch_author_index_oob",
-      "description": "Message references author index beyond author table",
+      "description": "Message references sender index beyond sender table",
       "binaryInput": {
         "note": "Binary batch with authorCount=2 but message references index 3",
         "shouldFailOnDecode": true
@@ -210,14 +210,14 @@
         "baseTimestamp": 1706400000,
         "messages": [
           {
-            "author": "0x1111111111111111111111111111111111111111",
+            "sender": "0x1111111111111111111111111111111111111111",
             "timestamp": 1706400000,
             "nonce": 0,
             "content": "First message",
             "signatureType": "bls"
           },
           {
-            "author": "0x1111111111111111111111111111111111111111",
+            "sender": "0x1111111111111111111111111111111111111111",
             "timestamp": 1706465536,
             "nonce": 1,
             "content": "Second message >18.2 hours later",

@@ -19,17 +19,17 @@ const author1: Address = '0x1111111111111111111111111111111111111111';
 const author2: Address = '0x2222222222222222222222222222222222222222';
 const baseTimestamp = 1706400000;
 
-function msg(author: Address, timestamp: number, nonce: number, content: string): ExposureMessage {
-  return { author, timestamp, nonce, content };
+function msg(sender: Address, timestamp: number, nonce: number, content: string): ExposureMessage {
+  return { sender, timestamp, nonce, content };
 }
 
 describe('buildRawMessageBytes', () => {
   it('should encode message in on-chain format', () => {
     const raw = buildRawMessageBytes(author1, baseTimestamp, 0, 'Hello');
-    // [author(20)][timestamp(4)][nonce(2)][content(5)] = 31 bytes
+    // [sender(20)][timestamp(4)][nonce(2)][content(5)] = 31 bytes
     expect(raw.length).toBe(31);
 
-    // Author
+    // Sender
     expect(raw[0]).toBe(0x11);
     expect(raw[19]).toBe(0x11);
 
@@ -102,7 +102,7 @@ describe('encodeExposureBatch', () => {
       const length = batch.messageLengths[i];
       const extracted = batch.data.slice(offset, offset + length);
       const expected = buildRawMessageBytes(
-        messages[i].author,
+        messages[i].sender,
         messages[i].timestamp,
         messages[i].nonce,
         messages[i].content
@@ -138,7 +138,7 @@ describe('decodeExposureBatch', () => {
     const decoded = decodeExposureBatch(encoded.data);
 
     expect(decoded.messageCount).toBe(1);
-    expect(decoded.messages[0].author).toBe(author1);
+    expect(decoded.messages[0].sender).toBe(author1);
     expect(decoded.messages[0].timestamp).toBe(baseTimestamp);
     expect(decoded.messages[0].nonce).toBe(42);
     expect(decoded.messages[0].content).toBe('Hello world!');
@@ -156,7 +156,7 @@ describe('decodeExposureBatch', () => {
 
     expect(decoded.messageCount).toBe(3);
     for (let i = 0; i < original.length; i++) {
-      expect(decoded.messages[i].author).toBe(original[i].author);
+      expect(decoded.messages[i].sender).toBe(original[i].sender);
       expect(decoded.messages[i].timestamp).toBe(original[i].timestamp);
       expect(decoded.messages[i].nonce).toBe(original[i].nonce);
       expect(decoded.messages[i].content).toBe(original[i].content);
@@ -210,7 +210,7 @@ describe('byte offset correctness', () => {
 
       // Build expected rawBytes independently
       const expected = buildRawMessageBytes(
-        messages[i].author,
+        messages[i].sender,
         messages[i].timestamp,
         messages[i].nonce,
         messages[i].content

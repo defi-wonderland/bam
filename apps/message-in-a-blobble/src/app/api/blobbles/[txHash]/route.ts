@@ -9,7 +9,7 @@ import {
 } from '@/lib/reader-client';
 
 interface SnapshotEntry {
-  author: string;
+  sender: string;
   nonce: string;
   messageId: string;
   messageIndexWithinBatch: number;
@@ -26,7 +26,7 @@ interface ReaderBatch {
 }
 
 interface ReaderMessage {
-  author: string;
+  sender: string;
   nonce: string;
   contents: string;
   batchRef: string | null;
@@ -68,7 +68,7 @@ function safeDecode(contentsHex: string): { timestamp: number; content: string }
  * messages attached to that batch (gives the payload bytes that
  * decode into rendered text).
  *
- * `messageSnapshot` alone would let us render authors and nonces
+ * `messageSnapshot` alone would let us render senders and nonces
  * but no `content` text — the snapshot does not carry payload
  * bytes. The matching `MessageRow.contents` field does, so we
  * fetch and merge.
@@ -108,7 +108,7 @@ export async function GET(
       return NextResponse.json({ error: 'not_found' }, { status: 404 });
     }
 
-    // Build a (author,nonce) → MessageRow lookup so we can attach
+    // Build a (sender,nonce) → MessageRow lookup so we can attach
     // payload bytes to each snapshot entry. An empty 200 from
     // `/messages` is "snapshot has identity but payload bytes weren't
     // observed yet" — render with null content rather than 404.
@@ -117,7 +117,7 @@ export async function GET(
       const rows =
         (messagesRes.body as { messages?: ReaderMessage[] }).messages ?? [];
       for (const m of rows) {
-        byKey.set(`${m.author.toLowerCase()}:${m.nonce}`, m);
+        byKey.set(`${m.sender.toLowerCase()}:${m.nonce}`, m);
       }
     }
 
@@ -125,10 +125,10 @@ export async function GET(
       .slice()
       .sort((a, b) => a.messageIndexWithinBatch - b.messageIndexWithinBatch)
       .map((entry) => {
-        const match = byKey.get(`${entry.author.toLowerCase()}:${entry.nonce}`);
+        const match = byKey.get(`${entry.sender.toLowerCase()}:${entry.nonce}`);
         const decoded = match ? safeDecode(match.contents) : null;
         return {
-          sender: entry.author,
+          sender: entry.sender,
           nonce: entry.nonce,
           timestamp: decoded?.timestamp ?? null,
           content: decoded?.content ?? null,

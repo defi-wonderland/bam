@@ -55,7 +55,7 @@ async function seedConfirmedBatch(
       submitter: null,
       l1IncludedAtUnixSec: null,
       messageSnapshot: args.messages.map((m, i) => ({
-        author: m.sender,
+        sender: m.sender,
         nonce: m.nonce,
         messageId: m.messageId,
         messageHash: m.messageHash,
@@ -66,7 +66,7 @@ async function seedConfirmedBatch(
       const m = args.messages[i];
       await txn.upsertObserved({
         messageId: m.messageId,
-        author: m.sender,
+        sender: m.sender,
         nonce: m.nonce,
         contentTag: args.contentTag,
         contents: m.contents,

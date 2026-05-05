@@ -25,7 +25,7 @@ interface ConfirmedRow {
 
 interface ReaderMessageRow {
   messageId: string | null;
-  author: string;
+  sender: string;
   nonce: string;
   contentTag: string;
   contents: string;
@@ -57,7 +57,7 @@ export async function GET(): Promise<NextResponse> {
       return [
         {
           message_id: r.messageHash,
-          sender: r.author,
+          sender: r.sender,
           nonce: r.nonce,
           contents: r.contents,
           signature: r.signature,

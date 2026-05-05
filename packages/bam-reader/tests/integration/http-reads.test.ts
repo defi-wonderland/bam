@@ -76,7 +76,7 @@ function fakeL1(): LiveTailL1Client {
 
 function snapshotEntry(): BatchMessageSnapshotEntry {
   return {
-    author: ADDR,
+    sender: ADDR,
     nonce: 1n,
     messageId: MID,
     messageHash: MHASH,
@@ -105,7 +105,7 @@ function batchRow(over: Partial<BatchRow> = {}): BatchRow {
 function messageRow(over: Partial<MessageRow> = {}): MessageRow {
   return {
     messageId: MID,
-    author: ADDR,
+    sender: ADDR,
     nonce: 1n,
     contentTag: TAG,
     contents: new Uint8Array([0xca, 0xfe, 0xba, 0xbe]),
@@ -156,7 +156,7 @@ describe('Reader HTTP integration — read endpoints over PGLite', () => {
       await txn.upsertBatch(batchRow({ txHash: TX_OTHER, blockNumber: 11 }));
       await txn.upsertObserved({
         ...messageRow(),
-        author: ADDR_OTHER,
+        sender: ADDR_OTHER,
         nonce: 7n,
         batchRef: TX_OTHER,
         messageId: ('0x' + 'cd'.repeat(32)) as Bytes32,

@@ -47,7 +47,7 @@ export interface BAMMessage {
  * ERC-BAM hash types used in the decode → hash → verify flow.
  *
  * messageHash: keccak256(sender || nonce || contents) — security bridge
- * messageId:   keccak256(author || nonce || contentHash) — deduplication key
+ * messageId:   keccak256(sender || nonce || contentHash) — deduplication key
  * signedHash:  keccak256(domain || messageHash) — cross-chain replay prevention
  *
  * The domain separator keccak256("ERC-BAM.v1" || chainId) is used to compute signedHash
@@ -56,7 +56,7 @@ export interface BAMMessage {
 export interface BAMHashes {
   /** keccak256(abi.encodePacked(sender, nonce, contents)) */
   messageHash: Bytes32;
-  /** keccak256(abi.encodePacked(author, nonce, contentHash)) */
+  /** keccak256(abi.encodePacked(sender, nonce, contentHash)) */
   messageId: Bytes32;
   /** keccak256(abi.encodePacked(domain, messageHash)) */
   signedHash: Bytes32;
@@ -108,10 +108,10 @@ export interface CalldataBatchRegisteredEvent {
 export interface MessageExposedEvent {
   /** Content identifier (versioned hash for blob, keccak256 for calldata) */
   contentHash: Bytes32;
-  /** Unique message identifier: keccak256(author || nonce || contentHash) */
+  /** Unique message identifier: keccak256(sender || nonce || contentHash) */
   messageId: Bytes32;
-  /** Author's Ethereum address */
-  author: Address;
+  /** Sender's Ethereum address */
+  sender: Address;
   /** Address that called the expose function */
   exposer: Address;
   /** Block timestamp when exposed */

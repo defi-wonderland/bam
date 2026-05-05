@@ -16,13 +16,13 @@ import {
 import type { SignedMessage, ExtendedSignatureHeader } from '../../src/index.js';
 
 describe('Extended Signature Mode (SigType 11)', () => {
-  const testAuthor = '0x1234567890123456789012345678901234567890' as const;
+  const testSender = '0x1234567890123456789012345678901234567890' as const;
   const testTimestamp = 1706867200; // Fixed timestamp for reproducibility
 
   describe('backward compatibility', () => {
     it('should encode/decode ECDSA messages unchanged', () => {
       const msg: SignedMessage = {
-        author: testAuthor,
+        sender: testSender,
         timestamp: testTimestamp,
         nonce: 1,
         content: 'ECDSA signed message',
@@ -34,14 +34,14 @@ describe('Extended Signature Mode (SigType 11)', () => {
       const decoded = decodeMessage(encoded);
 
       expect(decoded.signatureType).toBe('ecdsa');
-      expect(decoded.author).toBe(testAuthor);
+      expect(decoded.sender).toBe(testSender);
       expect(decoded.content).toBe(msg.content);
       expect(decoded.extendedHeader).toBeUndefined();
     });
 
     it('should encode/decode BLS messages unchanged', () => {
       const msg: SignedMessage = {
-        author: testAuthor,
+        sender: testSender,
         timestamp: testTimestamp,
         nonce: 2,
         content: 'BLS signed message',
@@ -53,7 +53,7 @@ describe('Extended Signature Mode (SigType 11)', () => {
       const decoded = decodeMessage(encoded);
 
       expect(decoded.signatureType).toBe('bls');
-      expect(decoded.author).toBe(testAuthor);
+      expect(decoded.sender).toBe(testSender);
       expect(decoded.content).toBe(msg.content);
       expect(decoded.extendedHeader).toBeUndefined();
     });
@@ -62,7 +62,7 @@ describe('Extended Signature Mode (SigType 11)', () => {
   describe('extended mode encoding/decoding', () => {
     it('should encode/decode extended BLS signature', () => {
       const msg: SignedMessage = {
-        author: testAuthor,
+        sender: testSender,
         timestamp: testTimestamp,
         nonce: 3,
         content: 'Extended BLS signature',
@@ -86,7 +86,7 @@ describe('Extended Signature Mode (SigType 11)', () => {
 
     it('should encode/decode extended ECDSA signature', () => {
       const msg: SignedMessage = {
-        author: testAuthor,
+        sender: testSender,
         timestamp: testTimestamp,
         nonce: 4,
         content: 'Extended ECDSA signature',
@@ -109,7 +109,7 @@ describe('Extended Signature Mode (SigType 11)', () => {
 
     it('should include 2-byte overhead for extended header', () => {
       const blsMsg: SignedMessage = {
-        author: testAuthor,
+        sender: testSender,
         timestamp: testTimestamp,
         nonce: 5,
         content: 'Test message',
@@ -177,7 +177,7 @@ describe('Extended Signature Mode (SigType 11)', () => {
 
     it('should reject extended message without header', () => {
       const msg: SignedMessage = {
-        author: testAuthor,
+        sender: testSender,
         timestamp: testTimestamp,
         nonce: 10,
         content: 'Missing header',
@@ -198,7 +198,7 @@ describe('Extended Signature Mode (SigType 11)', () => {
   describe('round-trip integrity', () => {
     it('should preserve all fields through encode/decode cycle', () => {
       const original: SignedMessage = {
-        author: testAuthor,
+        sender: testSender,
         timestamp: testTimestamp,
         nonce: 12345,
         content: 'Round-trip test with emoji 🚀',
@@ -213,7 +213,7 @@ describe('Extended Signature Mode (SigType 11)', () => {
       const encoded = encodeMessage(original);
       const decoded = decodeMessage(encoded);
 
-      expect(decoded.author).toBe(original.author);
+      expect(decoded.sender).toBe(original.sender);
       expect(decoded.timestamp).toBe(original.timestamp);
       expect(decoded.nonce).toBe(original.nonce);
       expect(decoded.content).toBe(original.content);
@@ -228,7 +228,7 @@ describe('Extended Signature Mode (SigType 11)', () => {
         '0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890' as const;
 
       const msg: SignedMessage = {
-        author: testAuthor,
+        sender: testSender,
         timestamp: testTimestamp,
         nonce: 100,
         content: 'Reply with extended sig',

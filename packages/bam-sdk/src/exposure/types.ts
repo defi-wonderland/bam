@@ -10,11 +10,11 @@ import type { KZGProof, VersionedHash } from '../kzg/types.js';
  * Parsed message from a blob with position info
  */
 export interface ParsedMessage {
-  /** Message author's Ethereum address */
-  author: Address;
+  /** Message sender's Ethereum address */
+  sender: Address;
   /** Unix timestamp */
   timestamp: number;
-  /** Per-author nonce */
+  /** Per-sender nonce */
   nonce: number;
   /** Message content */
   content: string;
@@ -177,7 +177,7 @@ export interface ExposureBatch {
 export interface DecodedExposureBatch {
   /** Decoded messages */
   messages: Array<{
-    author: Address;
+    sender: Address;
     timestamp: number;
     nonce: number;
     content: string;

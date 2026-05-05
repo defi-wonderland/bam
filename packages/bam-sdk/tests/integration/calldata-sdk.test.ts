@@ -131,12 +131,12 @@ describe('Calldata SDK Integration Tests', () => {
   });
 
   describe('Batch Data Encoding', () => {
-    const testAuthor = ANVIL_ADDRESS as Address;
+    const testSender = ANVIL_ADDRESS as Address;
     const testTimestamp = Math.floor(Date.now() / 1000);
 
     function createSignedMessages(
       msgs: Array<{
-        author: Address;
+        sender: Address;
         timestamp: number;
         nonce: number;
         content: string;
@@ -152,7 +152,7 @@ describe('Calldata SDK Integration Tests', () => {
     it('should encode single message batch for calldata', () => {
       const messages = createSignedMessages([
         {
-          author: testAuthor,
+          sender: testSender,
           timestamp: testTimestamp,
           nonce: 0,
           content: 'Hello from calldata!',
@@ -171,9 +171,9 @@ describe('Calldata SDK Integration Tests', () => {
 
     it('should encode multiple message batch for calldata', () => {
       const messages = createSignedMessages([
-        { author: testAuthor, timestamp: testTimestamp, nonce: 0, content: 'First message' },
-        { author: testAuthor, timestamp: testTimestamp + 1, nonce: 1, content: 'Second message' },
-        { author: testAuthor, timestamp: testTimestamp + 2, nonce: 2, content: 'Third message' },
+        { sender: testSender, timestamp: testTimestamp, nonce: 0, content: 'First message' },
+        { sender: testSender, timestamp: testTimestamp + 1, nonce: 1, content: 'Second message' },
+        { sender: testSender, timestamp: testTimestamp + 2, nonce: 2, content: 'Third message' },
       ]);
 
       const encoded = encodeBatch(messages, { compress: false });
@@ -187,7 +187,7 @@ describe('Calldata SDK Integration Tests', () => {
 
     it('should compute content hash for calldata batch', () => {
       const messages = createSignedMessages([
-        { author: testAuthor, timestamp: testTimestamp, nonce: 0, content: 'Hash test message' },
+        { sender: testSender, timestamp: testTimestamp, nonce: 0, content: 'Hash test message' },
       ]);
 
       const encoded = encodeBatch(messages, { compress: false });
@@ -199,12 +199,12 @@ describe('Calldata SDK Integration Tests', () => {
   });
 
   describe('Message Offset Calculation', () => {
-    const testAuthor = ANVIL_ADDRESS as Address;
+    const testSender = ANVIL_ADDRESS as Address;
     const testTimestamp = Math.floor(Date.now() / 1000);
 
     function createSignedMessages(
       msgs: Array<{
-        author: Address;
+        sender: Address;
         timestamp: number;
         nonce: number;
         content: string;
@@ -219,8 +219,8 @@ describe('Calldata SDK Integration Tests', () => {
 
     it('should validate batch before encoding', () => {
       const messages = [
-        { author: testAuthor, timestamp: testTimestamp, nonce: 0, content: 'First' },
-        { author: testAuthor, timestamp: testTimestamp + 1, nonce: 1, content: 'Second message here' },
+        { sender: testSender, timestamp: testTimestamp, nonce: 0, content: 'First' },
+        { sender: testSender, timestamp: testTimestamp + 1, nonce: 1, content: 'Second message here' },
       ];
 
       expect(() => validateBatch(messages)).not.toThrow();
@@ -228,7 +228,7 @@ describe('Calldata SDK Integration Tests', () => {
 
     it('should estimate batch size', () => {
       const messages = [
-        { author: testAuthor, timestamp: testTimestamp, nonce: 0, content: 'Target message content' },
+        { sender: testSender, timestamp: testTimestamp, nonce: 0, content: 'Target message content' },
       ];
 
       const size = estimateBatchSize(messages, { compress: false });
@@ -238,7 +238,7 @@ describe('Calldata SDK Integration Tests', () => {
 
     it('should encode and decode batch correctly', () => {
       const signed = createSignedMessages([
-        { author: testAuthor, timestamp: testTimestamp, nonce: 0, content: 'Target message content' },
+        { sender: testSender, timestamp: testTimestamp, nonce: 0, content: 'Target message content' },
       ]);
 
       const encoded = encodeBatch(signed, { compress: false });
@@ -246,17 +246,17 @@ describe('Calldata SDK Integration Tests', () => {
 
       expect(decoded.messages).toHaveLength(1);
       expect(decoded.messages[0].content).toBe('Target message content');
-      expect(decoded.messages[0].author.toLowerCase()).toBe(testAuthor.toLowerCase());
+      expect(decoded.messages[0].sender.toLowerCase()).toBe(testSender.toLowerCase());
     });
   });
 
   describe('CalldataExposureParams Validation', () => {
-    const testAuthor = ANVIL_ADDRESS as Address;
+    const testSender = ANVIL_ADDRESS as Address;
     const testTimestamp = Math.floor(Date.now() / 1000);
 
     function createSignedMessages(
       msgs: Array<{
-        author: Address;
+        sender: Address;
         timestamp: number;
         nonce: number;
         content: string;
@@ -271,7 +271,7 @@ describe('Calldata SDK Integration Tests', () => {
 
     it('should create valid exposure params structure', () => {
       const messages = createSignedMessages([
-        { author: testAuthor, timestamp: testTimestamp, nonce: 0, content: 'Exposure test' },
+        { sender: testSender, timestamp: testTimestamp, nonce: 0, content: 'Exposure test' },
       ]);
 
       const encoded = encodeBatch(messages, { compress: false });
@@ -294,7 +294,7 @@ describe('Calldata SDK Integration Tests', () => {
 
     it('should verify message hash computation', () => {
       const msg = {
-        author: testAuthor,
+        sender: testSender,
         timestamp: testTimestamp,
         nonce: 0,
         content: 'Verification test',
@@ -364,12 +364,12 @@ describe('Calldata SDK Integration Tests', () => {
 
   describe('CLI Command Integration', () => {
     it('should format batch data correctly for CLI input', () => {
-      const testAuthor = ANVIL_ADDRESS as Address;
+      const testSender = ANVIL_ADDRESS as Address;
       const testTimestamp = Math.floor(Date.now() / 1000);
 
       const messages: SignedMessage[] = [
         {
-          author: testAuthor,
+          sender: testSender,
           timestamp: testTimestamp,
           nonce: 0,
           content: 'CLI test message',
@@ -412,12 +412,12 @@ describe('Calldata SDK Integration Tests', () => {
   });
 
   describe('Edge Cases', () => {
-    const testAuthor = ANVIL_ADDRESS as Address;
+    const testSender = ANVIL_ADDRESS as Address;
     const testTimestamp = Math.floor(Date.now() / 1000);
 
     function createSignedMessages(
       msgs: Array<{
-        author: Address;
+        sender: Address;
         timestamp: number;
         nonce: number;
         content: string;
@@ -432,7 +432,7 @@ describe('Calldata SDK Integration Tests', () => {
 
     it('should handle empty content message', () => {
       const messages = createSignedMessages([
-        { author: testAuthor, timestamp: testTimestamp, nonce: 0, content: '' },
+        { sender: testSender, timestamp: testTimestamp, nonce: 0, content: '' },
       ]);
 
       const encoded = encodeBatch(messages, { compress: false });
@@ -443,7 +443,7 @@ describe('Calldata SDK Integration Tests', () => {
 
     it('should handle nonce values within 16-bit range', () => {
       const messages = createSignedMessages([
-        { author: testAuthor, timestamp: testTimestamp, nonce: 0xffff, content: 'Max nonce test' },
+        { sender: testSender, timestamp: testTimestamp, nonce: 0xffff, content: 'Max nonce test' },
       ]);
 
       const encoded = encodeBatch(messages, { compress: false });
@@ -454,7 +454,7 @@ describe('Calldata SDK Integration Tests', () => {
 
     it('should handle unicode content in calldata', () => {
       const messages = createSignedMessages([
-        { author: testAuthor, timestamp: testTimestamp, nonce: 0, content: 'Hello 世界 🌍 مرحبا' },
+        { sender: testSender, timestamp: testTimestamp, nonce: 0, content: 'Hello 世界 🌍 مرحبا' },
       ]);
 
       const encoded = encodeBatch(messages, { compress: false });
@@ -467,7 +467,7 @@ describe('Calldata SDK Integration Tests', () => {
       const longContent = 'x'.repeat(200);
 
       const messages = createSignedMessages([
-        { author: testAuthor, timestamp: testTimestamp, nonce: 0, content: longContent },
+        { sender: testSender, timestamp: testTimestamp, nonce: 0, content: longContent },
       ]);
 
       const encoded = encodeBatch(messages, { compress: false });

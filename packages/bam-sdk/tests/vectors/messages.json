@@ -9,7 +9,7 @@
       "name": "minimal_message_bls",
       "description": "Shortest valid message - simple ASCII content with BLS signature",
       "input": {
-        "author": "0x1234567890abcdef1234567890abcdef12345678",
+        "sender": "0x1234567890abcdef1234567890abcdef12345678",
         "timestamp": 1706400000,
         "nonce": 0,
         "content": "gm",
@@ -32,7 +32,7 @@
       "name": "typical_message_bls",
       "description": "Typical 100-character message with BLS signature",
       "input": {
-        "author": "0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
+        "sender": "0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
         "timestamp": 1706486400,
         "nonce": 42,
         "content": "Just deployed the new Social-Blobs aggregator! Excited to see how this scales with blob compression.",
@@ -53,7 +53,7 @@
       "name": "maximal_message_bls",
       "description": "Maximum 280-character message",
       "input": {
-        "author": "0xabcdef0123456789abcdef0123456789abcdef01",
+        "sender": "0xabcdef0123456789abcdef0123456789abcdef01",
         "timestamp": 1706572800,
         "nonce": 65535,
         "content": "Social-Blobs is a minimal social media protocol built on Ethereum blobs. It uses BLS signature aggregation for efficiency, Zstd compression with trained dictionaries, and achieves ~11,500 messages per blob. Twitter-scale throughput at sub-dollar costs. 280 chars max!",
@@ -74,7 +74,7 @@
       "name": "unicode_emoji_message",
       "description": "Message with emoji, CJK, and RTL scripts",
       "input": {
-        "author": "0x0000000000000000000000000000000000000001",
+        "sender": "0x0000000000000000000000000000000000000001",
         "timestamp": 1706659200,
         "nonce": 1,
         "content": "Hello 世界! 🌍🚀 日本語 한국어 العربية עברית 👋🔥💎",
@@ -94,7 +94,7 @@
       "name": "message_with_reply",
       "description": "Message replying to another message",
       "input": {
-        "author": "0x2222222222222222222222222222222222222222",
+        "sender": "0x2222222222222222222222222222222222222222",
         "timestamp": 1706745600,
         "nonce": 10,
         "content": "Great point! I agree completely.",
@@ -114,7 +114,7 @@
       "name": "message_ecdsa",
       "description": "Message with ECDSA signature instead of BLS",
       "input": {
-        "author": "0x3333333333333333333333333333333333333333",
+        "sender": "0x3333333333333333333333333333333333333333",
         "timestamp": 1706832000,
         "nonce": 5,
         "content": "Testing ECDSA signatures for wallet compatibility",
@@ -134,7 +134,7 @@
       "name": "url_and_hashtags",
       "description": "Message with URL and hashtags",
       "input": {
-        "author": "0x4444444444444444444444444444444444444444",
+        "sender": "0x4444444444444444444444444444444444444444",
         "timestamp": 1706918400,
         "nonce": 100,
         "content": "Check out the new protocol at https://socialblobs.eth #web3 #ethereum #decentralized",
@@ -153,7 +153,7 @@
       "name": "newlines_and_formatting",
       "description": "Message with newlines and special characters",
       "input": {
-        "author": "0x5555555555555555555555555555555555555555",
+        "sender": "0x5555555555555555555555555555555555555555",
         "timestamp": 1707004800,
         "nonce": 200,
         "content": "Line 1\nLine 2\n\nLine 4 (with blank line)\n\nSpecial chars: !@#$%^&*()_+-=[]{}|;':\",./<>?",
@@ -172,7 +172,7 @@
       "name": "empty_content",
       "description": "Valid message with zero-length content",
       "input": {
-        "author": "0x6666666666666666666666666666666666666666",
+        "sender": "0x6666666666666666666666666666666666666666",
         "timestamp": 1707091200,
         "nonce": 0,
         "content": "",
@@ -195,7 +195,7 @@
       "name": "max_nonce",
       "description": "Message with maximum nonce value (2^16 - 1)",
       "input": {
-        "author": "0x7777777777777777777777777777777777777777",
+        "sender": "0x7777777777777777777777777777777777777777",
         "timestamp": 1707177600,
         "nonce": 65535,
         "content": "Testing maximum nonce value",
@@ -214,7 +214,7 @@
       "name": "extended_bls_signature",
       "description": "Extended signature mode with BLS scheme (SigType 11)",
       "input": {
-        "author": "0x8888888888888888888888888888888888888888",
+        "sender": "0x8888888888888888888888888888888888888888",
         "timestamp": 1707264000,
         "nonce": 1,
         "content": "Testing extended BLS signature mode",
@@ -241,7 +241,7 @@
       "name": "extended_ecdsa_signature",
       "description": "Extended signature mode with ECDSA scheme (SigType 11)",
       "input": {
-        "author": "0x9999999999999999999999999999999999999999",
+        "sender": "0x9999999999999999999999999999999999999999",
         "timestamp": 1707350400,
         "nonce": 2,
         "content": "Testing extended ECDSA signature mode",
@@ -268,7 +268,7 @@
       "name": "extended_with_reply",
       "description": "Extended signature mode with reply-to reference",
       "input": {
-        "author": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "sender": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         "timestamp": 1707436800,
         "nonce": 3,
         "content": "Replying with extended signature",

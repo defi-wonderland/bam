@@ -3,7 +3,7 @@
  *
  * ERC-8180 leaves batch encoding decoder-specific; this is BAM's reference
  * decoder for `BAMMessage[]` + parallel scheme-0x01 signatures. No
- * per-author table, no timestamp-delta, no magic bytes — density
+ * per-sender table, no timestamp-delta, no magic bytes — density
  * regression vs. packed codecs is accepted here; ZSTD compression
  * recovers most of it for repetitive payloads.
  *
@@ -33,7 +33,7 @@ import { hexToBytes, bytesToHex } from './message.js';
 
 /**
  * Result of `encodeBatch`. Slimmer than the v1 `EncodedBatch` — no
- * author table, no compression ratio. `size = data.length` is provided
+ * sender table, no compression ratio. `size = data.length` is provided
  * for convenience.
  */
 export interface EncodedBatch {

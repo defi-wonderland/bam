@@ -7,13 +7,13 @@
   "vectors": [
     {
       "name": "tiny_batch_single_author",
-      "description": "Minimal batch with 1 author, 1 message",
+      "description": "Minimal batch with 1 sender, 1 message",
       "input": {
         "baseTimestamp": 1706400000,
         "dictionaryRef": "0x0000000000000000000000000000000000000000000000000000000000000000",
         "messages": [
           {
-            "author": "0x1111111111111111111111111111111111111111",
+            "sender": "0x1111111111111111111111111111111111111111",
             "timestamp": 1706400000,
             "nonce": 0,
             "content": "Solo message",
@@ -41,70 +41,70 @@
         "dictionaryRef": "0x0000000000000000000000000000000000000000000000000000000000000000",
         "messages": [
           {
-            "author": "0x1111111111111111111111111111111111111111",
+            "sender": "0x1111111111111111111111111111111111111111",
             "timestamp": 1706400000,
             "nonce": 0,
             "content": "First message",
             "signatureType": "bls"
           },
           {
-            "author": "0x2222222222222222222222222222222222222222",
+            "sender": "0x2222222222222222222222222222222222222222",
             "timestamp": 1706400010,
             "nonce": 0,
-            "content": "Second author joins",
+            "content": "Second sender joins",
             "signatureType": "bls"
           },
           {
-            "author": "0x1111111111111111111111111111111111111111",
+            "sender": "0x1111111111111111111111111111111111111111",
             "timestamp": 1706400020,
             "nonce": 1,
-            "content": "First author replies",
+            "content": "First sender replies",
             "signatureType": "bls"
           },
           {
-            "author": "0x3333333333333333333333333333333333333333",
+            "sender": "0x3333333333333333333333333333333333333333",
             "timestamp": 1706400030,
             "nonce": 0,
-            "content": "Third author appears",
+            "content": "Third sender appears",
             "signatureType": "bls"
           },
           {
-            "author": "0x2222222222222222222222222222222222222222",
+            "sender": "0x2222222222222222222222222222222222222222",
             "timestamp": 1706400040,
             "nonce": 1,
-            "content": "Second author again",
+            "content": "Second sender again",
             "signatureType": "bls"
           },
           {
-            "author": "0x1111111111111111111111111111111111111111",
+            "sender": "0x1111111111111111111111111111111111111111",
             "timestamp": 1706400050,
             "nonce": 2,
             "content": "Conversation continues...",
             "signatureType": "bls"
           },
           {
-            "author": "0x3333333333333333333333333333333333333333",
+            "sender": "0x3333333333333333333333333333333333333333",
             "timestamp": 1706400060,
             "nonce": 1,
-            "content": "Third author contributes",
+            "content": "Third sender contributes",
             "signatureType": "bls"
           },
           {
-            "author": "0x1111111111111111111111111111111111111111",
+            "sender": "0x1111111111111111111111111111111111111111",
             "timestamp": 1706400070,
             "nonce": 3,
             "content": "More from first",
             "signatureType": "bls"
           },
           {
-            "author": "0x2222222222222222222222222222222222222222",
+            "sender": "0x2222222222222222222222222222222222222222",
             "timestamp": 1706400080,
             "nonce": 2,
             "content": "And second",
             "signatureType": "bls"
           },
           {
-            "author": "0x3333333333333333333333333333333333333333",
+            "sender": "0x3333333333333333333333333333333333333333",
             "timestamp": 1706400090,
             "nonce": 2,
             "content": "Final message from third",
@@ -122,7 +122,7 @@
         "hasCompression": false,
         "canEncode": true,
         "canDecode": true,
-        "note": "Author indices: 0, 1, 0, 2, 1, 0, 2, 0, 1, 2"
+        "note": "Sender indices: 0, 1, 0, 2, 1, 0, 2, 0, 1, 2"
       }
     },
     {
@@ -183,7 +183,7 @@
         "authorCount": 256,
         "messageCount": 256,
         "compress": false,
-        "note": "One message per author to test maximum author table size"
+        "note": "One message per sender to test maximum sender table size"
       },
       "expectedOutput": {
         "magic": "0x534f4231",
@@ -204,35 +204,35 @@
         "dictionaryRef": "0x0000000000000000000000000000000000000000000000000000000000000000",
         "messages": [
           {
-            "author": "0x1111111111111111111111111111111111111111",
+            "sender": "0x1111111111111111111111111111111111111111",
             "timestamp": 1706400000,
             "nonce": 0,
             "content": "At base timestamp",
             "signatureType": "bls"
           },
           {
-            "author": "0x1111111111111111111111111111111111111111",
+            "sender": "0x1111111111111111111111111111111111111111",
             "timestamp": 1706400001,
             "nonce": 1,
             "content": "+1 second",
             "signatureType": "bls"
           },
           {
-            "author": "0x1111111111111111111111111111111111111111",
+            "sender": "0x1111111111111111111111111111111111111111",
             "timestamp": 1706400100,
             "nonce": 2,
             "content": "+100 seconds",
             "signatureType": "bls"
           },
           {
-            "author": "0x1111111111111111111111111111111111111111",
+            "sender": "0x1111111111111111111111111111111111111111",
             "timestamp": 1706403600,
             "nonce": 3,
             "content": "+1 hour",
             "signatureType": "bls"
           },
           {
-            "author": "0x1111111111111111111111111111111111111111",
+            "sender": "0x1111111111111111111111111111111111111111",
             "timestamp": 1706464800,
             "nonce": 4,
             "content": "+18 hours (near max delta)",
@@ -260,14 +260,14 @@
         "dictionaryRef": "0x0000000000000000000000000000000000000000000000000000000000000000",
         "messages": [
           {
-            "author": "0x1111111111111111111111111111111111111111",
+            "sender": "0x1111111111111111111111111111111111111111",
             "timestamp": 1706400000,
             "nonce": 0,
             "content": "BLS message",
             "signatureType": "bls"
           },
           {
-            "author": "0x2222222222222222222222222222222222222222",
+            "sender": "0x2222222222222222222222222222222222222222",
             "timestamp": 1706400010,
             "nonce": 0,
             "content": "ECDSA message",
@@ -290,28 +290,28 @@
         "dictionaryRef": "0x0000000000000000000000000000000000000000000000000000000000000000",
         "messages": [
           {
-            "author": "0x1111111111111111111111111111111111111111",
+            "sender": "0x1111111111111111111111111111111111111111",
             "timestamp": 1706400000,
             "nonce": 0,
             "content": "Hello 世界! 🌍",
             "signatureType": "bls"
           },
           {
-            "author": "0x2222222222222222222222222222222222222222",
+            "sender": "0x2222222222222222222222222222222222222222",
             "timestamp": 1706400010,
             "nonce": 0,
             "content": "مرحبا بالعالم 🚀",
             "signatureType": "bls"
           },
           {
-            "author": "0x3333333333333333333333333333333333333333",
+            "sender": "0x3333333333333333333333333333333333333333",
             "timestamp": 1706400020,
             "nonce": 0,
             "content": "שלום עולם 💎",
             "signatureType": "bls"
           },
           {
-            "author": "0x4444444444444444444444444444444444444444",
+            "sender": "0x4444444444444444444444444444444444444444",
             "timestamp": 1706400030,
             "nonce": 0,
             "content": "안녕하세요 세계 🔥",
@@ -336,10 +336,10 @@
       "generatorSpec": {
         "messageCount": 1000,
         "authorCount": 100,
-        "contentPattern": "Message #{index} from author {authorIndex}: Testing batch capacity at scale with typical social content",
+        "contentPattern": "Message #{index} from sender {authorIndex}: Testing batch capacity at scale with typical social content",
         "timestampBase": 1706400000,
         "timestampIncrement": 1,
-        "nonceStrategy": "per-author-sequential"
+        "nonceStrategy": "per-sender-sequential"
       },
       "expectedOutput": {
         "magic": "0x534f4231",

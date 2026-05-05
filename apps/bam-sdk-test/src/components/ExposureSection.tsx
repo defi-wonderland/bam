@@ -12,11 +12,11 @@ import {
 } from 'bam-sdk/browser';
 import { Section, Field, TextInput, TextArea, Button, Output, ErrorBox, useAction } from './ui';
 
-const DEFAULT_AUTHOR = '0x0000000000000000000000000000000000000001' as Address;
+const DEFAULT_SENDER = '0x0000000000000000000000000000000000000001' as Address;
 const DEFAULT_MESSAGES = ['gm', 'wagmi', 'lfg'].join('\n');
 
 export function ExposureSection() {
-  const [author, setAuthor] = useState<string>(DEFAULT_AUTHOR);
+  const [sender, setSender] = useState<string>(DEFAULT_SENDER);
   const [messagesText, setMessagesText] = useState(DEFAULT_MESSAGES);
   const [batchHex, setBatchHex] = useState('');
   const [singleMsg, setSingleMsg] = useState('hello exposure');
@@ -31,7 +31,7 @@ export function ExposureSection() {
       .map((s) => s.trim())
       .filter(Boolean);
     return lines.map((content, i) => ({
-      author: author as Address,
+      sender: sender as Address,
       timestamp: Math.floor(Date.now() / 1000),
       nonce: i,
       content,
@@ -44,8 +44,8 @@ export function ExposureSection() {
       title="Exposure Batch"
       description="buildRawMessageBytes / encodeExposureBatch / decodeExposureBatch — on-chain raw layout for KZG-verifiable exposure."
     >
-      <Field label="author (20-byte address)">
-        <TextInput value={author} onChange={(e) => setAuthor(e.target.value)} />
+      <Field label="sender (20-byte address)">
+        <TextInput value={sender} onChange={(e) => setSender(e.target.value)} />
       </Field>
 
       <Field label="single content (utf-8)">
@@ -56,7 +56,7 @@ export function ExposureSection() {
           buildRaw.run(
             () =>
               buildRawMessageBytes(
-                author as Address,
+                sender as Address,
                 Math.floor(Date.now() / 1000),
                 0,
                 singleMsg

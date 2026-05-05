@@ -20,7 +20,7 @@ export const SQL_CREATE_DDL: readonly string[] = [
     CONSTRAINT bam_store_schema_singleton CHECK (id = 1)
   )`,
   `CREATE TABLE IF NOT EXISTS messages (
-    author                      TEXT NOT NULL,
+    sender                      TEXT NOT NULL,
     nonce                       TEXT NOT NULL,
     content_tag                 TEXT NOT NULL,
     contents                    BYTEA NOT NULL,
@@ -35,7 +35,7 @@ export const SQL_CREATE_DDL: readonly string[] = [
     block_number                BIGINT,
     tx_index                    BIGINT,
     message_index_within_batch  BIGINT,
-    PRIMARY KEY (author, nonce)
+    PRIMARY KEY (sender, nonce)
   )`,
   // In-place upgrade for stores bootstrapped before chain_id existed.
   // Idempotent: a fresh `CREATE TABLE` above already includes the

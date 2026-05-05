@@ -41,14 +41,14 @@ function readerBatch(over: Record<string, unknown> = {}): Record<string, unknown
     invalidatedAt: null,
     messageSnapshot: [
       {
-        author: ADDR_A,
+        sender: ADDR_A,
         nonce: '1',
         messageId: '0x' + '99'.repeat(32),
         messageIndexWithinBatch: 0,
         messageHash: '0x' + '77'.repeat(32),
       },
       {
-        author: ADDR_B,
+        sender: ADDR_B,
         nonce: '5',
         messageId: '0x' + 'aa'.repeat(32),
         messageIndexWithinBatch: 1,
@@ -60,13 +60,13 @@ function readerBatch(over: Record<string, unknown> = {}): Record<string, unknown
 }
 
 function readerMessageRow(args: {
-  author: string;
+  sender: string;
   nonce: string;
   contents: string;
 }): Record<string, unknown> {
   return {
     messageId: '0x' + '99'.repeat(32),
-    author: args.author,
+    sender: args.sender,
     nonce: args.nonce,
     contentTag: MESSAGE_IN_A_BLOBBLE_TAG,
     contents: args.contents,
@@ -137,8 +137,8 @@ describe('GET /api/blobbles/[txHash] — Reader proxy', () => {
         status: 200,
         body: {
           messages: [
-            readerMessageRow({ author: ADDR_A, nonce: '1', contents: helloHex }),
-            readerMessageRow({ author: ADDR_B, nonce: '5', contents: worldHex }),
+            readerMessageRow({ sender: ADDR_A, nonce: '1', contents: helloHex }),
+            readerMessageRow({ sender: ADDR_B, nonce: '5', contents: worldHex }),
           ],
         },
       }

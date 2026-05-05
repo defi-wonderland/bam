@@ -348,7 +348,7 @@ describe('bam-reader CLI — structured log replacer', () => {
       kind: 'message_conflict',
       txHash: ('0x' + '11'.repeat(32)) as never,
       messageHash: ('0x' + '22'.repeat(32)) as never,
-      author: ('0x' + '33'.repeat(20)) as never,
+      sender: ('0x' + '33'.repeat(20)) as never,
       nonce: 42n,
     };
     expect(() => JSON.stringify(event, jsonReplacer)).not.toThrow();
