@@ -39,7 +39,21 @@ function ensureStyleTag(doc: Document): void {
 function mountAllOn(root: ParentNode): void {
   const targets = root.querySelectorAll<HTMLElement>('[data-bam-comments]');
   targets.forEach((node) => {
-    mountInstance(node);
+    // Defence-in-depth: `mountInstance` already catches its own
+    // configuration errors and surfaces them in the node, but if
+    // anything ever leaks past those guards we still want the
+    // remaining widgets on the page to mount.
+    try {
+      mountInstance(node);
+    } catch (err) {
+      try {
+        node.textContent = `bam-comments: mount failed (${
+          err instanceof Error ? err.message : 'unknown'
+        })`;
+      } catch {
+        /* node may not accept text — last resort, swallow */
+      }
+    }
   });
 }
 

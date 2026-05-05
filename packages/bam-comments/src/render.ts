@@ -57,18 +57,35 @@ export function mountInstance(target: HTMLElement): () => void {
   if ((target as HTMLElement & { __bamMounted?: boolean }).__bamMounted) {
     return () => {};
   }
-  (target as HTMLElement & { __bamMounted?: boolean }).__bamMounted = true;
+
+  // Validate + derive everything that can throw BEFORE we mark the
+  // node as mounted. A failure during init (missing data-post-id,
+  // empty siteId, bad contentTag) used to leave `__bamMounted = true`
+  // permanently, blocking any retry on the same node. Now we only
+  // own the node once we've passed every guard.
 
   const postId = target.getAttribute('data-post-id');
   if (postId === null || postId === '') {
     target.textContent = 'bam-comments: data-post-id missing';
     return () => {};
   }
-  const siteId = resolveSiteId(
-    target.getAttribute('data-site-id'),
-    typeof window === 'undefined' ? '' : window.location.hostname
-  );
-  const postIdHash = derivePostIdHash(BAM_COMMENTS_TAG, siteId, postId);
+
+  let siteId: string;
+  let postIdHash: `0x${string}`;
+  try {
+    siteId = resolveSiteId(
+      target.getAttribute('data-site-id'),
+      typeof window === 'undefined' ? '' : window.location.hostname
+    );
+    postIdHash = derivePostIdHash(BAM_COMMENTS_TAG, siteId, postId);
+  } catch (err) {
+    target.textContent = `bam-comments: ${
+      err instanceof Error ? err.message : 'init failed'
+    }`;
+    return () => {};
+  }
+
+  (target as HTMLElement & { __bamMounted?: boolean }).__bamMounted = true;
 
   const state: MountState = {
     postIdHash,
