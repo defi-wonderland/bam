@@ -1,17 +1,15 @@
 /**
- * Build-time defaults + per-panel limit parsing.
+ * Build-time defaults + per-panel limit parsing. Per-viewer
+ * overrides live in `localStorage` and are managed by
+ * `useExplorerConfig` (`./client-config.ts`).
  *
- * Defaults come from `NEXT_PUBLIC_DEFAULT_*` env baked into the bundle
- * by Next.js. Per-viewer overrides live in `localStorage` and are
- * managed by `useExplorerConfig` (`./client-config.ts`).
- *
- * **No token default.** A deployed Explorer never ships an operator's
+ * No token default — a deployed Explorer never ships an operator's
  * Poster bearer token to anonymous visitors.
  */
 
 import type { Bytes32 } from 'bam-sdk';
 
-const HEX_BYTES32_RE = /^0x[0-9a-fA-F]{64}$/;
+import { isHex32 } from './panel-helpers';
 
 const DEFAULT_LIMIT = 50;
 const LIMIT_MIN = 1;
@@ -27,14 +25,10 @@ export interface DefaultsFromEnv {
 
 export function parseContentTags(raw: string | undefined | null): Bytes32[] {
   if (raw === undefined || raw === null || raw.trim().length === 0) return [];
-  const parts = raw.split(',').map((s) => s.trim()).filter((s) => s.length > 0);
-  const out: Bytes32[] = [];
-  for (const p of parts) {
-    if (HEX_BYTES32_RE.test(p)) {
-      out.push(p as Bytes32);
-    }
-  }
-  return out;
+  return raw
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0 && isHex32(s)) as Bytes32[];
 }
 
 export function parsePanelLimit(raw: string | undefined | null): number {

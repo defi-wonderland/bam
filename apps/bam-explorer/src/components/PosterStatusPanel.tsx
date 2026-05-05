@@ -1,6 +1,5 @@
 import type { PanelResult } from '../lib/panel-result';
-import { DegradedBody } from './DegradedBody';
-import { PanelShell } from './PanelShell';
+import { SimplePanel } from './PanelShell';
 
 export function PosterStatusPanel({
   result,
@@ -12,24 +11,21 @@ export function PosterStatusPanel({
   onRefresh?: () => void | Promise<void>;
 }) {
   return (
-    <PanelShell
+    <SimplePanel
       title="Poster status"
       endpoint="Poster GET /status"
-      status={result.kind}
+      result={result}
       overridden={overridden}
       onRefresh={onRefresh}
-    >
-      {result.kind === 'ok' ? (
+      renderOk={(data) => (
         <pre
           data-testid="poster-status-ok"
           className="text-xs bg-slate-50 rounded p-2 overflow-x-auto text-slate-700"
         >
-          {JSON.stringify(extractStatus(result.data), null, 2)}
+          {JSON.stringify(extractStatus(data), null, 2)}
         </pre>
-      ) : (
-        <DegradedBody result={result} />
       )}
-    </PanelShell>
+    />
   );
 }
 

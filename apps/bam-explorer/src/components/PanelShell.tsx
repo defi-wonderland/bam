@@ -1,20 +1,13 @@
 import { useState, type ReactNode } from 'react';
 
+import { DegradedBody } from './DegradedBody';
 import { EndpointLabel } from './EndpointLabel';
 import { StatusBadge } from './StatusBadge';
-import type { PanelResult } from '../lib/panel-result';
+import type { PanelKind, PanelResult } from '../lib/panel-result';
 
-export function PanelShell({
-  title,
-  endpoint,
-  status,
-  overridden,
-  onRefresh,
-  children,
-}: {
+export interface PanelShellBaseProps {
   title: string;
   endpoint: string;
-  status: PanelResult<unknown>['kind'];
   /**
    * `true` when the upstream URL for this panel differs from the
    * build-time `NEXT_PUBLIC_DEFAULT_*` default. Surfaces a small
@@ -23,6 +16,17 @@ export function PanelShell({
    */
   overridden?: boolean;
   onRefresh?: () => void | Promise<void>;
+}
+
+export function PanelShell({
+  title,
+  endpoint,
+  status,
+  overridden,
+  onRefresh,
+  children,
+}: PanelShellBaseProps & {
+  status: PanelKind;
   children: ReactNode;
 }) {
   const [busy, setBusy] = useState(false);
@@ -72,5 +76,26 @@ export function PanelShell({
       </header>
       <div className="text-sm text-slate-700">{children}</div>
     </section>
+  );
+}
+
+/**
+ * Thin wrapper that handles the universal ok / degraded branch the
+ * five "simple" panels (PosterHealth/Status/Pending/SubmittedBatches,
+ * ReaderHealth) all share. Panels render their own ok body via
+ * `renderOk`; everything else routes through `<DegradedBody>`.
+ */
+export function SimplePanel<T = unknown>({
+  result,
+  renderOk,
+  ...shell
+}: PanelShellBaseProps & {
+  result: PanelResult<T>;
+  renderOk: (data: T) => ReactNode;
+}) {
+  return (
+    <PanelShell {...shell} status={result.kind}>
+      {result.kind === 'ok' ? renderOk(result.data) : <DegradedBody result={result} />}
+    </PanelShell>
   );
 }

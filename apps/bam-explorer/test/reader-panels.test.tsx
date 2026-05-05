@@ -6,11 +6,7 @@ import { ReaderBatchesPanel } from '../src/components/ReaderBatchesPanel';
 import { ReaderHealthPanel } from '../src/components/ReaderHealthPanel';
 import { ReaderMessagesPanel } from '../src/components/ReaderMessagesPanel';
 import type { PanelResult } from '../src/lib/panel-result';
-
-const FETCHED_AT = 1_700_000_000_000;
-const TAG_A = ('0x' + 'aa'.repeat(32)) as Bytes32;
-const TAG_B = ('0x' + 'bb'.repeat(32)) as Bytes32;
-const TX_HASH = '0x' + 'cc'.repeat(32);
+import { FETCHED_AT, TAG_A, TAG_B, TX_HASH } from './fixtures';
 
 afterEach(cleanup);
 
@@ -39,8 +35,8 @@ describe('ReaderHealthPanel', () => {
 });
 
 describe('ReaderBatchesPanel — empty tags state', () => {
-  it('renders no_content_tags when noTagsConfigured=true', () => {
-    render(<ReaderBatchesPanel resultsByTag={new Map()} noTagsConfigured />);
+  it('renders no_content_tags when resultsByTag is empty', () => {
+    render(<ReaderBatchesPanel resultsByTag={new Map()} />);
     expect(screen.getByTestId('panel-not-configured')).toBeTruthy();
     expect(screen.queryByTestId('reader-batches-tag-section')).toBeNull();
   });
@@ -62,7 +58,7 @@ describe('ReaderBatchesPanel — single-tag ok state', () => {
         },
       ],
     ]);
-    render(<ReaderBatchesPanel resultsByTag={m} noTagsConfigured={false} />);
+    render(<ReaderBatchesPanel resultsByTag={m} />);
     expect(screen.getByTestId('reader-batches-ok')).toBeTruthy();
     const link = screen.getByTestId('reader-batches-row-link') as HTMLAnchorElement;
     expect(link.getAttribute('href')).toBe(`/batches/${TX_HASH}`);
@@ -72,36 +68,25 @@ describe('ReaderBatchesPanel — single-tag ok state', () => {
 describe('ReaderBatchesPanel — mixed-state tags', () => {
   it('renders one section per tag, each with its own status', () => {
     const m = new Map<Bytes32, PanelResult<unknown>>([
-      [
-        TAG_A,
-        {
-          kind: 'ok',
-          data: { batches: [] },
-          fetchedAt: FETCHED_AT,
-        },
-      ],
-      [
-        TAG_B,
-        { kind: 'unreachable', detail: 'down', fetchedAt: FETCHED_AT },
-      ],
+      [TAG_A, { kind: 'ok', data: { batches: [] }, fetchedAt: FETCHED_AT }],
+      [TAG_B, { kind: 'unreachable', detail: 'down', fetchedAt: FETCHED_AT }],
     ]);
-    render(<ReaderBatchesPanel resultsByTag={m} noTagsConfigured={false} />);
-    const sections = screen.getAllByTestId('reader-batches-tag-section');
-    expect(sections).toHaveLength(2);
+    render(<ReaderBatchesPanel resultsByTag={m} />);
+    expect(screen.getAllByTestId('reader-batches-tag-section')).toHaveLength(2);
 
-    // Status badges across the panel: shell badge + per-tag badges.
-    // We confirm at least one badge says "unreachable" (worst-case rolls up).
-    const ariaLabels = Array.from(document.querySelectorAll('[role="status"]')).map((e) =>
-      e.getAttribute('aria-label') ?? ''
+    // Worst-case rolls up to the shell badge: at least one
+    // unreachable badge appears.
+    const ariaLabels = Array.from(document.querySelectorAll('[role="status"]')).map(
+      (e) => e.getAttribute('aria-label') ?? ''
     );
     expect(ariaLabels.some((l) => l.includes('unreachable'))).toBe(true);
     expect(ariaLabels.some((l) => l.includes('ok'))).toBe(true);
   });
 });
 
-describe('ReaderMessagesPanel — same shape as ReaderBatchesPanel', () => {
-  it('renders empty-tags state', () => {
-    render(<ReaderMessagesPanel resultsByTag={new Map()} noTagsConfigured />);
+describe('ReaderMessagesPanel', () => {
+  it('renders empty-tags state for an empty map', () => {
+    render(<ReaderMessagesPanel resultsByTag={new Map()} />);
     expect(screen.getByTestId('panel-not-configured')).toBeTruthy();
   });
 
@@ -120,7 +105,7 @@ describe('ReaderMessagesPanel — same shape as ReaderBatchesPanel', () => {
         },
       ],
     ]);
-    render(<ReaderMessagesPanel resultsByTag={m} noTagsConfigured={false} />);
+    render(<ReaderMessagesPanel resultsByTag={m} />);
     expect(screen.getByTestId('reader-messages-ok')).toBeTruthy();
   });
 
@@ -128,14 +113,12 @@ describe('ReaderMessagesPanel — same shape as ReaderBatchesPanel', () => {
     const m = new Map<Bytes32, PanelResult<unknown>>([
       [TAG_A, { kind: 'ok', data: { messages: [] }, fetchedAt: FETCHED_AT }],
     ]);
-    render(<ReaderMessagesPanel resultsByTag={m} noTagsConfigured={false} />);
+    render(<ReaderMessagesPanel resultsByTag={m} />);
     expect(screen.getByTestId('reader-messages-empty')).toBeTruthy();
     expect(screen.queryByTestId('panel-not-configured')).toBeNull();
   });
 
-  it('renders all returned items (no hardcoded slice cap)', () => {
-    // Build 73 messages: more than the old hardcoded 50, well within
-    // the upstream limit. Asserts the panel renders every one.
+  it('renders every returned item (no hardcoded slice cap)', () => {
     const messages = Array.from({ length: 73 }, (_, i) => ({
       messageHash: '0x' + String(i).padStart(2, '0').repeat(32).slice(0, 64),
       author: '0x' + 'aa'.repeat(20),
@@ -143,8 +126,9 @@ describe('ReaderMessagesPanel — same shape as ReaderBatchesPanel', () => {
     const m = new Map<Bytes32, PanelResult<unknown>>([
       [TAG_A, { kind: 'ok', data: { messages }, fetchedAt: FETCHED_AT }],
     ]);
-    render(<ReaderMessagesPanel resultsByTag={m} noTagsConfigured={false} />);
-    const rows = document.querySelectorAll('[data-testid="reader-messages-ok"] tbody tr');
-    expect(rows.length).toBe(73);
+    render(<ReaderMessagesPanel resultsByTag={m} />);
+    expect(
+      document.querySelectorAll('[data-testid="reader-messages-ok"] tbody tr').length
+    ).toBe(73);
   });
 });

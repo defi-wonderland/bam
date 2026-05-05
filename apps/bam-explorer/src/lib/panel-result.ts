@@ -1,8 +1,8 @@
 /**
  * Per-panel fetch result. Each fetcher in `fetchers.ts` returns one
- * of these and never throws — the page renderer maps `kind` to a
- * status badge so a Reader outage cannot prevent the Poster panels
- * from rendering, and vice versa.
+ * of these and never throws — the dashboard relies on this so a
+ * Reader outage doesn't cascade into a 500 page (gate G-6 / partial
+ * offline posture).
  */
 
 import {
@@ -24,6 +24,9 @@ export type PanelResult<T> =
   | { kind: 'not_configured'; reason: NotConfiguredReason; fetchedAt: number }
   | { kind: 'unreachable'; detail: string; fetchedAt: number }
   | { kind: 'error'; status: number; detail?: string; fetchedAt: number };
+
+export type PanelKind = PanelResult<unknown>['kind'];
+export type DegradedPanelResult = Exclude<PanelResult<unknown>, { kind: 'ok' }>;
 
 export function readerErrorToPanelResult<T>(
   err: unknown,

@@ -10,15 +10,9 @@ import {
 } from '../src/lib/poster-client';
 import * as posterClient from '../src/lib/poster-client';
 
-const TAG = '0x' + 'aa'.repeat(32);
-const BASE = 'http://poster.test';
+import { jsonResponse, TAG_A as TAG } from './fixtures';
 
-function jsonResponse(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { 'content-type': 'application/json' },
-  });
-}
+const BASE = 'http://poster.test';
 
 afterEach(() => {
   vi.restoreAllMocks();

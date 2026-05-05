@@ -1,6 +1,5 @@
 import type { PanelResult } from '../lib/panel-result';
-import { DegradedBody } from './DegradedBody';
-import { PanelShell } from './PanelShell';
+import { SimplePanel } from './PanelShell';
 
 export function PosterHealthPanel({
   result,
@@ -12,19 +11,14 @@ export function PosterHealthPanel({
   onRefresh?: () => void | Promise<void>;
 }) {
   return (
-    <PanelShell
+    <SimplePanel
       title="Poster health"
       endpoint="Poster GET /health"
-      status={result.kind}
+      result={result}
       overridden={overridden}
       onRefresh={onRefresh}
-    >
-      {result.kind === 'ok' ? (
-        <PosterHealthBody data={result.data} />
-      ) : (
-        <DegradedBody result={result} />
-      )}
-    </PanelShell>
+      renderOk={(data) => <PosterHealthBody data={data} />}
+    />
   );
 }
 

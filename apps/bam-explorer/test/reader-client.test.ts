@@ -9,16 +9,9 @@ import {
   ReaderUnreachableError,
 } from '../src/lib/reader-client';
 
-const TAG = '0x' + 'aa'.repeat(32);
-const TX_HASH = '0x' + 'cc'.repeat(32);
-const BASE = 'http://reader.test';
+import { jsonResponse, TAG_A as TAG, TX_HASH } from './fixtures';
 
-function jsonResponse(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { 'content-type': 'application/json' },
-  });
-}
+const BASE = 'http://reader.test';
 
 afterEach(() => {
   vi.restoreAllMocks();

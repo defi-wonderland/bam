@@ -8,8 +8,6 @@ import {
   vi,
 } from 'vitest';
 
-import type { PanelResult } from '../src/lib/panel-result';
-
 vi.mock('../src/lib/fetchers', () => ({
   fetchPosterHealth: vi.fn(),
   fetchPosterStatus: vi.fn(),
@@ -23,18 +21,9 @@ vi.mock('../src/lib/fetchers', () => ({
 
 import * as fetchers from '../src/lib/fetchers';
 import { Dashboard } from '../src/components/Dashboard';
+import { ok, unreachable, TAG_A as TAG } from './fixtures';
 
-const TAG = '0x' + 'aa'.repeat(32);
-const FETCHED_AT = 1_700_000_000_000;
 const STORAGE_KEY = 'bam-explorer.settings.v1';
-
-function ok<T>(data: T): PanelResult<T> {
-  return { kind: 'ok', data, fetchedAt: FETCHED_AT };
-}
-
-function unreachable<T>(detail = 'down'): PanelResult<T> {
-  return { kind: 'unreachable', detail, fetchedAt: FETCHED_AT };
-}
 
 function setAllOk(): void {
   vi.mocked(fetchers.fetchPosterHealth).mockResolvedValue(ok({ health: { state: 'ok' } }));

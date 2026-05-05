@@ -1,4 +1,4 @@
-import type { NotConfiguredReason, PanelResult } from '../lib/panel-result';
+import type { DegradedPanelResult, NotConfiguredReason } from '../lib/panel-result';
 
 const NOT_CONFIGURED_COPY: Record<NotConfiguredReason, string> = {
   reader_url_not_configured:
@@ -9,11 +9,7 @@ const NOT_CONFIGURED_COPY: Record<NotConfiguredReason, string> = {
     'No content tags configured. Open Settings to add 0x-prefixed bytes32 tags (or set NEXT_PUBLIC_DEFAULT_CONTENT_TAGS at build time).',
 };
 
-export function DegradedBody({
-  result,
-}: {
-  result: Exclude<PanelResult<unknown>, { kind: 'ok' }>;
-}) {
+export function DegradedBody({ result }: { result: DegradedPanelResult }) {
   switch (result.kind) {
     case 'not_configured':
       return (

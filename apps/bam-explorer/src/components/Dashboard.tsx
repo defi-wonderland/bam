@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Bytes32 } from 'bam-sdk';
 
 import {
@@ -35,6 +35,8 @@ interface DashboardData {
   readerBatchesByTag: Map<Bytes32, PanelResult<unknown>>;
   readerMessagesByTag: Map<Bytes32, PanelResult<unknown>>;
 }
+
+type PanelKey = Exclude<keyof DashboardData, 'fetchedAt'>;
 
 async function loadDashboard(cfg: ExplorerConfig): Promise<DashboardData> {
   const fetchedAt = Date.now();
@@ -94,69 +96,67 @@ export function Dashboard() {
     }
   }, [cfg.config]);
 
-  const readerCfg = { baseUrl: cfg.config.readerUrl };
-  const posterCfg = {
-    baseUrl: cfg.config.posterUrl,
-    authToken: cfg.config.posterAuthToken || undefined,
-  };
+  // Bumping `fetchedAt` so the header indicator reflects the most
+  // recent panel-level refresh, not just the last full reload.
+  const updatePanel = useCallback(<K extends PanelKey>(key: K, value: DashboardData[K]) => {
+    setData((prev) => (prev ? { ...prev, [key]: value, fetchedAt: Date.now() } : prev));
+  }, []);
 
-  // Per-panel refresh helpers. Each one updates its panel's slice of
-  // `data` AND bumps `fetchedAt` so the header freshness indicator
-  // reflects the most recent user-triggered refresh — not just the
-  // last full-dashboard load.
+  const readerCfg = useMemo(() => ({ baseUrl: cfg.config.readerUrl }), [cfg.config.readerUrl]);
+  const posterCfg = useMemo(
+    () => ({
+      baseUrl: cfg.config.posterUrl,
+      authToken: cfg.config.posterAuthToken || undefined,
+    }),
+    [cfg.config.posterUrl, cfg.config.posterAuthToken]
+  );
+
   const refreshPosterHealth = useCallback(async () => {
-    const r = await fetchPosterHealth(posterCfg);
-    setData((prev) => (prev ? { ...prev, posterHealth: r, fetchedAt: Date.now() } : prev));
-  }, [posterCfg.baseUrl, posterCfg.authToken]);
+    updatePanel('posterHealth', await fetchPosterHealth(posterCfg));
+  }, [posterCfg, updatePanel]);
 
   const refreshPosterStatus = useCallback(async () => {
-    const r = await fetchPosterStatus(posterCfg);
-    setData((prev) => (prev ? { ...prev, posterStatus: r, fetchedAt: Date.now() } : prev));
-  }, [posterCfg.baseUrl, posterCfg.authToken]);
+    updatePanel('posterStatus', await fetchPosterStatus(posterCfg));
+  }, [posterCfg, updatePanel]);
 
   const refreshPosterPending = useCallback(async () => {
-    const r = await fetchPosterPending(posterCfg, cfg.config.pendingLimit);
-    setData((prev) => (prev ? { ...prev, posterPending: r, fetchedAt: Date.now() } : prev));
-  }, [posterCfg.baseUrl, posterCfg.authToken, cfg.config.pendingLimit]);
+    updatePanel('posterPending', await fetchPosterPending(posterCfg, cfg.config.pendingLimit));
+  }, [posterCfg, cfg.config.pendingLimit, updatePanel]);
 
   const refreshPosterSubmitted = useCallback(async () => {
-    const r = await fetchPosterSubmittedBatches(posterCfg, cfg.config.submittedLimit);
-    setData((prev) =>
-      prev ? { ...prev, posterSubmittedBatches: r, fetchedAt: Date.now() } : prev
+    updatePanel(
+      'posterSubmittedBatches',
+      await fetchPosterSubmittedBatches(posterCfg, cfg.config.submittedLimit)
     );
-  }, [posterCfg.baseUrl, posterCfg.authToken, cfg.config.submittedLimit]);
+  }, [posterCfg, cfg.config.submittedLimit, updatePanel]);
 
   const refreshReaderHealth = useCallback(async () => {
-    const r = await fetchReaderHealth(readerCfg);
-    setData((prev) => (prev ? { ...prev, readerHealth: r, fetchedAt: Date.now() } : prev));
-  }, [readerCfg.baseUrl]);
+    updatePanel('readerHealth', await fetchReaderHealth(readerCfg));
+  }, [readerCfg, updatePanel]);
 
   const refreshReaderBatches = useCallback(async () => {
     const entries = await Promise.all(
       cfg.config.contentTags.map(
-        async (tag) => [tag, await fetchReaderBatches(readerCfg, tag, cfg.config.batchesLimit)] as const
+        async (tag) =>
+          [tag, await fetchReaderBatches(readerCfg, tag, cfg.config.batchesLimit)] as const
       )
     );
-    setData((prev) =>
-      prev ? { ...prev, readerBatchesByTag: new Map(entries), fetchedAt: Date.now() } : prev
-    );
-  }, [readerCfg.baseUrl, cfg.config.contentTags, cfg.config.batchesLimit]);
+    updatePanel('readerBatchesByTag', new Map(entries));
+  }, [readerCfg, cfg.config.contentTags, cfg.config.batchesLimit, updatePanel]);
 
   const refreshReaderMessages = useCallback(async () => {
     const entries = await Promise.all(
       cfg.config.contentTags.map(
-        async (tag) => [tag, await fetchReaderMessages(readerCfg, tag, cfg.config.messagesLimit)] as const
+        async (tag) =>
+          [tag, await fetchReaderMessages(readerCfg, tag, cfg.config.messagesLimit)] as const
       )
     );
-    setData((prev) =>
-      prev ? { ...prev, readerMessagesByTag: new Map(entries), fetchedAt: Date.now() } : prev
-    );
-  }, [readerCfg.baseUrl, cfg.config.contentTags, cfg.config.messagesLimit]);
+    updatePanel('readerMessagesByTag', new Map(entries));
+  }, [readerCfg, cfg.config.contentTags, cfg.config.messagesLimit, updatePanel]);
 
   useEffect(() => {
     if (!cfg.mounted) return;
     void refresh();
-    // Re-fetch when the config object changes (Settings applied / reset).
   }, [cfg.mounted, cfg.config, refresh]);
 
   if (!cfg.mounted) {
@@ -171,8 +171,6 @@ export function Dashboard() {
       </main>
     );
   }
-
-  const noTagsConfigured = cfg.config.contentTags.length === 0;
 
   return (
     <main className="max-w-6xl mx-auto px-6 py-8 relative">
@@ -236,13 +234,11 @@ export function Dashboard() {
           <div className="grid grid-cols-1 gap-4 mt-4">
             <ReaderBatchesPanel
               resultsByTag={data.readerBatchesByTag}
-              noTagsConfigured={noTagsConfigured}
               overridden={cfg.flags.readerUrl}
               onRefresh={refreshReaderBatches}
             />
             <ReaderMessagesPanel
               resultsByTag={data.readerMessagesByTag}
-              noTagsConfigured={noTagsConfigured}
               overridden={cfg.flags.readerUrl}
               onRefresh={refreshReaderMessages}
             />

@@ -1,6 +1,6 @@
 import type { PanelResult } from '../lib/panel-result';
-import { DegradedBody } from './DegradedBody';
-import { PanelShell } from './PanelShell';
+import { arrayField, shortOrEmpty } from '../lib/panel-helpers';
+import { SimplePanel } from './PanelShell';
 
 interface BatchItem {
   txHash?: string;
@@ -20,24 +20,19 @@ export function PosterSubmittedBatchesPanel({
   onRefresh?: () => void | Promise<void>;
 }) {
   return (
-    <PanelShell
+    <SimplePanel
       title="Submitted batches"
       endpoint="Poster GET /submitted-batches"
-      status={result.kind}
+      result={result}
       overridden={overridden}
       onRefresh={onRefresh}
-    >
-      {result.kind === 'ok' ? (
-        <SubmittedList data={result.data} />
-      ) : (
-        <DegradedBody result={result} />
-      )}
-    </PanelShell>
+      renderOk={(data) => <SubmittedList data={data} />}
+    />
   );
 }
 
 function SubmittedList({ data }: { data: unknown }) {
-  const items = extractBatches(data);
+  const items = arrayField<BatchItem>(data, 'batches');
   if (items.length === 0) {
     return (
       <p data-testid="poster-submitted-empty" className="text-slate-500">
@@ -58,32 +53,17 @@ function SubmittedList({ data }: { data: unknown }) {
         </thead>
         <tbody>
           {items.map((b, i) => (
-            <tr key={`${String(b.txHash ?? '')}:${String(b.contentTag ?? '')}:${i}`} className="text-slate-800">
-              <td className="pr-3 truncate max-w-[16ch]">{short(b.txHash)}</td>
+            <tr
+              key={`${String(b.txHash ?? '')}:${String(b.contentTag ?? '')}:${i}`}
+              className="text-slate-800"
+            >
+              <td className="pr-3 truncate max-w-[16ch]">{shortOrEmpty(b.txHash)}</td>
               <td className="pr-3 text-right">{String(b.blockNumber ?? '')}</td>
-              <td className="truncate max-w-[14ch]">{short(b.contentTag)}</td>
+              <td className="truncate max-w-[14ch]">{shortOrEmpty(b.contentTag)}</td>
             </tr>
           ))}
         </tbody>
       </table>
     </div>
   );
-}
-
-function extractBatches(data: unknown): BatchItem[] {
-  if (
-    typeof data === 'object' &&
-    data !== null &&
-    'batches' in data &&
-    Array.isArray((data as { batches: unknown }).batches)
-  ) {
-    return (data as { batches: BatchItem[] }).batches;
-  }
-  return [];
-}
-
-function short(v: unknown): string {
-  if (typeof v !== 'string') return '';
-  if (v.length <= 12) return v;
-  return `${v.slice(0, 6)}…${v.slice(-4)}`;
 }

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { memo, useEffect, useState } from 'react';
 
 function formatAge(seconds: number): string {
   if (seconds < 1) return 'just now';
@@ -12,11 +12,10 @@ function formatAge(seconds: number): string {
   return `${hours}h ${minutes % 60}m ago`;
 }
 
-export function Freshness({ fetchedAt }: { fetchedAt: number }) {
-  // Render the SSR snapshot as "just now" — at render time the server's
-  // `fetchedAt = Date.now()` is by definition zero seconds old, so this
-  // matches what the client computes on first paint and avoids a
-  // hydration mismatch.
+// Initial render shows "just now" so SSR/CSR match without a
+// hydration mismatch (the server's `fetchedAt = Date.now()` is by
+// definition zero seconds old at render time).
+export const Freshness = memo(function Freshness({ fetchedAt }: { fetchedAt: number }) {
   const [now, setNow] = useState<number | null>(null);
 
   useEffect(() => {
@@ -39,4 +38,4 @@ export function Freshness({ fetchedAt }: { fetchedAt: number }) {
       fetched {label}
     </span>
   );
-}
+});

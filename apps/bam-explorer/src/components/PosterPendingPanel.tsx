@@ -1,6 +1,6 @@
 import type { PanelResult } from '../lib/panel-result';
-import { DegradedBody } from './DegradedBody';
-import { PanelShell } from './PanelShell';
+import { arrayField, shortOrEmpty } from '../lib/panel-helpers';
+import { SimplePanel } from './PanelShell';
 
 interface PendingItem {
   messageHash?: string;
@@ -20,24 +20,19 @@ export function PosterPendingPanel({
   onRefresh?: () => void | Promise<void>;
 }) {
   return (
-    <PanelShell
+    <SimplePanel
       title="Pending messages"
       endpoint="Poster GET /pending"
-      status={result.kind}
+      result={result}
       overridden={overridden}
       onRefresh={onRefresh}
-    >
-      {result.kind === 'ok' ? (
-        <PendingList data={result.data} />
-      ) : (
-        <DegradedBody result={result} />
-      )}
-    </PanelShell>
+      renderOk={(data) => <PendingList data={data} />}
+    />
   );
 }
 
 function PendingList({ data }: { data: unknown }) {
-  const items = extractPending(data);
+  const items = arrayField<PendingItem>(data, 'pending');
   if (items.length === 0) {
     return (
       <p data-testid="poster-pending-empty" className="text-slate-500">
@@ -60,9 +55,9 @@ function PendingList({ data }: { data: unknown }) {
         <tbody>
           {items.map((m, i) => (
             <tr key={String(m.messageHash ?? i)} className="text-slate-800">
-              <td className="pr-3 truncate max-w-[16ch]">{short(m.messageHash)}</td>
-              <td className="pr-3 truncate max-w-[14ch]">{short(m.sender)}</td>
-              <td className="pr-3 truncate max-w-[14ch]">{short(m.contentTag)}</td>
+              <td className="pr-3 truncate max-w-[16ch]">{shortOrEmpty(m.messageHash)}</td>
+              <td className="pr-3 truncate max-w-[14ch]">{shortOrEmpty(m.sender)}</td>
+              <td className="pr-3 truncate max-w-[14ch]">{shortOrEmpty(m.contentTag)}</td>
               <td className="whitespace-nowrap">{formatTs(m.ingestedAt)}</td>
             </tr>
           ))}
@@ -70,24 +65,6 @@ function PendingList({ data }: { data: unknown }) {
       </table>
     </div>
   );
-}
-
-function extractPending(data: unknown): PendingItem[] {
-  if (
-    typeof data === 'object' &&
-    data !== null &&
-    'pending' in data &&
-    Array.isArray((data as { pending: unknown }).pending)
-  ) {
-    return (data as { pending: PendingItem[] }).pending;
-  }
-  return [];
-}
-
-function short(v: unknown): string {
-  if (typeof v !== 'string') return '';
-  if (v.length <= 12) return v;
-  return `${v.slice(0, 6)}…${v.slice(-4)}`;
 }
 
 function formatTs(v: unknown): string {

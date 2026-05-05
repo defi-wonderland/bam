@@ -2,10 +2,10 @@ import Link from 'next/link';
 import type { Bytes32 } from 'bam-sdk';
 
 import type { PanelResult } from '../lib/panel-result';
+import { aggregateKind, arrayField, isHex32, shortOrEmpty } from '../lib/panel-helpers';
 import { DegradedBody } from './DegradedBody';
 import { PanelShell } from './PanelShell';
 import { StatusBadge } from './StatusBadge';
-import { aggregateKind, isHex32, short } from '../lib/panel-helpers';
 
 interface BatchItem {
   txHash?: string;
@@ -17,16 +17,14 @@ interface BatchItem {
 
 export function ReaderBatchesPanel({
   resultsByTag,
-  noTagsConfigured,
   overridden,
   onRefresh,
 }: {
   resultsByTag: Map<Bytes32, PanelResult<unknown>>;
-  noTagsConfigured: boolean;
   overridden?: boolean;
   onRefresh?: () => void | Promise<void>;
 }) {
-  const overallKind = noTagsConfigured ? 'not_configured' : aggregateKind(resultsByTag);
+  const overallKind = aggregateKind(resultsByTag);
 
   return (
     <PanelShell
@@ -36,47 +34,26 @@ export function ReaderBatchesPanel({
       overridden={overridden}
       onRefresh={onRefresh}
     >
-      {noTagsConfigured ? (
+      {resultsByTag.size === 0 ? (
         <DegradedBody
-          result={{
-            kind: 'not_configured',
-            reason: 'no_content_tags',
-            fetchedAt: 0,
-          }}
+          result={{ kind: 'not_configured', reason: 'no_content_tags', fetchedAt: 0 }}
         />
       ) : (
-        <PerTagSections resultsByTag={resultsByTag} />
+        <div className="flex flex-col gap-3">
+          {Array.from(resultsByTag.entries()).map(([tag, result]) => (
+            <TagSection key={tag} tag={tag} result={result} />
+          ))}
+        </div>
       )}
     </PanelShell>
   );
 }
 
-function PerTagSections({
-  resultsByTag,
-}: {
-  resultsByTag: Map<Bytes32, PanelResult<unknown>>;
-}) {
-  const entries = Array.from(resultsByTag.entries());
-  return (
-    <div className="flex flex-col gap-3">
-      {entries.map(([tag, result]) => (
-        <TagSection key={tag} tag={tag} result={result} />
-      ))}
-    </div>
-  );
-}
-
-function TagSection({
-  tag,
-  result,
-}: {
-  tag: Bytes32;
-  result: PanelResult<unknown>;
-}) {
+function TagSection({ tag, result }: { tag: Bytes32; result: PanelResult<unknown> }) {
   return (
     <div className="rounded ring-1 ring-slate-100 p-2" data-testid="reader-batches-tag-section">
       <div className="flex items-baseline justify-between mb-2">
-        <span className="font-mono text-xs text-slate-700">tag {short(tag)}</span>
+        <span className="font-mono text-xs text-slate-700">tag {shortOrEmpty(tag)}</span>
         <StatusBadge kind={result.kind} />
       </div>
       {result.kind === 'ok' ? (
@@ -89,7 +66,7 @@ function TagSection({
 }
 
 function BatchesList({ data }: { data: unknown }) {
-  const items = extract(data);
+  const items = arrayField<BatchItem>(data, 'batches');
   if (items.length === 0) {
     return (
       <p data-testid="reader-batches-empty" className="text-slate-500 text-xs">
@@ -106,7 +83,7 @@ function BatchesList({ data }: { data: unknown }) {
           const linkable = txHash !== null && isHex32(txHash);
           const display = (
             <span className="font-mono text-xs text-slate-800">
-              {txHash ? short(txHash) : '(no tx hash)'}
+              {txHash ? shortOrEmpty(txHash) : '(no tx hash)'}
             </span>
           );
           return (
@@ -131,16 +108,4 @@ function BatchesList({ data }: { data: unknown }) {
       </ul>
     </div>
   );
-}
-
-function extract(data: unknown): BatchItem[] {
-  if (
-    typeof data === 'object' &&
-    data !== null &&
-    'batches' in data &&
-    Array.isArray((data as { batches: unknown }).batches)
-  ) {
-    return (data as { batches: BatchItem[] }).batches;
-  }
-  return [];
 }

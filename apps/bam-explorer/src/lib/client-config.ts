@@ -1,21 +1,10 @@
 'use client';
 
-/**
- * `useExplorerConfig` — React hook for the merged config:
- * `localStorage` overrides on top of `NEXT_PUBLIC_DEFAULT_*` build
- * defaults. Returns:
- *   - `mounted` — `false` during SSR / initial client render, `true`
- *     after `useEffect` reads `localStorage`. The Dashboard renders
- *     a loading shell while `!mounted` to keep SSR output
- *     deterministic and avoid a flash of default-URL data on
- *     viewers who have overrides.
- *   - `config` — effective `ExplorerConfig`.
- *   - `setOverride(key, value)` / `clearOverride(key)` /
- *     `resetAll()` for the Settings UI.
- *
- * The token has no env default (security posture in spec); it is
- * either entered via Settings or absent.
- */
+// Merges `localStorage` overrides on top of `NEXT_PUBLIC_DEFAULT_*`
+// build defaults. The `mounted` flag exists to keep SSR output
+// deterministic and avoid a flash of default-URL data for viewers
+// who have overrides — the Dashboard renders a loading shell until
+// `useEffect` reads `localStorage`.
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Bytes32 } from 'bam-sdk';

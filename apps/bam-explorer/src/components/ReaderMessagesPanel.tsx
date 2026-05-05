@@ -1,10 +1,11 @@
 import type { Bytes32 } from 'bam-sdk';
+import { hexToBytes } from 'bam-sdk/browser';
 
 import type { PanelResult } from '../lib/panel-result';
+import { aggregateKind, arrayField, shortOrEmpty } from '../lib/panel-helpers';
 import { DegradedBody } from './DegradedBody';
 import { PanelShell } from './PanelShell';
 import { StatusBadge } from './StatusBadge';
-import { aggregateKind, short } from '../lib/panel-helpers';
 
 interface MessageItem {
   messageHash?: string;
@@ -17,16 +18,14 @@ interface MessageItem {
 
 export function ReaderMessagesPanel({
   resultsByTag,
-  noTagsConfigured,
   overridden,
   onRefresh,
 }: {
   resultsByTag: Map<Bytes32, PanelResult<unknown>>;
-  noTagsConfigured: boolean;
   overridden?: boolean;
   onRefresh?: () => void | Promise<void>;
 }) {
-  const overallKind = noTagsConfigured ? 'not_configured' : aggregateKind(resultsByTag);
+  const overallKind = aggregateKind(resultsByTag);
 
   return (
     <PanelShell
@@ -36,47 +35,26 @@ export function ReaderMessagesPanel({
       overridden={overridden}
       onRefresh={onRefresh}
     >
-      {noTagsConfigured ? (
+      {resultsByTag.size === 0 ? (
         <DegradedBody
-          result={{
-            kind: 'not_configured',
-            reason: 'no_content_tags',
-            fetchedAt: 0,
-          }}
+          result={{ kind: 'not_configured', reason: 'no_content_tags', fetchedAt: 0 }}
         />
       ) : (
-        <PerTagSections resultsByTag={resultsByTag} />
+        <div className="flex flex-col gap-3">
+          {Array.from(resultsByTag.entries()).map(([tag, result]) => (
+            <TagSection key={tag} tag={tag} result={result} />
+          ))}
+        </div>
       )}
     </PanelShell>
   );
 }
 
-function PerTagSections({
-  resultsByTag,
-}: {
-  resultsByTag: Map<Bytes32, PanelResult<unknown>>;
-}) {
-  const entries = Array.from(resultsByTag.entries());
-  return (
-    <div className="flex flex-col gap-3">
-      {entries.map(([tag, result]) => (
-        <TagSection key={tag} tag={tag} result={result} />
-      ))}
-    </div>
-  );
-}
-
-function TagSection({
-  tag,
-  result,
-}: {
-  tag: Bytes32;
-  result: PanelResult<unknown>;
-}) {
+function TagSection({ tag, result }: { tag: Bytes32; result: PanelResult<unknown> }) {
   return (
     <div className="rounded ring-1 ring-slate-100 p-2" data-testid="reader-messages-tag-section">
       <div className="flex items-baseline justify-between mb-2">
-        <span className="font-mono text-xs text-slate-700">tag {short(tag)}</span>
+        <span className="font-mono text-xs text-slate-700">tag {shortOrEmpty(tag)}</span>
         <StatusBadge kind={result.kind} />
       </div>
       {result.kind === 'ok' ? (
@@ -89,7 +67,7 @@ function TagSection({
 }
 
 function MessagesList({ data }: { data: unknown }) {
-  const items = extract(data);
+  const items = arrayField<MessageItem>(data, 'messages');
   if (items.length === 0) {
     return (
       <p data-testid="reader-messages-empty" className="text-slate-500 text-xs">
@@ -132,76 +110,40 @@ function MessagesList({ data }: { data: unknown }) {
   );
 }
 
-function extract(data: unknown): MessageItem[] {
-  if (
-    typeof data === 'object' &&
-    data !== null &&
-    'messages' in data &&
-    Array.isArray((data as { messages: unknown }).messages)
-  ) {
-    return (data as { messages: MessageItem[] }).messages;
-  }
-  return [];
-}
-
-function shortOrEmpty(v: unknown): string {
-  if (typeof v !== 'string') return '';
-  return short(v);
-}
-
 const utf8 = new TextDecoder('utf-8', { fatal: true });
 
-/**
- * Best-effort decode of a BAM message's `contents` hex string into UTF-8 text.
- *
- * Each app on top of BAM owns its own `contents[32:]` codec (see
- * `apps/bam-twitter/src/lib/contents-codec.ts` and
- * `apps/message-in-a-blobble/src/lib/contents-codec.ts`). They all end with
- * `[u32 BE length][length bytes UTF-8]`, so we scan for the smallest offset
- * where the trailing bytes form a valid length-prefixed UTF-8 string.
- * Returns null if no candidate fits.
- */
-// Cap on the input `contents` to keep `decodeText` cheap. Reader
-// rows can carry up to a full blob (~128 KB) but the apps in this
-// repo all fit comfortably in well under 16 KB (32-byte tag + small
-// preamble + length-prefixed UTF-8 capped at 4096). With up to 200
-// rendered rows per panel, decoding every row through a regex +
-// full byte materialization on a 100 KB payload would stall the
-// dashboard. A 16 KB cap (32 KB hex chars + "0x") is generous for
-// every codec in this repo and short enough to render fast.
+// Reader rows can carry up to a full blob (~128 KB), but every
+// codec in this repo fits well under 16 KB. With up to 200
+// decoded rows per render the cap keeps the renderer responsive
+// even for adversarial payloads. The check on `contents.length`
+// runs before any allocation.
 const MAX_CONTENTS_BYTES = 16_384;
 const MAX_CONTENTS_HEX_CHARS = MAX_CONTENTS_BYTES * 2;
 
-// Exported for test/decode-text.test.ts; not part of the panel's
-// public API.
+/**
+ * Best-effort decode of a BAM message's `contents` into UTF-8 text.
+ * Each app's `contents[32:]` codec ends in `[u32 BE length][utf8]`,
+ * so we scan for the offset whose trailing bytes form a valid
+ * length-prefixed UTF-8 string. Returns null if no candidate fits.
+ *
+ * Exported for test/decode-text.test.ts; not part of the panel's
+ * public API.
+ */
 export function decodeText(contents: unknown): string | null {
   if (typeof contents !== 'string' || !contents.startsWith('0x')) return null;
-  // Bound the work *before* the slice / regex / Uint8Array
-  // allocation: a 128 KB Reader row would otherwise allocate a
-  // 128 KB substring just to reject it. Checking `contents.length`
-  // directly (with the "0x" prefix accounted for) keeps the
-  // oversize path allocation-free.
   if (contents.length > MAX_CONTENTS_HEX_CHARS + 2) return null;
-  const hex = contents.slice(2);
-  if (hex.length % 2 !== 0) return null;
-  // Strict hex check: `parseInt` returns `NaN` on non-hex chars,
-  // which then coerces to `0` when assigned into a `Uint8Array` and
-  // silently corrupts the byte stream. Reject the whole string
-  // instead so a malformed input renders as "(undecoded)" rather
-  // than as plausible-looking-but-wrong text.
-  if (!/^[0-9a-fA-F]*$/.test(hex)) return null;
-  const bytes = new Uint8Array(hex.length / 2);
-  for (let i = 0; i < bytes.length; i++) {
-    bytes[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+  let bytes: Uint8Array;
+  try {
+    bytes = hexToBytes(contents);
+  } catch {
+    return null;
   }
   if (bytes.length < 32 + 4) return null;
   const app = bytes.subarray(32);
   for (let p = 0; p + 4 <= app.length; p++) {
     const len =
       (app[p] * 0x1000000 + (app[p + 1] << 16) + (app[p + 2] << 8) + app[p + 3]) >>> 0;
-    // Empty UTF-8 (`len === 0`) is valid — decode it as the empty
-    // string rather than skipping the offset. Cap at 4096 to bound
-    // wasted work on garbage payloads.
+    // `len === 0` is valid (empty UTF-8); cap at 4096 to bound work.
     if (len > 4096) continue;
     if (p + 4 + len !== app.length) continue;
     try {
