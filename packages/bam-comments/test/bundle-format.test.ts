@@ -5,13 +5,23 @@
  * an ESM bundle's `export {…}` at the top level aborts a classic
  * script tag with a SyntaxError, and the widget never mounts.
  *
+ * Two properties have to hold for the embed to actually work, and
+ * a regression in either one would silently break every embed:
+ *
+ *   1. The bundle is structured as a function-expression
+ *      assignment (so it parses under a classic script tag).
+ *   2. That function is **invoked** at the end (so the top-level
+ *      `bootstrap()` side effect actually runs and the widget
+ *      auto-mounts). A non-invoked function expression would
+ *      satisfy (1) on its own but never execute.
+ *
  * If a future change in `vite.config.ts` flips `formats` back to
  * `['es']` (or otherwise reintroduces top-level imports/exports),
  * this test fails before any embed page goes silently dark.
  */
 
 import { describe, it, expect, beforeAll } from 'vitest';
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execSync } from 'node:child_process';
@@ -21,12 +31,19 @@ const widgetPath = path.resolve(here, '..', 'dist', 'widget.js');
 
 describe('widget bundle format', () => {
   let bundle: string;
+  /** Bundle without the trailing sourcemap comment + whitespace —
+   *  the actual executable JS the browser parses. */
+  let code: string;
 
   beforeAll(() => {
-    if (!existsSync(widgetPath)) {
-      execSync('pnpm build', { cwd: path.resolve(here, '..'), stdio: 'inherit' });
-    }
+    // Always rebuild rather than only-when-missing. A leftover
+    // `dist/widget.js` from a prior config (e.g. when `formats`
+    // was still `'es'`) would otherwise let the test validate the
+    // wrong artifact and pass against a bundle the current source
+    // wouldn't actually emit.
+    execSync('pnpm build', { cwd: path.resolve(here, '..'), stdio: 'inherit' });
     bundle = readFileSync(widgetPath, 'utf-8');
+    code = bundle.replace(/\/\/# sourceMappingURL=.*$/m, '').trimEnd();
   });
 
   it('emits an IIFE assigned to the documented global name', () => {
@@ -39,12 +56,19 @@ describe('widget bundle format', () => {
     expect(bundle).toMatch(/^var BamComments\s*=\s*\(?\s*function/);
   });
 
+  it('actually invokes the IIFE (top-level bootstrap must run)', () => {
+    // Without an invocation the function expression is just
+    // assigned to `BamComments` and never executes — the embed's
+    // `bootstrap()` side effect would be skipped and the widget
+    // would silently never auto-mount. Pin the trailing `(...)`
+    // call form. Tolerant of both `}(args);` (Vite's current
+    // shape) and `})(args);` (conventional wrapped form).
+    expect(code).toMatch(/\}\s*\)?\s*\([^;]*\)\s*;?\s*$/);
+  });
+
   it('does not contain top-level `export` (ESM marker)', () => {
-    // Strip the trailing sourcemap comment + any whitespace, then
-    // assert the executable doesn't end with an `export {…}` block
-    // (the smoking-gun signal of an ESM bundle, which a classic
-    // script tag cannot load).
-    const code = bundle.replace(/\/\/# sourceMappingURL=.*$/m, '').trimEnd();
+    // The smoking-gun signal of an ESM bundle, which a classic
+    // script tag cannot load.
     expect(code).not.toMatch(/\bexport\s*\{/);
   });
 
@@ -56,3 +80,4 @@ describe('widget bundle format', () => {
     expect(bundle).not.toMatch(/^\s*import\s/m);
   });
 });
+
