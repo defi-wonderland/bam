@@ -1,11 +1,16 @@
 /**
  * Vite library build for the embeddable comments widget.
  *
- * One entry → one unhashed `dist/widget.js` (IIFE-style ES module).
- * The host page references it with `<script src="/widget.js" defer>`,
- * so the filename is part of the public contract — do not hash, do
- * not split chunks. CSS is inlined via `?inline` imports inside the
- * source, so no separate stylesheet is emitted.
+ * One entry → one unhashed `dist/widget.js`, IIFE format. The host
+ * page references it with a plain `<script src="/widget.js" defer>`
+ * — no `type="module"` required, no CORS preflight. The IIFE's
+ * named global (`window.BamComments`) exposes the package's named
+ * exports for any embedder that wants to call `mountInstance` or
+ * `derivePostIdHash` programmatically; the auto-mount side effect
+ * runs as part of the IIFE body.
+ *
+ * CSS is inlined via `?inline` imports inside the source, so no
+ * separate stylesheet is emitted.
  */
 
 import { defineConfig } from 'vite';
@@ -33,7 +38,10 @@ export default defineConfig({
     emptyOutDir: true,
     lib: {
       entry: path.resolve(here, 'src/index.ts'),
-      formats: ['es'],
+      formats: ['iife'],
+      // Required by Vite for IIFE; doubles as the global the
+      // widget hangs its named exports off (`window.BamComments`).
+      name: 'BamComments',
       fileName: () => 'widget.js',
     },
     rollupOptions: {

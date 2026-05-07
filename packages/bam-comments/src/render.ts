@@ -333,13 +333,12 @@ function renderInto(
 }
 
 function headerEl(state: MountState, hooks: RenderHooks): HTMLElement {
+  // The host page is the natural owner of section chrome (e.g.
+  // <h2>Comments</h2> on the surrounding article); the widget only
+  // emits its wallet status here so the two don't fight over the
+  // section title.
   const head = document.createElement('div');
   head.className = 'bam-header';
-
-  const title = document.createElement('h3');
-  title.className = 'bam-title';
-  title.textContent = 'Comments';
-  head.appendChild(title);
 
   if (state.account !== null) {
     const acc = document.createElement('span');
