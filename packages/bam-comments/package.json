@@ -1,0 +1,35 @@
+{
+  "name": "bam-comments",
+  "version": "0.1.0",
+  "private": true,
+  "description": "BAM-backed embeddable comments widget. Drops in via a single <script> tag and auto-mounts on every [data-bam-comments] element on the host page.",
+  "type": "module",
+  "sideEffects": false,
+  "main": "dist/widget.js",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite build --watch",
+    "clean": "rm -rf dist",
+    "test": "vitest",
+    "test:run": "vitest --run",
+    "size": "node ./scripts/check-size.mjs",
+    "lint": "eslint src test"
+  },
+  "dependencies": {
+    "bam-sdk": "workspace:*",
+    "viem": "^2.21.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "happy-dom": "^15.11.0",
+    "typescript": "^5.3.3",
+    "vite": "^5.4.0",
+    "vitest": "^1.2.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

@@ -1,0 +1,125 @@
+/*
+ * Host-page styles for the bam-blog-demo. The comments widget brings
+ * its own scoped CSS; nothing here leaks into it (and vice versa,
+ * thanks to the [data-bam-comments] selectors inside the widget).
+ */
+
+:root {
+  --bg: #f8fafc;
+  --fg: #0f172a;
+  --muted: #475569;
+  --accent: #2563eb;
+  --border: #e2e8f0;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+    Roboto, "Helvetica Neue", Arial, sans-serif;
+  line-height: 1.55;
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f172a;
+    --fg: #e2e8f0;
+    --muted: #94a3b8;
+    --accent: #60a5fa;
+    --border: #1e293b;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+}
+
+.shell {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 32px 20px 64px;
+}
+
+header.site {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 32px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+header.site .brand {
+  font-weight: 700;
+  font-size: 18px;
+}
+
+header.site nav a {
+  color: var(--muted);
+  text-decoration: none;
+  margin-left: 16px;
+}
+header.site nav a:hover {
+  color: var(--fg);
+}
+
+article h1 {
+  margin-top: 0;
+  font-size: 28px;
+  line-height: 1.2;
+}
+
+article .meta {
+  color: var(--muted);
+  font-size: 13px;
+  margin-bottom: 24px;
+}
+
+article p {
+  margin: 0 0 18px;
+}
+
+article a {
+  color: var(--accent);
+}
+
+.post-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.post-list li {
+  padding: 16px 0;
+  border-bottom: 1px solid var(--border);
+}
+.post-list li:last-child {
+  border-bottom: none;
+}
+
+.post-list a {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--fg);
+  text-decoration: none;
+}
+.post-list a:hover {
+  color: var(--accent);
+}
+
+.post-list .lede {
+  color: var(--muted);
+  font-size: 14px;
+  margin: 6px 0 0;
+}
+
+.comments {
+  margin-top: 48px;
+}
+
+.comments h2 {
+  font-size: 18px;
+  margin: 0 0 12px;
+}

@@ -3,6 +3,7 @@
   "version": "0.3.0",
   "description": "BAM SDK - Blob Authenticated Messaging protocol toolkit",
   "type": "module",
+  "sideEffects": false,
   "main": "dist/esm/index.js",
   "module": "dist/esm/index.js",
   "types": "dist/types/index.d.ts",

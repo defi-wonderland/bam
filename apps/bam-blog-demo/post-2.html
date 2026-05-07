@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>The shape of a comment — BAM Blog Demo</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <header class="site">
+        <span class="brand">BAM Blog Demo</span>
+        <nav>
+          <a href="/index.html">Home</a>
+        </nav>
+      </header>
+
+      <article>
+        <h1>The shape of a comment</h1>
+        <p class="meta">Post #2 — by the BAM team</p>
+
+        <p>
+          A bam-comments message is one ERC-8180 message. Its
+          <code>contents</code> field begins with the 32-byte
+          ERC-8179 <code>contentTag</code>
+          (<code>keccak256(utf8("bam-comments.v1"))</code>) so the
+          on-chain index keeps every comments app's stream isolated
+          from every other app sharing the same Poster.
+        </p>
+        <p>
+          After the tag prefix, the bytes are app-opaque. The widget
+          packs them as: a one-byte version, a one-byte kind
+          (comment or reply), the 32-byte
+          <code>postIdHash</code> derived from
+          <code>(siteId, postId)</code>, a uint64 timestamp,
+          (optionally) the parent message hash for replies, then a
+          length-prefixed UTF-8 body. Length-prefixing the
+          <code>siteId</code>/<code>postId</code> bytes when deriving
+          <code>postIdHash</code> keeps <code>("ab","cd")</code> from
+          colliding with <code>("abc","d")</code>.
+        </p>
+        <p>
+          Threading on the read side is a flat-list-to-tree pass with
+          orphan and cycle filtering, then display depth clamped to
+          two so the UI stays readable. The wire-level depth is
+          preserved — clients with different opinions about display
+          can still walk the full chain.
+        </p>
+      </article>
+
+      <section class="comments">
+        <h2>Comments</h2>
+        <div
+          data-bam-comments
+          data-post-id="the-shape-of-a-comment"
+          data-site-id="bam-comments-demo"
+        ></div>
+      </section>
+    </div>
+    <script src="/widget.js" defer></script>
+  </body>
+</html>
