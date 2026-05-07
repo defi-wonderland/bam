@@ -30,8 +30,13 @@ describe('widget bundle format', () => {
   });
 
   it('emits an IIFE assigned to the documented global name', () => {
-    // Vite's IIFE template: `var BamComments = (function(exports) {…})({});`
-    expect(bundle).toMatch(/^var BamComments\s*=\s*function/);
+    // Vite's current IIFE template emits
+    //   `var BamComments=function(exports){…}({});`
+    // (no whitespace around `=`, no wrapping `(` before `function`).
+    // We allow the optional wrapping paren so a future Vite version
+    // that switches to the more conventional
+    // `var BamComments = (function() {…})()` form still matches.
+    expect(bundle).toMatch(/^var BamComments\s*=\s*\(?\s*function/);
   });
 
   it('does not contain top-level `export` (ESM marker)', () => {
