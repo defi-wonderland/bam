@@ -118,6 +118,22 @@ describe('requestAccount', () => {
     });
   });
 
+  it('throws unknown on non-string first element (does not raise TypeError)', async () => {
+    // Non-spec provider returning a non-string; `.toLowerCase()` would
+    // throw outside the WalletError mapping path if we let it.
+    const provider = stub(async () => [{ address: '0xabc' }]);
+    await expect(requestAccount(provider)).rejects.toMatchObject({
+      code: 'unknown',
+    });
+  });
+
+  it('throws unknown on null first element', async () => {
+    const provider = stub(async () => [null]);
+    await expect(requestAccount(provider)).rejects.toMatchObject({
+      code: 'unknown',
+    });
+  });
+
   it('maps 4001 (user rejected) to request_rejected', async () => {
     const provider = stub(async () => {
       throw { code: 4001, message: 'user denied' };

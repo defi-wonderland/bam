@@ -52,11 +52,22 @@ export function getProvider(): Eip1193Provider | null {
 }
 
 export async function requestAccount(provider: Eip1193Provider): Promise<`0x${string}`> {
-  const accounts = await callOrThrow<string[]>(provider, 'eth_requestAccounts');
+  const accounts = await callOrThrow<unknown>(provider, 'eth_requestAccounts');
   if (!Array.isArray(accounts) || accounts.length === 0) {
     throw new WalletError('disconnected', 'no accounts returned');
   }
-  return accounts[0].toLowerCase() as `0x${string}`;
+  // Defensive: a non-spec-compliant provider could return a non-string
+  // first element; calling `.toLowerCase()` on that throws a TypeError
+  // outside the WalletError mapping path and leaks raw stack traces to
+  // the UI. Match the type guard `readExistingAccount` already uses.
+  const first = accounts[0];
+  if (typeof first !== 'string') {
+    throw new WalletError(
+      'unknown',
+      `eth_requestAccounts returned ${typeof first} at index 0`
+    );
+  }
+  return first.toLowerCase() as `0x${string}`;
 }
 
 export async function getChainId(provider: Eip1193Provider): Promise<number> {

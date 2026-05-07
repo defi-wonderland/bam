@@ -63,7 +63,15 @@ export async function getNextNonce(sender: `0x${string}`): Promise<bigint> {
   if (!/^[0-9]+$/.test(v)) {
     throw new UpstreamError('shape', `nextNonce not a decimal uint64: ${v}`);
   }
-  return BigInt(v);
+  const n = BigInt(v);
+  // Enforce the uint64 upper bound here rather than letting an
+  // out-of-range nonce blow up later inside `computeMessageHash`
+  // (which throws a generic RangeError that's hard to attribute back
+  // to upstream drift).
+  if (n > 0xffffffffffffffffn) {
+    throw new UpstreamError('shape', `nextNonce out of uint64 range: ${v}`);
+  }
+  return n;
 }
 
 export interface SubmitArgs {
