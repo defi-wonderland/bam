@@ -24,10 +24,11 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { execSync } from 'node:child_process';
+import { build } from 'vite';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const widgetPath = path.resolve(here, '..', 'dist', 'widget.js');
+const packageRoot = path.resolve(here, '..');
 
 describe('widget bundle format', () => {
   let bundle: string;
@@ -35,16 +36,25 @@ describe('widget bundle format', () => {
    *  the actual executable JS the browser parses. */
   let code: string;
 
-  beforeAll(() => {
+  beforeAll(async () => {
     // Always rebuild rather than only-when-missing. A leftover
     // `dist/widget.js` from a prior config (e.g. when `formats`
     // was still `'es'`) would otherwise let the test validate the
     // wrong artifact and pass against a bundle the current source
     // wouldn't actually emit.
-    execSync('pnpm build', { cwd: path.resolve(here, '..'), stdio: 'inherit' });
+    //
+    // Call Vite's JS API directly rather than spawning a `pnpm`
+    // subprocess — under `pnpm test` that would nest pnpm inside
+    // pnpm (workspace re-evaluation, lockfile contention, double-
+    // run hooks) for no benefit; this test only needs whatever
+    // bundle the current `vite.config.ts` would emit.
+    await build({
+      root: packageRoot,
+      logLevel: 'silent',
+    });
     bundle = readFileSync(widgetPath, 'utf-8');
     code = bundle.replace(/\/\/# sourceMappingURL=.*$/m, '').trimEnd();
-  });
+  }, 30_000);
 
   it('emits an IIFE assigned to the documented global name', () => {
     // Vite's current IIFE template emits
