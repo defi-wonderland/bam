@@ -75,7 +75,7 @@ export interface ReaderCounters {
   skippedDecode: number;
   /** Messages whose verify dispatch returned false / hit cap / timed out. */
   skippedVerify: number;
-  /** Conflicting `(author, nonce)` rejections from the substrate. */
+  /** Conflicting `(sender, nonce)` rejections from the substrate. */
   skippedConflict: number;
   /** Batches whose blob bytes could not be reached (permanent classification). */
   undecodable: number;
@@ -106,7 +106,7 @@ export type ReaderEvent =
       kind: 'message_conflict';
       txHash: Bytes32;
       messageHash: Bytes32;
-      author: Address;
+      sender: Address;
       nonce: bigint;
     }
   | {

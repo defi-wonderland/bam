@@ -50,7 +50,7 @@ const POSTER_ROWS: WriterRow[] = TAGS.map((tag, i) => ({
   contentTag: tag,
   posterSnapshot: [
     {
-      author: ('0x' + (i + 1).toString(16).padStart(40, '0')) as Address,
+      sender: ('0x' + (i + 1).toString(16).padStart(40, '0')) as Address,
       nonce: BigInt(i + 1),
       messageId: ('0x' + 'mm'.repeat(32).slice(0, 64)) as Bytes32,
       messageHash: ('0x' + 'hh'.repeat(32).slice(0, 64)) as Bytes32,

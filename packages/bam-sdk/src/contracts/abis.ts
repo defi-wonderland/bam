@@ -754,7 +754,7 @@ export const BLS_EXPOSER_ABI = [
         "internalType": "bytes32"
       },
       {
-        "name": "author",
+        "name": "sender",
         "type": "address",
         "indexed": true,
         "internalType": "address"
@@ -787,10 +787,10 @@ export const BLS_EXPOSER_ABI = [
   },
   {
     "type": "error",
-    "name": "AuthorNotRegistered",
+    "name": "SenderNotRegistered",
     "inputs": [
       {
-        "name": "author",
+        "name": "sender",
         "type": "address",
         "internalType": "address"
       }

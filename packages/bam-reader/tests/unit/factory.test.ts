@@ -194,7 +194,7 @@ describe('createReader', () => {
 
     function snapshotEntry(): BatchMessageSnapshotEntry {
       return {
-        author: ADDR,
+        sender: ADDR,
         nonce: 1n,
         messageId: MID,
         messageHash: MHASH,
@@ -223,7 +223,7 @@ describe('createReader', () => {
     function messageRow(over: Partial<MessageRow> = {}): MessageRow {
       return {
         messageId: MID,
-        author: ADDR,
+        sender: ADDR,
         nonce: 1n,
         contentTag: TAG,
         contents: new Uint8Array([1, 2, 3]),
@@ -262,7 +262,7 @@ describe('createReader', () => {
         status: 'confirmed',
       });
       expect(rows.length).toBe(1);
-      expect(rows[0].author.toLowerCase()).toBe(ADDR.toLowerCase());
+      expect(rows[0].sender.toLowerCase()).toBe(ADDR.toLowerCase());
       expect(rows[0].nonce).toBe(1n);
       await reader.close();
     });

@@ -88,7 +88,7 @@ async function readSnapshotMessages(
 ): Promise<SnapshotJoinRow[]> {
   const out: SnapshotJoinRow[] = [];
   for (const e of b.messageSnapshot) {
-    const row = await txn.getByAuthorNonce(e.author, e.nonce);
+    const row = await txn.getBySenderNonce(e.sender, e.nonce);
     out.push({
       row,
       messageIdAtConfirm: e.messageId,
@@ -120,7 +120,7 @@ function mapBatch(b: BatchRow, msgs: SnapshotJoinRow[]): SubmittedBatch {
       continue;
     }
     mappedMessages.push({
-      sender: m.row.author,
+      sender: m.row.sender,
       nonce: m.row.nonce,
       contents: new Uint8Array(m.row.contents),
       signature: new Uint8Array(m.row.signature),

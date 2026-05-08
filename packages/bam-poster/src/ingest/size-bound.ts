@@ -8,7 +8,7 @@ import type { ValidationResult } from '../types.js';
 
 /**
  * Extra slack under blob capacity — covers ZSTD framing overhead, the
- * author table (up to 255 × 20 bytes), and the per-message envelope
+ * sender table (up to 255 × 20 bytes), and the per-message envelope
  * that the Poster wraps around the wire bytes. 4 KiB is conservative
  * but still leaves ~95% of the blob for content.
  */

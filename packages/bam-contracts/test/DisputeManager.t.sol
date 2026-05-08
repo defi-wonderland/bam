@@ -13,11 +13,11 @@ contract MockExposureRecord {
     mapping(bytes32 => bool) private _exposed;
     mapping(bytes32 => SocialBlobsTypes.ExposedTweet) private _exposures;
 
-    function setExposed(bytes32 messageHash, address author) external {
+    function setExposed(bytes32 messageHash, address sender) external {
         _exposed[messageHash] = true;
         _exposures[messageHash] = SocialBlobsTypes.ExposedTweet({
             contentHash: bytes32(0),
-            author: author,
+            sender: sender,
             messageContentHash: keccak256("content"),
             timestamp: uint64(block.timestamp),
             exposedAt: uint64(block.timestamp),

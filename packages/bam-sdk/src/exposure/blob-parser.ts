@@ -6,7 +6,7 @@
  * byte positions, enabling on-chain exposure with KZG proofs.
  *
  * The exposure format stores each message in on-chain raw format:
- *   [author(20)][timestamp(4)][nonce(2)][content]
+ *   [sender(20)][timestamp(4)][nonce(2)][content]
  * This is exactly what BLSExposer.expose() verifies via KZG proofs.
  */
 
@@ -123,8 +123,8 @@ export function parseBlob(
     const rawBytes = usableData.slice(offset, offset + rawLen);
     offset += rawLen;
 
-    // Parse: [author(20)][timestamp(4)][nonce(2)][content]
-    const author = bytesToHex(rawBytes.slice(0, ADDRESS_SIZE)) as Address;
+    // Parse: [sender(20)][timestamp(4)][nonce(2)][content]
+    const sender = bytesToHex(rawBytes.slice(0, ADDRESS_SIZE)) as Address;
 
     const timestamp =
       ((rawBytes[20] << 24) | (rawBytes[21] << 16) | (rawBytes[22] << 8) | rawBytes[23]) >>> 0;
@@ -142,7 +142,7 @@ export function parseBlob(
     const messageHash = bytesToHex(keccak_256(rawBytes)) as Bytes32;
 
     messages.push({
-      author,
+      sender,
       timestamp,
       nonce,
       content,

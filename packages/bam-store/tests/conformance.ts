@@ -31,7 +31,7 @@ function messageRow(overrides: Partial<MessageRow> = {}): MessageRow {
   contents.fill(0xaa, 0, 32);
   return {
     messageId: null,
-    author: ADDR_1,
+    sender: ADDR_1,
     nonce: 1n,
     contentTag: TAG_A,
     contents,
@@ -53,7 +53,7 @@ function snapshotEntry(
   overrides: Partial<BatchMessageSnapshotEntry> = {}
 ): BatchMessageSnapshotEntry {
   return {
-    author: ADDR_1,
+    sender: ADDR_1,
     nonce: 1n,
     messageId: MID_1,
     messageHash: MHASH_1,
@@ -93,8 +93,8 @@ export function runConformance(make: StoreFactory): void {
     for (const s of created.splice(0)) await s.close();
   });
 
-  describe('upsert-observed idempotency on (author, nonce)', () => {
-    it('second upsert with same (author, nonce) and matching messageHash is a no-op', async () => {
+  describe('upsert-observed idempotency on (sender, nonce)', () => {
+    it('second upsert with same (sender, nonce) and matching messageHash is a no-op', async () => {
       const store = await newStore();
       const row = messageRow({
         status: 'confirmed',
@@ -107,7 +107,7 @@ export function runConformance(make: StoreFactory): void {
       await store.withTxn((txn) => txn.upsertBatch(batchRow({ status: 'confirmed', blockNumber: 10 })));
       await store.withTxn((txn) => txn.upsertObserved(row));
       await store.withTxn((txn) => txn.upsertObserved(row));
-      const back = await store.withTxn((txn) => txn.getByAuthorNonce(ADDR_1, 1n));
+      const back = await store.withTxn((txn) => txn.getBySenderNonce(ADDR_1, 1n));
       expect(back).not.toBeNull();
       expect(back!.status).toBe('confirmed');
     });
@@ -150,7 +150,7 @@ export function runConformance(make: StoreFactory): void {
           ingestSeq: 1,
         })
       );
-      // Upsert at same (author, nonce) but with different bytes must reject
+      // Upsert at same (sender, nonce) but with different bytes must reject
       // even though the existing row is NOT confirmed.
       const mismatching = messageRow({
         status: 'confirmed',
@@ -193,7 +193,7 @@ export function runConformance(make: StoreFactory): void {
           })
         )
       );
-      const back = await store.withTxn((txn) => txn.getByAuthorNonce(ADDR_1, 1n));
+      const back = await store.withTxn((txn) => txn.getBySenderNonce(ADDR_1, 1n));
       expect(back!.status).toBe('confirmed');
       expect(back!.messageId).toBe(MID_1);
     });
@@ -211,7 +211,7 @@ export function runConformance(make: StoreFactory): void {
             blockNumber: 10,
             txIndex: 0,
             messageIndexWithinBatch: 0,
-            author: ADDR_1,
+            sender: ADDR_1,
             nonce: 1n,
           })
         );
@@ -222,7 +222,7 @@ export function runConformance(make: StoreFactory): void {
             blockNumber: 10,
             txIndex: 0,
             messageIndexWithinBatch: 1,
-            author: ADDR_2,
+            sender: ADDR_2,
             nonce: 1n,
           })
         );
@@ -231,8 +231,8 @@ export function runConformance(make: StoreFactory): void {
       const batches = await store.withTxn((txn) => txn.listBatches({}));
       expect(batches[0].status).toBe('reorged');
       expect(batches[0].invalidatedAt).toBe(5_000);
-      const r1 = await store.withTxn((txn) => txn.getByAuthorNonce(ADDR_1, 1n));
-      const r2 = await store.withTxn((txn) => txn.getByAuthorNonce(ADDR_2, 1n));
+      const r1 = await store.withTxn((txn) => txn.getBySenderNonce(ADDR_1, 1n));
+      const r2 = await store.withTxn((txn) => txn.getBySenderNonce(ADDR_2, 1n));
       expect(r1!.status).toBe('reorged');
       expect(r2!.status).toBe('reorged');
     });
@@ -245,13 +245,13 @@ export function runConformance(make: StoreFactory): void {
         await txn.upsertBatch(batchRow({ txHash: TX_A, blockNumber: 10 }));
         await txn.upsertBatch(batchRow({ txHash: TX_B, blockNumber: 20 }));
         await txn.upsertObserved(
-          messageRow({ author: ADDR_1, nonce: 1n, batchRef: TX_B, blockNumber: 20, txIndex: 0, messageIndexWithinBatch: 0 })
+          messageRow({ sender: ADDR_1, nonce: 1n, batchRef: TX_B, blockNumber: 20, txIndex: 0, messageIndexWithinBatch: 0 })
         );
         await txn.upsertObserved(
-          messageRow({ author: ADDR_2, nonce: 1n, batchRef: TX_A, blockNumber: 10, txIndex: 3, messageIndexWithinBatch: 1 })
+          messageRow({ sender: ADDR_2, nonce: 1n, batchRef: TX_A, blockNumber: 10, txIndex: 3, messageIndexWithinBatch: 1 })
         );
         await txn.upsertObserved(
-          messageRow({ author: ADDR_1, nonce: 2n, batchRef: TX_A, blockNumber: 10, txIndex: 3, messageIndexWithinBatch: 0 })
+          messageRow({ sender: ADDR_1, nonce: 2n, batchRef: TX_A, blockNumber: 10, txIndex: 3, messageIndexWithinBatch: 0 })
         );
       });
       const rows = await store.withTxn((txn) => txn.listMessages({}));
@@ -267,13 +267,13 @@ export function runConformance(make: StoreFactory): void {
       const store = await newStore();
       await store.withTxn(async (txn) => {
         await txn.upsertObserved(
-          messageRow({ author: ADDR_1, nonce: 1n, blockNumber: 10, txIndex: 0, messageIndexWithinBatch: 0 })
+          messageRow({ sender: ADDR_1, nonce: 1n, blockNumber: 10, txIndex: 0, messageIndexWithinBatch: 0 })
         );
         await txn.upsertObserved(
-          messageRow({ author: ADDR_1, nonce: 2n, blockNumber: 10, txIndex: 0, messageIndexWithinBatch: 1 })
+          messageRow({ sender: ADDR_1, nonce: 2n, blockNumber: 10, txIndex: 0, messageIndexWithinBatch: 1 })
         );
         await txn.upsertObserved(
-          messageRow({ author: ADDR_1, nonce: 3n, blockNumber: 11, txIndex: 0, messageIndexWithinBatch: 0 })
+          messageRow({ sender: ADDR_1, nonce: 3n, blockNumber: 11, txIndex: 0, messageIndexWithinBatch: 0 })
         );
       });
       const rows = await store.withTxn((txn) =>
@@ -336,15 +336,15 @@ export function runConformance(make: StoreFactory): void {
     it('round-trips multi-entry snapshot through upsertBatch + listBatches', async () => {
       const store = await newStore();
       const snap: BatchMessageSnapshotEntry[] = [
-        snapshotEntry({ author: ADDR_1, nonce: 1n, messageIndexWithinBatch: 0, messageId: ('0x' + 'a1'.repeat(32)) as Bytes32 }),
-        snapshotEntry({ author: ADDR_2, nonce: 7n, messageIndexWithinBatch: 1, messageId: ('0x' + 'b2'.repeat(32)) as Bytes32, messageHash: ('0x' + '88'.repeat(32)) as Bytes32 }),
+        snapshotEntry({ sender: ADDR_1, nonce: 1n, messageIndexWithinBatch: 0, messageId: ('0x' + 'a1'.repeat(32)) as Bytes32 }),
+        snapshotEntry({ sender: ADDR_2, nonce: 7n, messageIndexWithinBatch: 1, messageId: ('0x' + 'b2'.repeat(32)) as Bytes32, messageHash: ('0x' + '88'.repeat(32)) as Bytes32 }),
       ];
       await store.withTxn((txn) =>
         txn.upsertBatch(batchRow({ status: 'confirmed', blockNumber: 10, messageSnapshot: snap }))
       );
       const [b] = await store.withTxn((txn) => txn.listBatches({}));
       expect(b.messageSnapshot).toHaveLength(2);
-      expect(b.messageSnapshot[0].author.toLowerCase()).toBe(ADDR_1.toLowerCase());
+      expect(b.messageSnapshot[0].sender.toLowerCase()).toBe(ADDR_1.toLowerCase());
       expect(b.messageSnapshot[0].nonce).toBe(1n);
       expect(b.messageSnapshot[1].nonce).toBe(7n);
       expect(b.messageSnapshot[1].messageIndexWithinBatch).toBe(1);
@@ -549,7 +549,7 @@ export function runConformance(make: StoreFactory): void {
         await txn.markSubmitted([{ sender: ADDR_1, nonce: 1n }], TX_A);
         await txn.upsertObserved(
           messageRow({
-            author: ADDR_2,
+            sender: ADDR_2,
             nonce: 5n,
             status: 'confirmed',
             batchRef: TX_B,
@@ -559,8 +559,8 @@ export function runConformance(make: StoreFactory): void {
           })
         );
       });
-      const poster = await store.withTxn((txn) => txn.getByAuthorNonce(ADDR_1, 1n));
-      const reader = await store.withTxn((txn) => txn.getByAuthorNonce(ADDR_2, 5n));
+      const poster = await store.withTxn((txn) => txn.getBySenderNonce(ADDR_1, 1n));
+      const reader = await store.withTxn((txn) => txn.getBySenderNonce(ADDR_2, 5n));
       expect(poster!.status).toBe('submitted');
       expect(reader!.status).toBe('confirmed');
     });
@@ -575,7 +575,7 @@ export function runConformance(make: StoreFactory): void {
         for (let i = 0; i < N; i++) {
           await txn.upsertObserved(
             messageRow({
-              author: ADDR_1,
+              sender: ADDR_1,
               nonce: BigInt(i + 1),
               status: 'confirmed',
               batchRef: TX_A,
@@ -597,7 +597,7 @@ export function runConformance(make: StoreFactory): void {
           await txn.upsertBatch(batchRow({ status: 'confirmed', blockNumber: 100 }));
           await txn.upsertObserved(
             messageRow({
-              author: ADDR_1,
+              sender: ADDR_1,
               nonce: 1n,
               status: 'confirmed',
               batchRef: TX_A,

@@ -9,7 +9,7 @@ import { StatusBadge } from './StatusBadge';
 
 interface MessageItem {
   messageHash?: string;
-  author?: string;
+  sender?: string;
   batchRef?: string;
   contents?: string;
   status?: string;
@@ -82,7 +82,7 @@ function MessagesList({ data }: { data: unknown }) {
         <thead className="text-slate-500">
           <tr>
             <th className="text-left font-normal pr-3">messageHash</th>
-            <th className="text-left font-normal pr-3">author</th>
+            <th className="text-left font-normal pr-3">sender</th>
             <th className="text-left font-normal pr-3">batchRef</th>
             <th className="text-left font-normal">text</th>
           </tr>
@@ -93,7 +93,7 @@ function MessagesList({ data }: { data: unknown }) {
             return (
               <tr key={String(m.messageHash ?? i)} className="text-slate-800">
                 <td className="pr-3 truncate max-w-[16ch]">{shortOrEmpty(m.messageHash)}</td>
-                <td className="pr-3 truncate max-w-[14ch]">{shortOrEmpty(m.author)}</td>
+                <td className="pr-3 truncate max-w-[14ch]">{shortOrEmpty(m.sender)}</td>
                 <td className="pr-3 truncate max-w-[16ch]">{shortOrEmpty(m.batchRef)}</td>
                 <td
                   className={`truncate max-w-[40ch] font-sans ${text === null ? 'text-slate-400 italic' : ''}`}

@@ -29,7 +29,7 @@ describe('api/messages — proxy', () => {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        author: '0x1234567890123456789012345678901234567890',
+        sender: '0x1234567890123456789012345678901234567890',
         timestamp: 1_700_000_000,
         nonce: 1,
         content: 'hello',
@@ -46,7 +46,7 @@ describe('api/messages — proxy', () => {
     const forwardedBody = (init as { body: Uint8Array }).body;
     const forwardedJson = JSON.parse(new TextDecoder().decode(forwardedBody));
     expect(forwardedJson.contentTag).toMatch(/^0x[0-9a-f]{64}$/);
-    expect(forwardedJson.message.author).toBe('0x1234567890123456789012345678901234567890');
+    expect(forwardedJson.message.sender).toBe('0x1234567890123456789012345678901234567890');
   });
 
   it('POST returns a rejection response verbatim (no remapping)', async () => {
@@ -60,7 +60,7 @@ describe('api/messages — proxy', () => {
     const req = new NextRequest('http://localhost/api/messages', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ author: '0x0', timestamp: 0, nonce: 0, content: '', signature: '0x' }),
+      body: JSON.stringify({ sender: '0x0', timestamp: 0, nonce: 0, content: '', signature: '0x' }),
     });
     const res = await POST(req);
     expect(res.status).toBe(400);
@@ -74,7 +74,7 @@ describe('api/messages — proxy', () => {
     const req = new NextRequest('http://localhost/api/messages', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ author: '0x0', timestamp: 0, nonce: 0, content: '', signature: '0x' }),
+      body: JSON.stringify({ sender: '0x0', timestamp: 0, nonce: 0, content: '', signature: '0x' }),
     });
     const res = await POST(req);
     expect(res.status).toBe(502);

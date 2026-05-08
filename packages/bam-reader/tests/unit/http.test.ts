@@ -144,7 +144,7 @@ describe('ReaderHttpServer', () => {
 
   function snapshotEntry(): BatchMessageSnapshotEntry {
     return {
-      author: ADDR,
+      sender: ADDR,
       nonce: 1n,
       messageId: MID,
       messageHash: MHASH,
@@ -173,7 +173,7 @@ describe('ReaderHttpServer', () => {
   function messageRow(over: Partial<MessageRow> = {}): MessageRow {
     return {
       messageId: MID,
-      author: ADDR,
+      sender: ADDR,
       nonce: 1n,
       contentTag: TAG,
       contents: new Uint8Array([0xde, 0xad, 0xbe, 0xef]),
@@ -253,7 +253,7 @@ describe('ReaderHttpServer', () => {
       expect(Array.isArray(body.messages)).toBe(true);
       expect(body.messages.length).toBe(1);
       const row = body.messages[0];
-      expect(row.author.toLowerCase()).toBe(ADDR.toLowerCase());
+      expect(row.sender.toLowerCase()).toBe(ADDR.toLowerCase());
       expect(row.nonce).toBe('1'); // bigint → decimal string
       expect(row.contents).toBe('0xdeadbeef'); // Uint8Array → 0x-hex
       expect(row.signature).toBe('0x' + '00'.repeat(65));
@@ -340,39 +340,39 @@ describe('ReaderHttpServer', () => {
       expect(await res.json()).toEqual({ error: 'bad_request', reason: 'batchRef' });
     });
 
-    it('filters by author when supplied (drives the cross-tag next-nonce scan)', async () => {
+    it('filters by sender when supplied (drives the cross-tag next-nonce scan)', async () => {
       const { port } = await bootSeededServer();
       const hit = await fetch(
-        `http://127.0.0.1:${port}/messages?contentTag=${TAG}&author=${ADDR}`
+        `http://127.0.0.1:${port}/messages?contentTag=${TAG}&sender=${ADDR}`
       );
       expect(hit.status).toBe(200);
       expect((await hit.json()).messages.length).toBe(1);
 
-      const otherAuthor = '0x' + '22'.repeat(20);
+      const otherSender = '0x' + '22'.repeat(20);
       const miss = await fetch(
-        `http://127.0.0.1:${port}/messages?contentTag=${TAG}&author=${otherAuthor}`
+        `http://127.0.0.1:${port}/messages?contentTag=${TAG}&sender=${otherSender}`
       );
       expect(miss.status).toBe(200);
       expect((await miss.json()).messages).toEqual([]);
     });
 
-    it('accepts mixed-case author and matches the lower-cased stored value', async () => {
+    it('accepts mixed-case sender and matches the lower-cased stored value', async () => {
       const { port } = await bootSeededServer();
       const upper = ('0x' + '11'.repeat(20)).toUpperCase().replace('0X', '0x');
       const res = await fetch(
-        `http://127.0.0.1:${port}/messages?contentTag=${TAG}&author=${upper}`
+        `http://127.0.0.1:${port}/messages?contentTag=${TAG}&sender=${upper}`
       );
       expect(res.status).toBe(200);
       expect((await res.json()).messages.length).toBe(1);
     });
 
-    it('rejects malformed author with 400', async () => {
+    it('rejects malformed sender with 400', async () => {
       const { port } = await bootSeededServer();
       const res = await fetch(
-        `http://127.0.0.1:${port}/messages?contentTag=${TAG}&author=0xnope`
+        `http://127.0.0.1:${port}/messages?contentTag=${TAG}&sender=0xnope`
       );
       expect(res.status).toBe(400);
-      expect(await res.json()).toEqual({ error: 'bad_request', reason: 'author' });
+      expect(await res.json()).toEqual({ error: 'bad_request', reason: 'sender' });
     });
   });
 

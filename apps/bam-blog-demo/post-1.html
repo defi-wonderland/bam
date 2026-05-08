@@ -21,16 +21,16 @@
 
         <p>
           Most messaging on Ethereum today is framed as transactions.
-          That's expensive (gas paid per author, per message), it
+          That's expensive (gas paid per sender, per message), it
           tightly couples authorship to a contract account, and it
-          makes large multi-author event streams (timelines, comment
+          makes large multi-sender event streams (timelines, comment
           threads, feeds) impractical.
         </p>
         <p>
           BAM — Blob Authenticated Messaging — sidesteps the
-          transaction frame. A single author signs an EIP-712-typed
+          transaction frame. A single sender signs an EIP-712-typed
           claim over a per-sender monotonic nonce; an aggregator
-          batches many authors into a blob and posts one transaction.
+          batches many senders into a blob and posts one transaction.
           The on-chain contract verifies the batch, indexes a
           per-tag content stream, and emits the data so any reader
           can reconstruct the messages.

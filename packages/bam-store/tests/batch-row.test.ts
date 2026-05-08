@@ -29,7 +29,7 @@ const BCH = ('0x' + '04'.repeat(32)) as Bytes32;
 
 function snapshotEntry(): BatchMessageSnapshotEntry {
   return {
-    author: ADDR_1,
+    sender: ADDR_1,
     nonce: 1n,
     messageId: MID_1,
     messageHash: MHASH_1,

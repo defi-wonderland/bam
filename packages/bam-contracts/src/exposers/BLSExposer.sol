@@ -31,8 +31,8 @@ contract BLSExposer is ReentrancyGuard, IERC_BAM_Exposer {
     /// @notice Thrown when extracted bytes don't match provided message
     error MessageMismatch();
 
-    /// @notice Thrown when author is not registered in BLS registry
-    error AuthorNotRegistered(address author);
+    /// @notice Thrown when sender is not registered in BLS registry
+    error SenderNotRegistered(address sender);
 
     // ═══════════════════════════════════════════════════════════════════════════════
     // IMMUTABLES
@@ -108,33 +108,33 @@ contract BLSExposer is ReentrancyGuard, IERC_BAM_Exposer {
             revert MessageMismatch();
         }
 
-        // 4. Parse message fields: [author(20)][timestamp(4)][nonce(2)][contents...]
-        address author = _parseAuthor(params.messageBytes);
+        // 4. Parse message fields: [sender(20)][timestamp(4)][nonce(2)][contents...]
+        address sender = _parseSender(params.messageBytes);
         uint64 nonce = _parseNonce(params.messageBytes);
         bytes calldata contents = params.messageBytes[26:];
 
         // 5. Compute standardized hashes per ERC-BAM
-        bytes32 messageHash = keccak256(abi.encodePacked(author, nonce, contents));
-        messageId = keccak256(abi.encodePacked(author, nonce, params.versionedHash));
+        bytes32 messageHash = keccak256(abi.encodePacked(sender, nonce, contents));
+        messageId = keccak256(abi.encodePacked(sender, nonce, params.versionedHash));
         bytes32 signedHash = keccak256(abi.encodePacked(_DOMAIN, messageHash));
 
         // 6. Check not already exposed
         if (_exposed[messageId]) revert AlreadyExposed(messageId);
 
         // 7. Verify BLS signature against signedHash (domain-separated)
-        _verifyBLSSignature(author, signedHash, params.blsSignature);
+        _verifyBLSSignature(sender, signedHash, params.blsSignature);
 
         // 8. Mark as exposed
         _exposed[messageId] = true;
 
         // 9. Emit standardized event
         emit MessageExposed(
-            params.versionedHash, messageId, author, msg.sender, uint64(block.timestamp)
+            params.versionedHash, messageId, sender, msg.sender, uint64(block.timestamp)
         );
 
         // 10. Optionally record to ExposureRecord
         if (address(exposureRecord) != address(0)) {
-            _recordExposure(messageId, params.versionedHash, author, params.messageBytes);
+            _recordExposure(messageId, params.versionedHash, sender, params.messageBytes);
         }
 
         return messageId;
@@ -175,31 +175,31 @@ contract BLSExposer is ReentrancyGuard, IERC_BAM_Exposer {
             revert MessageMismatch();
         }
 
-        // 4. Parse message fields: [author(20)][timestamp(4)][nonce(2)][contents...]
-        address author = _parseAuthor(params.messageBytes);
+        // 4. Parse message fields: [sender(20)][timestamp(4)][nonce(2)][contents...]
+        address sender = _parseSender(params.messageBytes);
         uint64 nonce = _parseNonce(params.messageBytes);
         bytes calldata contents = params.messageBytes[26:];
 
         // 5. Compute standardized hashes per ERC-BAM
-        bytes32 messageHash = keccak256(abi.encodePacked(author, nonce, contents));
-        messageId = keccak256(abi.encodePacked(author, nonce, contentHash));
+        bytes32 messageHash = keccak256(abi.encodePacked(sender, nonce, contents));
+        messageId = keccak256(abi.encodePacked(sender, nonce, contentHash));
         bytes32 signedHash = keccak256(abi.encodePacked(_DOMAIN, messageHash));
 
         // 6. Check not already exposed
         if (_exposed[messageId]) revert AlreadyExposed(messageId);
 
         // 7. Verify BLS signature against signedHash (domain-separated)
-        _verifyBLSSignature(author, signedHash, params.signature);
+        _verifyBLSSignature(sender, signedHash, params.signature);
 
         // 8. Mark as exposed
         _exposed[messageId] = true;
 
         // 9. Emit standardized event
-        emit MessageExposed(contentHash, messageId, author, msg.sender, uint64(block.timestamp));
+        emit MessageExposed(contentHash, messageId, sender, msg.sender, uint64(block.timestamp));
 
         // 10. Optionally record to ExposureRecord
         if (address(exposureRecord) != address(0)) {
-            _recordExposure(messageId, contentHash, author, params.messageBytes);
+            _recordExposure(messageId, contentHash, sender, params.messageBytes);
         }
 
         return messageId;
@@ -227,14 +227,14 @@ contract BLSExposer is ReentrancyGuard, IERC_BAM_Exposer {
     // INTERNAL
     // ═══════════════════════════════════════════════════════════════════════════════
 
-    /// @dev Parse author address from message bytes (offset 0, 20 bytes)
+    /// @dev Parse sender address from message bytes (offset 0, 20 bytes)
     /// @param messageBytes Raw message bytes
-    /// @return author Extracted author address
-    function _parseAuthor(bytes calldata messageBytes) internal pure returns (address author) {
-        // Message format: [author (20 bytes)][timestamp (4 bytes)][nonce (2 bytes)][content...]
+    /// @return sender Extracted sender address
+    function _parseSender(bytes calldata messageBytes) internal pure returns (address sender) {
+        // Message format: [sender (20 bytes)][timestamp (4 bytes)][nonce (2 bytes)][content...]
         assembly {
             // Load 32 bytes starting at messageBytes.offset, shift right 96 bits to get address
-            author := shr(96, calldataload(messageBytes.offset))
+            sender := shr(96, calldataload(messageBytes.offset))
         }
     }
 
@@ -242,7 +242,7 @@ contract BLSExposer is ReentrancyGuard, IERC_BAM_Exposer {
     /// @param messageBytes Raw message bytes
     /// @return nonce Extracted nonce as uint64
     function _parseNonce(bytes calldata messageBytes) internal pure returns (uint64 nonce) {
-        // Message format: [author (20 bytes)][timestamp (4 bytes)][nonce (2 bytes)][content...]
+        // Message format: [sender (20 bytes)][timestamp (4 bytes)][nonce (2 bytes)][content...]
         uint16 rawNonce;
         assembly {
             // Load 32 bytes at offset 24, shift right 240 bits to get 2 bytes
@@ -252,16 +252,16 @@ contract BLSExposer is ReentrancyGuard, IERC_BAM_Exposer {
     }
 
     /// @dev Verify BLS signature using the registry
-    /// @param author Message author
+    /// @param sender Message sender
     /// @param signedHash Domain-separated hash to verify
     /// @param signature BLS signature
-    function _verifyBLSSignature(address author, bytes32 signedHash, bytes calldata signature)
+    function _verifyBLSSignature(address sender, bytes32 signedHash, bytes calldata signature)
         internal
         view
     {
-        // Get author's BLS public key from registry
-        bytes memory pubKey = blsRegistry.getKey(author);
-        if (pubKey.length == 0) revert AuthorNotRegistered(author);
+        // Get sender's BLS public key from registry
+        bytes memory pubKey = blsRegistry.getKey(sender);
+        if (pubKey.length == 0) revert SenderNotRegistered(sender);
 
         // Verify BLS signature
         // Note: May fail if EIP-2537 precompiles not available
@@ -280,12 +280,12 @@ contract BLSExposer is ReentrancyGuard, IERC_BAM_Exposer {
     /// @dev Record exposure to ExposureRecord
     /// @param messageId Unique identifier of the message
     /// @param contentHash Content hash of the blob/batch
-    /// @param author Author address
+    /// @param sender Sender address
     /// @param messageBytes Raw message bytes for parsing timestamp
     function _recordExposure(
         bytes32 messageId,
         bytes32 contentHash,
-        address author,
+        address sender,
         bytes calldata messageBytes
     ) internal {
         // Parse timestamp from message (bytes 20-24)
@@ -302,6 +302,6 @@ contract BLSExposer is ReentrancyGuard, IERC_BAM_Exposer {
 
         // Record (may fail silently if ExposureRecord reverts)
         // Note: ExposureRecord.record still takes batchId -- pass 0 since IDs are deprecated
-        try exposureRecord.record(messageId, 0, author, msgContentHash, msgTimestamp) { } catch { }
+        try exposureRecord.record(messageId, 0, sender, msgContentHash, msgTimestamp) { } catch { }
     }
 }

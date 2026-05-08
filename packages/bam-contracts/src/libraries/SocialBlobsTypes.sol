@@ -60,14 +60,14 @@ library SocialBlobsTypes {
 
     /// @notice Record of an exposed tweet
     /// @param contentHash Content hash (versioned hash for blob, keccak256 for calldata)
-    /// @param author Author's Ethereum address
+    /// @param sender Sender's Ethereum address
     /// @param messageContentHash keccak256 hash of message content
     /// @param timestamp Original message timestamp
     /// @param exposedAt Block timestamp when exposed
     /// @param exposedBy Address that exposed the tweet
     struct ExposedTweet {
         bytes32 contentHash;
-        address author;
+        address sender;
         bytes32 messageContentHash;
         uint64 timestamp;
         uint64 exposedAt;

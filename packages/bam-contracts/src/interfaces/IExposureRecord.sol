@@ -15,12 +15,12 @@ interface IExposureRecord {
     /// @notice Emitted when an exposure is recorded
     /// @param messageHash Hash of the exposed message
     /// @param batchId ID of the batch containing the message
-    /// @param author Author's Ethereum address
+    /// @param sender Sender's Ethereum address
     /// @param exposedBy Address that recorded the exposure (typically an exposer contract)
     event ExposureRecorded(
         bytes32 indexed messageHash,
         uint256 indexed batchId,
-        address indexed author,
+        address indexed sender,
         address exposedBy
     );
 
@@ -39,13 +39,13 @@ interface IExposureRecord {
     /// @dev Permissionless - can be called by any exposer contract
     /// @param messageHash Hash of the exposed message
     /// @param batchId ID of the batch containing the message
-    /// @param author Author's Ethereum address
+    /// @param sender Sender's Ethereum address
     /// @param contentHash keccak256 hash of message content
     /// @param timestamp Original message timestamp
     function record(
         bytes32 messageHash,
         uint256 batchId,
-        address author,
+        address sender,
         bytes32 contentHash,
         uint64 timestamp
     ) external;

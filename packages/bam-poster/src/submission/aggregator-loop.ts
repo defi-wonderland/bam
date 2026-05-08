@@ -162,7 +162,7 @@ export class AggregatorLoop {
       await this.opts.store.withTxn(async (txn) => {
         for (const entry of outcome.entries) {
           const snapshot: BatchMessageSnapshotEntry[] = entry.messages.map((m, i) => ({
-            author: m.sender,
+            sender: m.sender,
             nonce: m.nonce,
             messageId: computeMessageId(m.sender, m.nonce, batchContentHash),
             messageHash: m.messageHash,
@@ -190,7 +190,7 @@ export class AggregatorLoop {
 
           for (let i = 0; i < entry.messages.length; i++) {
             const m = entry.messages[i]!;
-            const row = await txn.getByAuthorNonce(m.sender, m.nonce);
+            const row = await txn.getBySenderNonce(m.sender, m.nonce);
             if (row === null) continue;
             const messageId = computeMessageId(
               m.sender,
@@ -199,7 +199,7 @@ export class AggregatorLoop {
             );
             await txn.upsertObserved({
               messageId,
-              author: m.sender,
+              sender: m.sender,
               nonce: m.nonce,
               contentTag: entry.contentTag,
               contents: new Uint8Array(m.contents),

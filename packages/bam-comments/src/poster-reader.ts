@@ -163,18 +163,7 @@ export interface ListMessagesArgs {
 
 interface ReaderRow {
   messageHash: string;
-  /**
-   * The signing EOA. The two upstreams expose the same address under
-   * different field names: the Poster's `/pending` returns `sender`
-   * (matching the ERC-8180 message-hash input
-   * `keccak256(sender ‖ nonce ‖ contents)`); the Reader's `/messages`
-   * returns `author` (matching ERC-8180's batch encoding, where the
-   * on-chain decoder exposes a per-batch `authors[]`). Same value,
-   * different framing — we accept both rather than fork the row
-   * shape.
-   */
-  sender?: string;
-  author?: string;
+  sender: string;
   nonce: string;
   contents: string;
   status?: string;
@@ -232,9 +221,8 @@ function decodeRow(row: ReaderRow, pending: boolean): DecodedMessage | null {
   try {
     const contents = hexToBytes(row.contents);
     const { envelope } = decodeCommentContents(contents);
-    const senderField = row.sender ?? row.author;
-    if (typeof senderField !== 'string') return null;
-    const sender = senderField as `0x${string}`;
+    if (typeof row.sender !== 'string') return null;
+    const sender = row.sender as `0x${string}`;
     const nonce = BigInt(row.nonce);
     const messageHash = (computeMessageHash(sender, nonce, contents)) as `0x${string}`;
     const parentMessageHash =
