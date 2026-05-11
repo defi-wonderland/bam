@@ -217,6 +217,38 @@ export const batchesHandler: Handler = async (_req, res, ctx, extras) => {
   }
 };
 
+/**
+ * Serve raw blob bytes (`application/octet-stream`, 131072 bytes) from
+ * the local archive. 404 when the archive is unconfigured or has no
+ * entry. No fallback to beacon/Blobscan.
+ */
+export const blobByVersionedHashHandler: Handler = async (_req, res, ctx, extras) => {
+  const versionedHash = extras.pathParam;
+  if (versionedHash === null || !HEX_BYTES32_RE.test(versionedHash)) {
+    badRequest(res, 'versionedHash');
+    return;
+  }
+  try {
+    const bytes = await ctx.reader.getBlob(versionedHash as Bytes32);
+    if (bytes === null) {
+      notFound(res);
+      return;
+    }
+    res.statusCode = 200;
+    res.setHeader('Content-Type', 'application/octet-stream');
+    res.setHeader('Content-Length', String(bytes.byteLength));
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${versionedHash.toLowerCase()}.blob"`
+    );
+    // Buffer view over the same memory — no copy.
+    res.end(Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength));
+  } catch (err) {
+    logHandlerError('GET /blobs/:versionedHash', err);
+    internalError(res);
+  }
+};
+
 export const batchByTxHashHandler: Handler = async (_req, res, ctx, extras) => {
   const txHash = extras.pathParam;
   if (txHash === null || !HEX_BYTES32_RE.test(txHash)) {

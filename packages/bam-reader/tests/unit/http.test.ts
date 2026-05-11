@@ -1,3 +1,4 @@
+import { createBlob, loadTrustedSetup } from 'bam-sdk';
 import type { Address, Bytes32 } from 'bam-sdk';
 import { createMemoryStore } from 'bam-store';
 import type {
@@ -8,6 +9,8 @@ import type {
 } from 'bam-store';
 import { afterEach, describe, expect, it } from 'vitest';
 
+import type { BlobArchive } from '../../src/blob-fetch/archive.js';
+import { recomputeVersionedHash } from '../../src/blob-fetch/versioned-hash.js';
 import { createReader, type Reader } from '../../src/factory.js';
 import { ReaderHttpServer, ROUTES } from '../../src/http/server.js';
 import type { LiveTailL1Client } from '../../src/loop/live-tail.js';
@@ -233,6 +236,12 @@ describe('ReaderHttpServer', () => {
         throw new Error('boom: details that must not leak (driver/dsn)');
       },
       async getBatch() {
+        throw new Error('boom: details that must not leak (driver/dsn)');
+      },
+      async cursorBlock() {
+        throw new Error('boom: details that must not leak (driver/dsn)');
+      },
+      async getBlob() {
         throw new Error('boom: details that must not leak (driver/dsn)');
       },
     };
@@ -482,6 +491,113 @@ describe('ReaderHttpServer', () => {
     it('returns flat internal_error on a thrown read', async () => {
       const { port } = await bootThrowingServer();
       const res = await fetch(`http://127.0.0.1:${port}/batches/${TX_KNOWN}`);
+      expect(res.status).toBe(500);
+      expect(await res.json()).toEqual({ error: 'internal_error' });
+    });
+  });
+
+  // ── GET /blobs/:versionedHash ────────────────────────────────────────
+  describe('GET /blobs/:versionedHash', () => {
+    function inMemoryArchive(
+      seed: ReadonlyMap<string, Uint8Array> = new Map()
+    ): BlobArchive {
+      const store = new Map<string, Uint8Array>(
+        Array.from(seed, ([k, v]) => [k.toLowerCase(), v])
+      );
+      return {
+        async get(vh) {
+          return store.get(vh.toLowerCase()) ?? null;
+        },
+        async put(vh, bytes) {
+          store.set(vh.toLowerCase(), bytes);
+        },
+      };
+    }
+
+    async function bootWithArchive(opts: {
+      seed?: ReadonlyMap<string, Uint8Array>;
+    }): Promise<{ port: number }> {
+      const reader = await createReader(baseConfig(), {
+        l1: fakeL1({ head: 100 }),
+        store: await createMemoryStore(),
+        archive: inMemoryArchive(opts.seed),
+      });
+      cleanups.push(() => reader.close());
+      const http = await ReaderHttpServer.start({ reader, port: 0 });
+      cleanups.push(() => http.close());
+      return { port: http.port() };
+    }
+
+    let blobBytes: Uint8Array;
+    let blobVh: Bytes32;
+    let otherVh: Bytes32;
+
+    function initBlobFixtures(): void {
+      if (blobBytes) return;
+      loadTrustedSetup();
+      blobBytes = createBlob(new TextEncoder().encode('http-blob-fixture'));
+      blobVh = recomputeVersionedHash(blobBytes);
+      const other = createBlob(new TextEncoder().encode('http-blob-fixture-other'));
+      otherVh = recomputeVersionedHash(other);
+    }
+
+    it('returns raw blob bytes as application/octet-stream', async () => {
+      initBlobFixtures();
+      const { port } = await bootWithArchive({
+        seed: new Map([[blobVh, blobBytes]]),
+      });
+      const res = await fetch(`http://127.0.0.1:${port}/blobs/${blobVh}`);
+      expect(res.status).toBe(200);
+      expect(res.headers.get('content-type')).toBe('application/octet-stream');
+      expect(res.headers.get('content-length')).toBe(String(blobBytes.byteLength));
+      expect(res.headers.get('content-disposition')).toBe(
+        `attachment; filename="${blobVh}.blob"`
+      );
+      const got = new Uint8Array(await res.arrayBuffer());
+      expect(got.byteLength).toBe(blobBytes.byteLength);
+      // Round-trip via the same hash we'd verify against on disk.
+      expect(recomputeVersionedHash(got)).toBe(blobVh);
+    });
+
+    it('returns 404 not_found when the archive has no entry for that hash', async () => {
+      initBlobFixtures();
+      const { port } = await bootWithArchive({
+        seed: new Map([[blobVh, blobBytes]]),
+      });
+      const res = await fetch(`http://127.0.0.1:${port}/blobs/${otherVh}`);
+      expect(res.status).toBe(404);
+      expect(await res.json()).toEqual({ error: 'not_found' });
+    });
+
+    it('returns 404 not_found when no archive is configured at all', async () => {
+      const reader = await createReader(baseConfig(), {
+        l1: fakeL1({ head: 100 }),
+        store: await createMemoryStore(),
+        // no archive — should behave like an unconfigured cache.
+      });
+      cleanups.push(() => reader.close());
+      const http = await ReaderHttpServer.start({ reader, port: 0 });
+      cleanups.push(() => http.close());
+      const someVh = ('0x' + 'cc'.repeat(32)) as Bytes32;
+      const res = await fetch(`http://127.0.0.1:${http.port()}/blobs/${someVh}`);
+      expect(res.status).toBe(404);
+      expect(await res.json()).toEqual({ error: 'not_found' });
+    });
+
+    it('returns 400 bad_request on a malformed versionedHash', async () => {
+      const { port } = await bootWithArchive({ seed: new Map() });
+      const res = await fetch(`http://127.0.0.1:${port}/blobs/0xnotahash`);
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({
+        error: 'bad_request',
+        reason: 'versionedHash',
+      });
+    });
+
+    it('returns flat internal_error on a thrown archive read', async () => {
+      const { port } = await bootThrowingServer();
+      const someVh = ('0x' + 'cc'.repeat(32)) as Bytes32;
+      const res = await fetch(`http://127.0.0.1:${port}/blobs/${someVh}`);
       expect(res.status).toBe(500);
       expect(await res.json()).toEqual({ error: 'internal_error' });
     });

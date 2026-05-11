@@ -20,6 +20,7 @@ import {
 import {
   batchByTxHashHandler,
   batchesHandler,
+  blobByVersionedHashHandler,
   healthHandler,
   messagesHandler,
   type Handler,
@@ -52,6 +53,7 @@ export const ROUTES: BoundRoute[] = [
   { method: 'GET', path: '/messages', handler: messagesHandler },
   { method: 'GET', path: '/batches', handler: batchesHandler },
   { method: 'GET', path: '/batches/:txHash', handler: batchByTxHashHandler },
+  { method: 'GET', path: '/blobs/:versionedHash', handler: blobByVersionedHashHandler },
 ];
 
 interface MatchedRoute {

@@ -33,6 +33,11 @@ import type { Bytes32 } from 'bam-sdk';
 import { ChainIdMismatch } from './errors.js';
 import { assertChainIdMatches } from './bin/env.js';
 import {
+  createFilesystemBlobArchive,
+  verifyingArchive,
+  type BlobArchive,
+} from './blob-fetch/archive.js';
+import {
   backfill as runBackfill,
   type BackfillCounters,
 } from './loop/backfill.js';
@@ -81,6 +86,13 @@ export interface Reader {
    * `messages`. Blank-slates the configured chain's observed state.
    */
   resetAll(chainId?: number): Promise<void>;
+  /**
+   * Raw blob bytes for `versionedHash` from the local archive, or
+   * `null` when the archive is unconfigured or has no entry. No
+   * fallback to beacon/Blobscan — the archive populates naturally
+   * as batches are processed with archiving enabled.
+   */
+  getBlob(versionedHash: Bytes32): Promise<Uint8Array | null>;
 }
 
 export interface ReaderFactoryExtras {
@@ -92,6 +104,13 @@ export interface ReaderFactoryExtras {
   verifyPublicClient?: VerifyReadContractClient;
   /** Optional pre-constructed store; if absent, the factory builds one from `config.dbUrl`. */
   store?: BamStore;
+  /**
+   * Optional pre-constructed blob archive. When supplied, wins over
+   * `config.blobArchiveDir` — swap the substrate (S3, DB, …) without
+   * touching env. When neither is set, the archive is disabled and
+   * the multi-source fetcher goes straight to beacon/Blobscan.
+   */
+  archive?: BlobArchive;
   /** Optional logger; default writes to stderr. */
   logger?: (event: ReaderEvent) => void;
   /** Time between live-tail polls. Default 12s. */
@@ -142,9 +161,21 @@ export async function createReader(
   const startBlock = extras.startBlock ?? config.startBlock ?? 0;
   const pollMs = extras.livePollMs ?? DEFAULT_LIVE_POLL_MS;
 
+  // Wrap with verification at the factory boundary so the trust
+  // model is enforced for every call site (orchestrator + HTTP) and
+  // for every backend (filesystem, S3, DB, …) — not just the FS impl
+  // that happens to verify internally.
+  const rawArchive =
+    extras.archive ??
+    (config.blobArchiveDir
+      ? await createFilesystemBlobArchive({ dir: config.blobArchiveDir })
+      : undefined);
+  const archive = rawArchive ? verifyingArchive(rawArchive) : undefined;
+
   const sources = {
     beaconUrl: config.beaconUrl,
     blobscanUrl: config.blobscanUrl,
+    archive,
   };
 
   const reorgWatcher = new ReaderReorgWatcher({
@@ -290,6 +321,11 @@ export async function createReader(
       });
     },
 
+    async getBlob(versionedHash) {
+      if (!archive) return null;
+      return archive.get(versionedHash);
+    },
+
     async close() {
       stopped = true;
       if (serveResolve) serveResolve();
@@ -301,6 +337,9 @@ export async function createReader(
         // We own this store — close it. Caller-supplied stores are
         // closed by the caller.
         await store.close();
+      }
+      if (!extras.archive && archive?.close) {
+        await archive.close();
       }
     },
   };

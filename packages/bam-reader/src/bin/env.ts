@@ -131,6 +131,7 @@ export function parseEnv(
 
   const beaconUrl = optionalString(env, 'READER_BEACON_URL');
   const blobscanUrl = optionalString(env, 'READER_BLOBSCAN_URL');
+  const blobArchiveDir = optionalString(env, 'READER_BLOB_ARCHIVE_DIR');
 
   const contentTags = parseCsvTags(env.READER_CONTENT_TAGS, 'READER_CONTENT_TAGS');
 
@@ -232,6 +233,7 @@ export function parseEnv(
     bamCoreAddress,
     beaconUrl,
     blobscanUrl,
+    blobArchiveDir,
     contentTags,
     reorgWindowBlocks,
     dbUrl,
