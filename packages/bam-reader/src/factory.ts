@@ -74,6 +74,15 @@ export interface Reader {
    * reaching into `store.withTxn` directly.
    */
   cursorBlock(): Promise<number | null>;
+  /**
+   * Return the raw blob bytes for `versionedHash` from the configured
+   * local archive, or `null` when the archive is not configured or
+   * does not have the blob. The Reader does **not** fall back to
+   * beacon/Blobscan here — `/blobs/:versionedHash` is an archive
+   * read endpoint, not a fetch endpoint. The archive populates
+   * naturally as batches are processed with archiving enabled.
+   */
+  getBlob(versionedHash: Bytes32): Promise<Uint8Array | null>;
 }
 
 export interface ReaderFactoryExtras {
@@ -270,6 +279,11 @@ export async function createReader(
     async cursorBlock() {
       const cursor = await store.withTxn((txn) => txn.getCursor(config.chainId));
       return cursor?.lastBlockNumber ?? null;
+    },
+
+    async getBlob(versionedHash) {
+      if (!archive) return null;
+      return archive.get(versionedHash);
     },
 
     async close() {

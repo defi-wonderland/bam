@@ -217,6 +217,45 @@ export const batchesHandler: Handler = async (_req, res, ctx, extras) => {
   }
 };
 
+/**
+ * Serve a blob's raw bytes from the local archive. Returns 404 when the
+ * archive is not configured or does not have the blob (no fallback to
+ * beacon/Blobscan — this endpoint is an archive read, not a fetch).
+ *
+ * Body is `application/octet-stream`, exactly 131072 bytes. The
+ * archive's read path re-hashes the bytes via `assertVersionedHashMatches`
+ * before they leave the substrate; a corrupted file surfaces as a 500
+ * with `internal_error` and is logged server-side as `source_lied(archive)`
+ * by the multi-source fetcher path, but here it propagates as an
+ * unexpected error from `getBlob` itself.
+ */
+export const blobByVersionedHashHandler: Handler = async (_req, res, ctx, extras) => {
+  const versionedHash = extras.pathParam;
+  if (versionedHash === null || !HEX_BYTES32_RE.test(versionedHash)) {
+    badRequest(res, 'versionedHash');
+    return;
+  }
+  try {
+    const bytes = await ctx.reader.getBlob(versionedHash as Bytes32);
+    if (bytes === null) {
+      notFound(res);
+      return;
+    }
+    res.statusCode = 200;
+    res.setHeader('Content-Type', 'application/octet-stream');
+    res.setHeader('Content-Length', String(bytes.byteLength));
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${versionedHash.toLowerCase()}.blob"`
+    );
+    // Buffer view over the same memory — no copy.
+    res.end(Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength));
+  } catch (err) {
+    logHandlerError('GET /blobs/:versionedHash', err);
+    internalError(res);
+  }
+};
+
 export const batchByTxHashHandler: Handler = async (_req, res, ctx, extras) => {
   const txHash = extras.pathParam;
   if (txHash === null || !HEX_BYTES32_RE.test(txHash)) {
