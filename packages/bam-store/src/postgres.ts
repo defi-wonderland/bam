@@ -61,6 +61,15 @@ function isSerializationFailure(err: unknown): boolean {
   return false;
 }
 
+function isUniqueViolation(err: unknown): boolean {
+  if (typeof err !== 'object' || err === null) return false;
+  const code = (err as { code?: unknown }).code;
+  if (code === '23505') return true;
+  const cause = (err as { cause?: unknown }).cause;
+  if (cause) return isUniqueViolation(cause);
+  return false;
+}
+
 function asUint8(value: Uint8Array): Uint8Array {
   // `Buffer` is a `Uint8Array` subclass; `value.constructor === Uint8Array`
   // distinguishes a plain typed array from a Buffer without naming
@@ -295,23 +304,38 @@ function makeTxn(tx: DrizzleDb): StoreTxn {
           .delete(messagesT)
           .where(and(eq(messagesT.sender, sender), eq(messagesT.nonce, nonce)));
       }
-      await tx.insert(messagesT).values({
-        sender,
-        nonce,
-        contentTag: row.contentTag,
-        contents: row.contents,
-        signature: row.signature,
-        messageHash: row.messageHash,
-        messageId: null,
-        status: 'pending',
-        batchRef: null,
-        chainId: row.chainId,
-        ingestedAt: row.ingestedAt,
-        ingestSeq: row.ingestSeq,
-        blockNumber: null,
-        txIndex: null,
-        messageIndexWithinBatch: null,
-      });
+      // The pre-check above is best-effort. Under concurrent ingests
+      // two txns can both observe "no row" and proceed to INSERT; one
+      // loses with Postgres `23505` (unique_violation) on the
+      // `(sender, nonce)` PK. `withTxn` retries only serialization
+      // failures (`40001`), so a unique violation would otherwise leak
+      // out of the store boundary and surface as a 500 `internal_error`
+      // at the HTTP layer. Translate to the typed error so the
+      // Poster's ingest pipeline maps it to `{reason:'duplicate'}`.
+      try {
+        await tx.insert(messagesT).values({
+          sender,
+          nonce,
+          contentTag: row.contentTag,
+          contents: row.contents,
+          signature: row.signature,
+          messageHash: row.messageHash,
+          messageId: null,
+          status: 'pending',
+          batchRef: null,
+          chainId: row.chainId,
+          ingestedAt: row.ingestedAt,
+          ingestSeq: row.ingestSeq,
+          blockNumber: null,
+          txIndex: null,
+          messageIndexWithinBatch: null,
+        });
+      } catch (err) {
+        if (isUniqueViolation(err)) {
+          throw new DuplicateMessageError(row.sender, row.nonce);
+        }
+        throw err;
+      }
     },
 
     async getPendingByKey(key: PendingKey): Promise<StoreTxnPendingRow | null> {
