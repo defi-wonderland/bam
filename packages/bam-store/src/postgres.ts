@@ -744,6 +744,15 @@ function makeTxn(tx: DrizzleDb): StoreTxn {
           },
         });
     },
+    async deleteCursor(chainId: number): Promise<void> {
+      await tx.delete(readerCursorT).where(eq(readerCursorT.chainId, chainId));
+    },
+    async deleteBatches(chainId: number): Promise<void> {
+      await tx.delete(batchesT).where(eq(batchesT.chainId, chainId));
+    },
+    async deleteMessages(chainId: number): Promise<void> {
+      await tx.delete(messagesT).where(eq(messagesT.chainId, chainId));
+    },
   };
 }
 

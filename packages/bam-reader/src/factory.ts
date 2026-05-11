@@ -70,6 +70,17 @@ export interface Reader {
    * reaching into `store.withTxn` directly.
    */
   cursorBlock(): Promise<number | null>;
+  /**
+   * Drop the `reader_cursor` row for `chainId` (defaults to the
+   * configured chainId). On next `serve`, the live-tail resumes from
+   * `startBlock`. Idempotent: no-op when no row exists.
+   */
+  resetCursor(chainId?: number): Promise<void>;
+  /**
+   * `resetCursor` plus chain-scoped truncation of `batches` and
+   * `messages`. Blank-slates the configured chain's observed state.
+   */
+  resetAll(chainId?: number): Promise<void>;
 }
 
 export interface ReaderFactoryExtras {
@@ -251,6 +262,26 @@ export async function createReader(
     async cursorBlock() {
       const cursor = await store.withTxn((txn) => txn.getCursor(config.chainId));
       return cursor?.lastBlockNumber ?? null;
+    },
+
+    async resetCursor(chainId) {
+      const id = chainId ?? config.chainId;
+      await store.withTxn((txn) => txn.deleteCursor(id));
+    },
+
+    async resetAll(chainId) {
+      const id = chainId ?? config.chainId;
+      // Order within the txn doesn't matter — both tables are
+      // independent, and the cursor row is the resume pointer that the
+      // live-tail consults on next serve. We drop messages before
+      // batches purely for log-grep parity with operator intuition
+      // ("messages dropped, then batches, then cursor"); rollback on
+      // partial failure still leaves a coherent state.
+      await store.withTxn(async (txn) => {
+        await txn.deleteMessages(id);
+        await txn.deleteBatches(id);
+        await txn.deleteCursor(id);
+      });
     },
 
     async close() {
