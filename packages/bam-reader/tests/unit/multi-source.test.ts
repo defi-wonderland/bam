@@ -1,12 +1,15 @@
 import { commitToBlob, createBlob, loadTrustedSetup } from 'bam-sdk';
+import type { Bytes32 } from 'bam-sdk';
 import { beforeAll, describe, expect, it } from 'vitest';
 
+import type { BlobArchive } from '../../src/blob-fetch/archive.js';
 import type { FetchLike } from '../../src/blob-fetch/beacon.js';
 import {
   fetchBlob,
   type BlobSourceEvent,
 } from '../../src/blob-fetch/multi-source.js';
 import { recomputeVersionedHash } from '../../src/blob-fetch/versioned-hash.js';
+import { VersionedHashMismatch } from '../../src/errors.js';
 
 const PARENT_ROOT = ('0x' + 'cd'.repeat(32)) as `0x${string}`;
 const BEACON_URL = 'https://beacon.example.test';
@@ -219,5 +222,157 @@ describe('fetchBlob', () => {
       fetchImpl,
     });
     expect(got).toBeNull();
+  });
+
+  // ────────────────────────── archive integration ──────────────────────────
+
+  interface FakeArchive extends BlobArchive {
+    readonly store: Map<string, Uint8Array>;
+    readonly getCalls: Bytes32[];
+    readonly putCalls: Bytes32[];
+  }
+
+  function fakeArchive(opts?: {
+    seed?: Array<[Bytes32, Uint8Array]>;
+    getError?: () => Error;
+    putError?: () => Error;
+  }): FakeArchive {
+    const store = new Map<string, Uint8Array>(
+      (opts?.seed ?? []).map(([k, v]) => [k.toLowerCase(), v])
+    );
+    const getCalls: Bytes32[] = [];
+    const putCalls: Bytes32[] = [];
+    return {
+      store,
+      getCalls,
+      putCalls,
+      async get(vh) {
+        getCalls.push(vh);
+        if (opts?.getError) throw opts.getError();
+        const hit = store.get(vh.toLowerCase());
+        return hit ?? null;
+      },
+      async put(vh, bytes) {
+        putCalls.push(vh);
+        if (opts?.putError) throw opts.putError();
+        store.set(vh.toLowerCase(), bytes);
+      },
+    };
+  }
+
+  it('serves from archive on hit and skips the network entirely', async () => {
+    const archive = fakeArchive({ seed: [[fixtureA.versionedHash, fixtureA.blob]] });
+    let networkCalls = 0;
+    const fetchImpl: FetchLike = async () => {
+      networkCalls++;
+      return { ok: false, status: 500, json: async () => ({}) };
+    };
+    const events: BlobSourceEvent[] = [];
+    const got = await fetchBlob({
+      versionedHash: fixtureA.versionedHash,
+      parentBeaconBlockRoot: PARENT_ROOT,
+      sources: { beaconUrl: BEACON_URL, blobscanUrl: BLOBSCAN_URL },
+      archive,
+      fetchImpl,
+      logger: (e) => events.push(e),
+    });
+    expect(got).not.toBeNull();
+    expect(recomputeVersionedHash(got!)).toBe(fixtureA.versionedHash);
+    expect(networkCalls).toBe(0);
+    expect(events).toContainEqual({
+      kind: 'archive_hit',
+      versionedHash: fixtureA.versionedHash,
+    });
+    expect(archive.putCalls).toEqual([]);
+  });
+
+  it('falls through to network on archive miss and writes back', async () => {
+    const archive = fakeArchive();
+    const fetchImpl = mockFetch(
+      new Map<string, MockResponse>(beaconRoutes(fixtureA.commitmentHex, fixtureA.blob))
+    );
+    const got = await fetchBlob({
+      versionedHash: fixtureA.versionedHash,
+      parentBeaconBlockRoot: PARENT_ROOT,
+      sources: { beaconUrl: BEACON_URL, blobscanUrl: BLOBSCAN_URL },
+      archive,
+      fetchImpl,
+    });
+    expect(got).not.toBeNull();
+    expect(recomputeVersionedHash(got!)).toBe(fixtureA.versionedHash);
+    expect(archive.putCalls).toEqual([fixtureA.versionedHash]);
+    expect(archive.store.get(fixtureA.versionedHash.toLowerCase())).toBeDefined();
+  });
+
+  it('treats a lying archive like a lying upstream and falls through', async () => {
+    const archive = fakeArchive();
+    const events: BlobSourceEvent[] = [];
+    // Make archive.get() throw VersionedHashMismatch — mirrors what the
+    // filesystem archive does on a tampered file.
+    archive.get = async (vh) => {
+      throw new VersionedHashMismatch(`mismatch on ${vh}`);
+    };
+    const fetchImpl = mockFetch(
+      new Map<string, MockResponse>(beaconRoutes(fixtureA.commitmentHex, fixtureA.blob))
+    );
+    const got = await fetchBlob({
+      versionedHash: fixtureA.versionedHash,
+      parentBeaconBlockRoot: PARENT_ROOT,
+      sources: { beaconUrl: BEACON_URL, blobscanUrl: BLOBSCAN_URL },
+      archive,
+      fetchImpl,
+      logger: (e) => events.push(e),
+    });
+    expect(got).not.toBeNull();
+    expect(recomputeVersionedHash(got!)).toBe(fixtureA.versionedHash);
+    expect(events).toContainEqual({
+      kind: 'source_lied',
+      source: 'archive',
+      versionedHash: fixtureA.versionedHash,
+    });
+  });
+
+  it('swallows archive read errors and logs them', async () => {
+    const archive = fakeArchive({ getError: () => new Error('EIO: disk on fire') });
+    const events: BlobSourceEvent[] = [];
+    const fetchImpl = mockFetch(
+      new Map<string, MockResponse>(beaconRoutes(fixtureA.commitmentHex, fixtureA.blob))
+    );
+    const got = await fetchBlob({
+      versionedHash: fixtureA.versionedHash,
+      parentBeaconBlockRoot: PARENT_ROOT,
+      sources: { beaconUrl: BEACON_URL, blobscanUrl: BLOBSCAN_URL },
+      archive,
+      fetchImpl,
+      logger: (e) => events.push(e),
+    });
+    expect(got).not.toBeNull();
+    expect(events).toContainEqual({
+      kind: 'archive_read_failed',
+      versionedHash: fixtureA.versionedHash,
+      error: 'EIO: disk on fire',
+    });
+  });
+
+  it('returns network bytes even when archive write-back fails', async () => {
+    const archive = fakeArchive({ putError: () => new Error('ENOSPC') });
+    const events: BlobSourceEvent[] = [];
+    const fetchImpl = mockFetch(
+      new Map<string, MockResponse>(beaconRoutes(fixtureA.commitmentHex, fixtureA.blob))
+    );
+    const got = await fetchBlob({
+      versionedHash: fixtureA.versionedHash,
+      parentBeaconBlockRoot: PARENT_ROOT,
+      sources: { beaconUrl: BEACON_URL, blobscanUrl: BLOBSCAN_URL },
+      archive,
+      fetchImpl,
+      logger: (e) => events.push(e),
+    });
+    expect(got).not.toBeNull();
+    expect(events).toContainEqual({
+      kind: 'archive_write_failed',
+      versionedHash: fixtureA.versionedHash,
+      error: 'ENOSPC',
+    });
   });
 });

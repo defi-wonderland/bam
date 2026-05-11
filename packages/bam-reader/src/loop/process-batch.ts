@@ -31,6 +31,7 @@ import type {
   MessageRow,
 } from 'bam-store';
 
+import type { BlobArchive } from '../blob-fetch/archive.js';
 import { extractSegmentBytes } from '../blob-fetch/extract.js';
 import {
   fetchBlob as defaultFetchBlob,
@@ -60,6 +61,8 @@ export interface ProcessBatchOptions {
   l1IncludedAtUnixSec: number | null;
   store: BamStore;
   sources: { beaconUrl?: string; blobscanUrl?: string };
+  /** Optional local blob archive — read first, written back on network hit. */
+  archive?: BlobArchive;
   chainId: number;
   decodePublicClient?: ReadContractClient;
   verifyPublicClient?: VerifyReadContractClient;
@@ -103,11 +106,30 @@ function buildBlobSourceLogger(
 ): BlobSourceLogger | undefined {
   if (!log) return undefined;
   return (e) => {
-    if (e.kind === 'source_lied') {
-      log({ kind: 'blob_source_lied', versionedHash: e.versionedHash, source: e.source });
+    switch (e.kind) {
+      case 'source_lied':
+        log({ kind: 'blob_source_lied', versionedHash: e.versionedHash, source: e.source });
+        return;
+      case 'archive_hit':
+        log({ kind: 'blob_archive_hit', versionedHash: e.versionedHash });
+        return;
+      case 'archive_read_failed':
+        log({
+          kind: 'blob_archive_read_failed',
+          versionedHash: e.versionedHash,
+          error: e.error,
+        });
+        return;
+      case 'archive_write_failed':
+        log({
+          kind: 'blob_archive_write_failed',
+          versionedHash: e.versionedHash,
+          error: e.error,
+        });
+        return;
+      // The "all_sources_lied" event maps to a `blob_unreachable` log
+      // with classification deferred to the caller (T016 retention check).
     }
-    // The "all_sources_lied" event maps to a `blob_unreachable` log
-    // with classification deferred to the caller (T016 retention check).
   };
 }
 
@@ -198,6 +220,7 @@ export async function processBatch(
       versionedHash: opts.event.versionedHash,
       parentBeaconBlockRoot: opts.parentBeaconBlockRoot,
       sources: opts.sources,
+      archive: opts.archive,
       fetchImpl: opts.fetchImpl,
       logger: buildBlobSourceLogger(log),
     });

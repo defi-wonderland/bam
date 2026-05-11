@@ -41,6 +41,7 @@ import {
 import type { ReaderCounters, ReaderEvent } from '../types.js';
 import type { ReadContractClient } from '../decode/on-chain-decoder.js';
 import type { VerifyReadContractClient } from '../verify/on-chain-registry.js';
+import type { BlobArchive } from '../blob-fetch/archive.js';
 import type { FetchLike } from '../blob-fetch/beacon.js';
 
 export interface LiveTailL1Client extends LogScanClient, BlockSource {
@@ -82,6 +83,7 @@ export interface LiveTailOptions {
   ethCallGasCap: bigint;
   ethCallTimeoutMs: number;
   sources: { beaconUrl?: string; blobscanUrl?: string };
+  archive?: BlobArchive;
   decodePublicClient?: ReadContractClient;
   verifyPublicClient?: VerifyReadContractClient;
   fetchImpl?: FetchLike;
@@ -256,6 +258,7 @@ function buildProcessOpts(
     l1IncludedAtUnixSec,
     store: opts.store,
     sources: opts.sources,
+    archive: opts.archive,
     chainId: opts.chainId,
     decodePublicClient: opts.decodePublicClient,
     verifyPublicClient: opts.verifyPublicClient,

@@ -33,6 +33,10 @@ import type { Bytes32 } from 'bam-sdk';
 import { ChainIdMismatch } from './errors.js';
 import { assertChainIdMatches } from './bin/env.js';
 import {
+  createFilesystemBlobArchive,
+  type BlobArchive,
+} from './blob-fetch/archive.js';
+import {
   backfill as runBackfill,
   type BackfillCounters,
 } from './loop/backfill.js';
@@ -81,6 +85,13 @@ export interface ReaderFactoryExtras {
   verifyPublicClient?: VerifyReadContractClient;
   /** Optional pre-constructed store; if absent, the factory builds one from `config.dbUrl`. */
   store?: BamStore;
+  /**
+   * Optional pre-constructed blob archive. When supplied, wins over
+   * `config.blobArchiveDir` — swap the substrate (S3, DB, …) without
+   * touching env. When neither is set, the archive is disabled and
+   * the multi-source fetcher goes straight to beacon/Blobscan.
+   */
+  archive?: BlobArchive;
   /** Optional logger; default writes to stderr. */
   logger?: (event: ReaderEvent) => void;
   /** Time between live-tail polls. Default 12s. */
@@ -130,6 +141,12 @@ export async function createReader(
     blobscanUrl: config.blobscanUrl,
   };
 
+  const archive =
+    extras.archive ??
+    (config.blobArchiveDir
+      ? createFilesystemBlobArchive({ dir: config.blobArchiveDir })
+      : undefined);
+
   const reorgWatcher = new ReaderReorgWatcher({
     store,
     blockSource: extras.l1,
@@ -159,6 +176,7 @@ export async function createReader(
               ethCallGasCap: config.ethCallGasCap,
               ethCallTimeoutMs: config.ethCallTimeoutMs,
               sources,
+              archive,
               decodePublicClient: extras.decodePublicClient,
               verifyPublicClient: extras.verifyPublicClient,
               counters,
@@ -196,6 +214,7 @@ export async function createReader(
         ethCallGasCap: config.ethCallGasCap,
         ethCallTimeoutMs: config.ethCallTimeoutMs,
         sources,
+        archive,
         decodePublicClient: extras.decodePublicClient,
         verifyPublicClient: extras.verifyPublicClient,
         counters,
@@ -264,6 +283,10 @@ export async function createReader(
         // We own this store — close it. Caller-supplied stores are
         // closed by the caller.
         await store.close();
+      }
+      if (!extras.archive && archive?.close) {
+        // Same ownership rule for the archive: we close what we built.
+        await archive.close();
       }
     },
   };
