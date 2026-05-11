@@ -106,7 +106,13 @@ export interface ReaderFactoryExtras {
 
 const DEFAULT_LIVE_POLL_MS = 12_000;
 
-async function createStoreFromDbUrl(dbUrl: string): Promise<BamStore> {
+/**
+ * Resolve a `READER_DB_URL` to a concrete `BamStore`. Exported so the
+ * `reset` subcommand can open the store directly without going through
+ * `createReader` — which would otherwise require a working RPC for its
+ * chain-id assertion.
+ */
+export async function openStore(dbUrl: string): Promise<BamStore> {
   if (dbUrl === 'memory:' || dbUrl === 'memory') {
     return createMemoryStore();
   }
@@ -131,7 +137,7 @@ export async function createReader(
   // 1. Validate chainId at construction (red-team C-3).
   await assertChainIdMatches(extras.l1, config.chainId);
 
-  const store = extras.store ?? (await createStoreFromDbUrl(config.dbUrl));
+  const store = extras.store ?? (await openStore(config.dbUrl));
   const counters = emptyCounters();
   const startBlock = extras.startBlock ?? config.startBlock ?? 0;
   const pollMs = extras.livePollMs ?? DEFAULT_LIVE_POLL_MS;

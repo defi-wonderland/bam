@@ -252,4 +252,12 @@ describe('parseArgs — reset subcommand', () => {
   it('rejects unknown flags under reset', () => {
     expect(() => parseArgs(['reset', '--cursor', '--force'])).toThrow(/unknown flag/);
   });
+
+  it('treats `reset --help` as a usage request, not an unknown flag', () => {
+    // `runCli` intercepts --help anywhere in argv and prints usage to
+    // stdout / exits 0; if parseArgs is reached, it surfaces the usage
+    // string via ArgParseError rather than the `unknown flag` path.
+    expect(() => parseArgs(['reset', '--help'])).toThrow(/serve|backfill|reset/);
+    expect(() => parseArgs(['reset', '-h'])).toThrow(/serve|backfill|reset/);
+  });
 });

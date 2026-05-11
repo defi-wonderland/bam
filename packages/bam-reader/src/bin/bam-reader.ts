@@ -28,7 +28,7 @@ import { getDeployment } from 'bam-sdk';
 
 import { ChainIdMismatch, UnknownChainDeploymentError } from '../errors.js';
 import { EnvConfigError, parseEnv } from './env.js';
-import { createReader, type Reader } from '../factory.js';
+import { createReader, openStore, type Reader } from '../factory.js';
 import { ReaderHttpServer } from '../http/server.js';
 import type { LiveTailL1Client } from '../loop/live-tail.js';
 import type { ReaderConfig } from '../types.js';
@@ -256,6 +256,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
       if (flag === '--cursor') cursorFlag = true;
       else if (flag === '--all') allFlag = true;
       else if (flag === '--yes') confirmed = true;
+      else if (flag === '--help' || flag === '-h') throw new ArgParseError(usage());
       else throw new ArgParseError(`unknown flag: ${flag}`);
     }
     if (cursorFlag && allFlag) {
@@ -341,8 +342,10 @@ export function usage(): string {
 export async function runCli(
   argv: string[] = process.argv.slice(2)
 ): Promise<void> {
-  // Surface --help / -h before env parsing so users without env see usage.
-  if (argv.length > 0 && (argv[0] === '--help' || argv[0] === '-h')) {
+  // Surface --help / -h before env parsing so users without env see
+  // usage. Accept the flag anywhere in argv so `bam-reader reset --help`
+  // behaves the same as `bam-reader --help`.
+  if (argv.some((a) => a === '--help' || a === '-h')) {
     process.stdout.write(`${usage()}\n`);
     process.exit(0);
   }
@@ -366,6 +369,59 @@ export async function runCli(
       process.exit(2);
     }
     throw err;
+  }
+
+  // `reset` is a pure DB operation — open the store directly and skip
+  // the RPC roundtrip that `createReader` performs at construction
+  // (chain-id assertion). Operators need to be able to rewind state
+  // when the upstream RPC is down.
+  if (args.subcommand === 'reset') {
+    if (!args.confirmed) {
+      const scopeDesc =
+        args.scope === 'cursor'
+          ? 'the reader cursor row'
+          : 'the reader cursor, batches, and messages rows';
+      process.stderr.write(
+        `bam-reader: reset --${args.scope} would delete ${scopeDesc} ` +
+          `for chainId=${cfg.chainId}. Re-run with --yes to confirm.\n`
+      );
+      process.exit(4);
+    }
+    let store;
+    try {
+      store = await openStore(cfg.dbUrl);
+    } catch (err) {
+      process.stderr.write(
+        `bam-reader: reset failed to open store: ${err instanceof Error ? err.message : String(err)}\n`
+      );
+      process.exit(1);
+    }
+    try {
+      await store.withTxn(async (txn) => {
+        if (args.scope === 'all') {
+          await txn.deleteMessages(cfg.chainId);
+          await txn.deleteBatches(cfg.chainId);
+        }
+        await txn.deleteCursor(cfg.chainId);
+      });
+      process.stdout.write(
+        args.scope === 'cursor'
+          ? `[bam-reader] reset --cursor: cleared cursor for chainId=${cfg.chainId}\n`
+          : `[bam-reader] reset --all: cleared cursor, batches, messages for chainId=${cfg.chainId}\n`
+      );
+      await store.close();
+      process.exit(0);
+    } catch (err) {
+      process.stderr.write(
+        `bam-reader: reset failed: ${err instanceof Error ? err.message : String(err)}\n`
+      );
+      try {
+        await store.close();
+      } catch {
+        /* ignore */
+      }
+      process.exit(1);
+    }
   }
 
   const adapter = createViemL1(cfg.rpcUrl);
@@ -398,50 +454,6 @@ export async function runCli(
       process.exit(3);
     }
     throw err;
-  }
-
-  if (args.subcommand === 'reset') {
-    if (!args.confirmed) {
-      const scopeDesc =
-        args.scope === 'cursor'
-          ? 'the reader cursor row'
-          : 'the reader cursor, batches, and messages rows';
-      process.stderr.write(
-        `bam-reader: reset --${args.scope} would delete ${scopeDesc} ` +
-          `for chainId=${cfg.chainId}. Re-run with --yes to confirm.\n`
-      );
-      try {
-        await reader.close();
-      } catch {
-        /* ignore */
-      }
-      process.exit(4);
-    }
-    try {
-      if (args.scope === 'cursor') {
-        await reader.resetCursor();
-        process.stdout.write(
-          `[bam-reader] reset --cursor: cleared cursor for chainId=${cfg.chainId}\n`
-        );
-      } else {
-        await reader.resetAll();
-        process.stdout.write(
-          `[bam-reader] reset --all: cleared cursor, batches, messages for chainId=${cfg.chainId}\n`
-        );
-      }
-      await reader.close();
-      process.exit(0);
-    } catch (err) {
-      process.stderr.write(
-        `bam-reader: reset failed: ${err instanceof Error ? err.message : String(err)}\n`
-      );
-      try {
-        await reader.close();
-      } catch {
-        /* ignore */
-      }
-      process.exit(1);
-    }
   }
 
   if (args.subcommand === 'backfill') {
