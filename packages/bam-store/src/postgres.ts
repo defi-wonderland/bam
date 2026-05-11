@@ -1,4 +1,4 @@
-import { and, asc, eq, gt, gte, isNotNull, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, gte, isNotNull, ne, sql } from 'drizzle-orm';
 import { drizzle as drizzlePglite } from 'drizzle-orm/pglite';
 import type { PgDatabase, PgQueryResultHKT } from 'drizzle-orm/pg-core';
 import { PGlite } from '@electric-sql/pglite';
@@ -18,6 +18,7 @@ import type {
   StoreTxn,
   StoreTxnPendingRow,
 } from './types.js';
+import { DuplicateMessageError } from './errors.js';
 import { decodeNonce, encodeNonce } from './nonce-codec.js';
 import { SCHEMA_VERSION } from './schema/index.js';
 import {
@@ -288,7 +289,7 @@ function makeTxn(tx: DrizzleDb): StoreTxn {
         .where(and(eq(messagesT.sender, sender), eq(messagesT.nonce, nonce)));
       if (existing[0]) {
         if (existing[0].status !== 'reorged') {
-          throw new Error('insertPending: duplicate (sender, nonce)');
+          throw new DuplicateMessageError(row.sender, row.nonce);
         }
         await tx
           .delete(messagesT)
@@ -414,6 +415,33 @@ function makeTxn(tx: DrizzleDb): StoreTxn {
             lastMessageHash: row.lastMessageHash,
           },
         });
+    },
+    async getMaxNonReorgedNonce(
+      sender: Address
+    ): Promise<NonceTrackerRow | null> {
+      const senderKey = sender.toLowerCase();
+      // `messages.nonce` is the fixed-width zero-padded decimal string
+      // produced by `encodeNonce`, so a lexicographic ORDER BY on the
+      // text column matches numeric order. Reorged slots are
+      // reclaimable, so they don't count as "occupied".
+      const rows = await tx
+        .select({
+          nonce: messagesT.nonce,
+          messageHash: messagesT.messageHash,
+        })
+        .from(messagesT)
+        .where(
+          and(eq(messagesT.sender, senderKey), ne(messagesT.status, 'reorged'))
+        )
+        .orderBy(desc(messagesT.nonce))
+        .limit(1);
+      const r = rows[0];
+      if (!r) return null;
+      return {
+        sender: senderKey as Address,
+        lastNonce: decodeNonce(r.nonce),
+        lastMessageHash: r.messageHash as Bytes32,
+      };
     },
 
     // ── unified-schema lifecycle transitions ─────────────────────────
