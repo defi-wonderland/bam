@@ -92,8 +92,15 @@ export function verifyingArchive(inner: BlobArchive): BlobArchive {
  * Writes use temp-file + rename for atomicity-of-name. fsync is *not*
  * called: durability matters less than correctness here, and the
  * content-addressed naming means a torn file is detected on next read
- * (via `assertVersionedHashMatches`) and treated as a cache miss —
- * the network refetch + rewrite recovers without operator action.
+ * (via the verifying-archive wrapper that callers should compose on
+ * top — see `verifyingArchive`) and treated as a cache miss; the
+ * network refetch + rewrite recovers without operator action.
+ *
+ * `get` enforces a **size bound** (refuses to buffer a wrong-size
+ * file via `stat`-on-handle before any payload read) but does **not**
+ * re-hash the bytes — that's the wrapper's job, so the cost is paid
+ * exactly once. The factory composes them; direct callers should
+ * use `verifyingArchive(createFilesystemBlobArchive(…))`.
  *
  * The root directory is created (and implicitly probed for
  * writability) at construction so configuration errors surface at
@@ -140,7 +147,6 @@ export async function createFilesystemBlobArchive(
             `archive short read: ${bytesRead} of ${FULL_BLOB_BYTE_LENGTH} for ${vh}`
           );
         }
-        assertVersionedHashMatches(bytes, versionedHash);
         return bytes;
       } finally {
         await handle.close();

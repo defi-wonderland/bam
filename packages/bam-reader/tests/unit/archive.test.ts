@@ -63,14 +63,22 @@ describe('createFilesystemBlobArchive', () => {
     expect(recomputeVersionedHash(got!)).toBe(versionedHash);
   });
 
-  it('throws VersionedHashMismatch when the stored bytes do not match the key', async () => {
+  it('returns wrong-hash bytes raw — content verification is the wrapper\'s job', async () => {
+    // FS get only enforces a size bound; content verification lives in
+    // `verifyingArchive`. This guarantees the hash recompute is paid
+    // exactly once per read (the factory always composes them).
     const archive = await createFilesystemBlobArchive({ dir });
     const shard = versionedHash.slice(2, 4);
     const shardDir = path.join(dir, shard);
     await mkdir(shardDir, { recursive: true });
     await writeFile(path.join(shardDir, `${versionedHash}.blob`), otherBlob);
+    const got = await archive.get(versionedHash);
+    expect(got).not.toBeNull();
+    expect(recomputeVersionedHash(got!)).not.toBe(versionedHash);
 
-    await expect(archive.get(versionedHash)).rejects.toBeInstanceOf(VersionedHashMismatch);
+    // Composed with the wrapper (canonical setup), it throws.
+    const verified = verifyingArchive(archive);
+    await expect(verified.get(versionedHash)).rejects.toBeInstanceOf(VersionedHashMismatch);
   });
 
   it('throws VersionedHashMismatch on a wrong-size entry without buffering it', async () => {
