@@ -48,7 +48,7 @@ export const bamStoreSchema = pgTable(
 export const messages = pgTable(
   'messages',
   {
-    author: text('author').notNull(),
+    sender: text('sender').notNull(),
     nonce: text('nonce').notNull(),
     contentTag: text('content_tag').notNull(),
     contents: bytea('contents').notNull(),
@@ -65,7 +65,7 @@ export const messages = pgTable(
     messageIndexWithinBatch: bigint('message_index_within_batch', { mode: 'number' }),
   },
   (t) => ({
-    pk: primaryKey({ columns: [t.author, t.nonce] }),
+    pk: primaryKey({ columns: [t.sender, t.nonce] }),
     tagStatusSeq: index('idx_messages_tag_status_seq').on(
       t.contentTag,
       t.status,

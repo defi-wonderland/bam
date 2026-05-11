@@ -98,7 +98,7 @@ describe('ReaderMessagesPanel', () => {
           kind: 'ok',
           data: {
             messages: [
-              { messageHash: '0x' + '11'.repeat(32), author: '0x' + '22'.repeat(20) },
+              { messageHash: '0x' + '11'.repeat(32), sender: '0x' + '22'.repeat(20) },
             ],
           },
           fetchedAt: FETCHED_AT,
@@ -121,7 +121,7 @@ describe('ReaderMessagesPanel', () => {
   it('renders every returned item (no hardcoded slice cap)', () => {
     const messages = Array.from({ length: 73 }, (_, i) => ({
       messageHash: '0x' + String(i).padStart(2, '0').repeat(32).slice(0, 64),
-      author: '0x' + 'aa'.repeat(20),
+      sender: '0x' + 'aa'.repeat(20),
     }));
     const m = new Map<Bytes32, PanelResult<unknown>>([
       [TAG_A, { kind: 'ok', data: { messages }, fetchedAt: FETCHED_AT }],

@@ -62,7 +62,7 @@ export interface StoreTxn {
    * first-class state for an async-receipt variant).
    */
   markSubmitted(keys: PendingKey[], batchRef: Bytes32): Promise<void>;
-  /** Reader-side: idempotent upsert of an observed message keyed by (author, nonce). */
+  /** Reader-side: idempotent upsert of an observed message keyed by (sender, nonce). */
   upsertObserved(row: MessageRow): Promise<void>;
   /**
    * Poster-side or Reader-side: mark a submitted/confirmed row as reorged.
@@ -89,7 +89,7 @@ export interface StoreTxn {
   // ── unified-schema reads ──────────────────────────────────────────────
   listMessages(query: MessagesQuery): Promise<MessageRow[]>;
   getByMessageId(messageId: Bytes32): Promise<MessageRow | null>;
-  getByAuthorNonce(author: Address, nonce: bigint): Promise<MessageRow | null>;
+  getBySenderNonce(sender: Address, nonce: bigint): Promise<MessageRow | null>;
 
   // ── unified-schema batch CRUD ────────────────────────────────────────
   /**
@@ -179,7 +179,7 @@ export interface BamStore {
  *
  * The spec's "nonce-replay-across-batchers" duplicate flow is not a
  * distinct lifecycle state. Today the substrate rejects a different-bytes
- * arrival at the same `(author, nonce)`; first-confirmed wins and the
+ * arrival at the same `(sender, nonce)`; first-confirmed wins and the
  * later arrival has nowhere to land. The Reader (004) will introduce a
  * proper duplicate sink (separate table or alternate key) for that path.
  */
@@ -207,7 +207,7 @@ export interface ChainCoord {
 export interface MessageRow {
   /** ERC-8180 messageId. Populated only once the message is part of a confirmed batch. */
   messageId: Bytes32 | null;
-  author: Address;
+  sender: Address;
   nonce: bigint;
   contentTag: Bytes32;
   contents: Uint8Array;
@@ -241,7 +241,7 @@ export interface MessageRow {
  * batch. Stored on the batch row, immutable after first write.
  */
 export interface BatchMessageSnapshotEntry {
-  author: Address;
+  sender: Address;
   nonce: bigint;
   /** ERC-8180 batch-scoped messageId, computed at confirmation. */
   messageId: Bytes32;
@@ -282,7 +282,7 @@ export interface BatchRow {
   /**
    * L1 type-3 transaction `from` — the entity that paid gas to publish
    * the blob and call `registerBlobBatch` (ERC-8180). Distinct from the
-   * per-message `author`, which signs each message inside the batch.
+   * per-message `sender`, which signs each message inside the batch.
    * Set by both writers (Poster from its signer; Reader from the
    * `BlobBatchRegistered` indexed `submitter` arg).
    */
@@ -318,7 +318,7 @@ export interface ReaderCursorRow {
 
 export interface MessagesQuery {
   contentTag?: Bytes32;
-  author?: Address;
+  sender?: Address;
   status?: MessageStatus;
   /** Restrict to messages attached to a specific batch. */
   batchRef?: Bytes32;

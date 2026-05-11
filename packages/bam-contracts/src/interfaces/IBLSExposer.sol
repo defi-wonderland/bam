@@ -15,13 +15,13 @@ interface IBLSExposer {
     /// @notice Emitted when a tweet is exposed on-chain
     /// @param contentHash Content hash (versioned hash for blob, keccak256 for calldata)
     /// @param messageHash keccak256 hash of the message
-    /// @param author Author's Ethereum address
+    /// @param sender Sender's Ethereum address
     /// @param exposer Address that called expose
     /// @param timestamp Block timestamp when exposed
     event TweetExposed(
         bytes32 indexed contentHash,
         bytes32 indexed messageHash,
-        address indexed author,
+        address indexed sender,
         address exposer,
         uint64 timestamp
     );
@@ -42,8 +42,8 @@ interface IBLSExposer {
     /// @notice Thrown when extracted bytes don't match provided message
     error MessageMismatch();
 
-    /// @notice Thrown when author is not registered in BLS registry
-    error AuthorNotRegistered(address author);
+    /// @notice Thrown when sender is not registered in BLS registry
+    error SenderNotRegistered(address sender);
 
     /// @notice Thrown when message has already been exposed
     error AlreadyExposed(bytes32 messageHash);

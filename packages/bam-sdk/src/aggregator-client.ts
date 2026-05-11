@@ -19,7 +19,7 @@
  *
  * // Submit message
  * const message = {
- *   author: '0x...',
+ *   sender: '0x...',
  *   timestamp: Date.now() / 1000 | 0,
  *   nonce: 1,
  *   content: 'Hello!',

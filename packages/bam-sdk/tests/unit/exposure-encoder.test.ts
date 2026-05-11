@@ -15,21 +15,21 @@ import {
 import type { ExposureMessage } from '../../src/exposure/encoder.js';
 import { MAGIC_EXPOSURE, EXPOSURE_HEADER_SIZE, EXPOSURE_MSG_PREFIX_SIZE } from '../../src/constants.js';
 
-const author1: Address = '0x1111111111111111111111111111111111111111';
-const author2: Address = '0x2222222222222222222222222222222222222222';
+const sender1: Address = '0x1111111111111111111111111111111111111111';
+const sender2: Address = '0x2222222222222222222222222222222222222222';
 const baseTimestamp = 1706400000;
 
-function msg(author: Address, timestamp: number, nonce: number, content: string): ExposureMessage {
-  return { author, timestamp, nonce, content };
+function msg(sender: Address, timestamp: number, nonce: number, content: string): ExposureMessage {
+  return { sender, timestamp, nonce, content };
 }
 
 describe('buildRawMessageBytes', () => {
   it('should encode message in on-chain format', () => {
-    const raw = buildRawMessageBytes(author1, baseTimestamp, 0, 'Hello');
-    // [author(20)][timestamp(4)][nonce(2)][content(5)] = 31 bytes
+    const raw = buildRawMessageBytes(sender1, baseTimestamp, 0, 'Hello');
+    // [sender(20)][timestamp(4)][nonce(2)][content(5)] = 31 bytes
     expect(raw.length).toBe(31);
 
-    // Author
+    // Sender
     expect(raw[0]).toBe(0x11);
     expect(raw[19]).toBe(0x11);
 
@@ -49,7 +49,7 @@ describe('buildRawMessageBytes', () => {
 
 describe('encodeExposureBatch', () => {
   it('should encode a single message', () => {
-    const batch = encodeExposureBatch([msg(author1, baseTimestamp, 0, 'Test')]);
+    const batch = encodeExposureBatch([msg(sender1, baseTimestamp, 0, 'Test')]);
 
     expect(batch.messageCount).toBe(1);
     expect(batch.headerSize).toBe(EXPOSURE_HEADER_SIZE);
@@ -69,9 +69,9 @@ describe('encodeExposureBatch', () => {
 
   it('should encode multiple messages', () => {
     const messages = [
-      msg(author1, baseTimestamp, 0, 'First'),
-      msg(author2, baseTimestamp + 10, 1, 'Second'),
-      msg(author1, baseTimestamp + 20, 1, 'Third'),
+      msg(sender1, baseTimestamp, 0, 'First'),
+      msg(sender2, baseTimestamp + 10, 1, 'Second'),
+      msg(sender1, baseTimestamp + 20, 1, 'Third'),
     ];
 
     const batch = encodeExposureBatch(messages);
@@ -91,8 +91,8 @@ describe('encodeExposureBatch', () => {
 
   it('should store messages in on-chain raw format at claimed offsets', () => {
     const messages = [
-      msg(author1, baseTimestamp, 0, 'Hello'),
-      msg(author2, baseTimestamp + 5, 3, 'World'),
+      msg(sender1, baseTimestamp, 0, 'Hello'),
+      msg(sender2, baseTimestamp + 5, 3, 'World'),
     ];
 
     const batch = encodeExposureBatch(messages);
@@ -102,7 +102,7 @@ describe('encodeExposureBatch', () => {
       const length = batch.messageLengths[i];
       const extracted = batch.data.slice(offset, offset + length);
       const expected = buildRawMessageBytes(
-        messages[i].author,
+        messages[i].sender,
         messages[i].timestamp,
         messages[i].nonce,
         messages[i].content
@@ -118,7 +118,7 @@ describe('encodeExposureBatch', () => {
   it('should include aggregate signature when provided', () => {
     const aggSig = new Uint8Array(48).fill(0xab);
     const batch = encodeExposureBatch(
-      [msg(author1, baseTimestamp, 0, 'Test')],
+      [msg(sender1, baseTimestamp, 0, 'Test')],
       aggSig
     );
 
@@ -133,12 +133,12 @@ describe('encodeExposureBatch', () => {
 
 describe('decodeExposureBatch', () => {
   it('should roundtrip single message', () => {
-    const original = [msg(author1, baseTimestamp, 42, 'Hello world!')];
+    const original = [msg(sender1, baseTimestamp, 42, 'Hello world!')];
     const encoded = encodeExposureBatch(original);
     const decoded = decodeExposureBatch(encoded.data);
 
     expect(decoded.messageCount).toBe(1);
-    expect(decoded.messages[0].author).toBe(author1);
+    expect(decoded.messages[0].sender).toBe(sender1);
     expect(decoded.messages[0].timestamp).toBe(baseTimestamp);
     expect(decoded.messages[0].nonce).toBe(42);
     expect(decoded.messages[0].content).toBe('Hello world!');
@@ -146,9 +146,9 @@ describe('decodeExposureBatch', () => {
 
   it('should roundtrip multiple messages', () => {
     const original = [
-      msg(author1, baseTimestamp, 0, 'First message'),
-      msg(author2, baseTimestamp + 100, 5, 'Second message'),
-      msg(author1, baseTimestamp + 200, 1, 'Third message with more content here'),
+      msg(sender1, baseTimestamp, 0, 'First message'),
+      msg(sender2, baseTimestamp + 100, 5, 'Second message'),
+      msg(sender1, baseTimestamp + 200, 1, 'Third message with more content here'),
     ];
 
     const encoded = encodeExposureBatch(original);
@@ -156,7 +156,7 @@ describe('decodeExposureBatch', () => {
 
     expect(decoded.messageCount).toBe(3);
     for (let i = 0; i < original.length; i++) {
-      expect(decoded.messages[i].author).toBe(original[i].author);
+      expect(decoded.messages[i].sender).toBe(original[i].sender);
       expect(decoded.messages[i].timestamp).toBe(original[i].timestamp);
       expect(decoded.messages[i].nonce).toBe(original[i].nonce);
       expect(decoded.messages[i].content).toBe(original[i].content);
@@ -164,11 +164,11 @@ describe('decodeExposureBatch', () => {
   });
 
   it('should preserve rawBytes in decoded output', () => {
-    const original = [msg(author1, baseTimestamp, 7, 'Content')];
+    const original = [msg(sender1, baseTimestamp, 7, 'Content')];
     const encoded = encodeExposureBatch(original);
     const decoded = decodeExposureBatch(encoded.data);
 
-    const expected = buildRawMessageBytes(author1, baseTimestamp, 7, 'Content');
+    const expected = buildRawMessageBytes(sender1, baseTimestamp, 7, 'Content');
     expect(decoded.messages[0].rawBytes).toEqual(expected);
   });
 
@@ -181,7 +181,7 @@ describe('decodeExposureBatch', () => {
   it('should roundtrip aggregate signature', () => {
     const aggSig = new Uint8Array(48).fill(0xcd);
     const encoded = encodeExposureBatch(
-      [msg(author1, baseTimestamp, 0, 'Test')],
+      [msg(sender1, baseTimestamp, 0, 'Test')],
       aggSig
     );
     const decoded = decodeExposureBatch(encoded.data);
@@ -194,9 +194,9 @@ describe('decodeExposureBatch', () => {
 describe('byte offset correctness', () => {
   it('should have offsets that extract correct rawBytes from batch data', () => {
     const messages = [
-      msg(author1, baseTimestamp, 0, 'Short'),
-      msg(author2, baseTimestamp + 1, 1, 'A longer message with more content'),
-      msg(author1, baseTimestamp + 2, 2, 'x'),
+      msg(sender1, baseTimestamp, 0, 'Short'),
+      msg(sender2, baseTimestamp + 1, 1, 'A longer message with more content'),
+      msg(sender1, baseTimestamp + 2, 2, 'x'),
     ];
 
     const batch = encodeExposureBatch(messages);
@@ -210,7 +210,7 @@ describe('byte offset correctness', () => {
 
       // Build expected rawBytes independently
       const expected = buildRawMessageBytes(
-        messages[i].author,
+        messages[i].sender,
         messages[i].timestamp,
         messages[i].nonce,
         messages[i].content
@@ -224,9 +224,9 @@ describe('byte offset correctness', () => {
 
   it('should have contiguous message layout', () => {
     const messages = [
-      msg(author1, baseTimestamp, 0, 'A'),
-      msg(author1, baseTimestamp, 1, 'BB'),
-      msg(author1, baseTimestamp, 2, 'CCC'),
+      msg(sender1, baseTimestamp, 0, 'A'),
+      msg(sender1, baseTimestamp, 1, 'BB'),
+      msg(sender1, baseTimestamp, 2, 'CCC'),
     ];
 
     const batch = encodeExposureBatch(messages);

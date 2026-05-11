@@ -13,7 +13,7 @@ export const DEFAULT_RATE_LIMIT: RateLimitConfig = {
 
 /**
  * Sliding-window rate limiter keyed on the **signer address** (the
- * on-chain protocol identity the author claims in the envelope).
+ * on-chain protocol identity the sender claims in the envelope).
  * CROPS-P preserved: we never persist or log an IP.
  *
  * Runs after the size check and before crypto, so CPU-grief spam with

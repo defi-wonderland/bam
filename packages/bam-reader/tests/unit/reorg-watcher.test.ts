@@ -161,12 +161,12 @@ describe('ReaderReorgWatcher.tick', () => {
   it('does not re-enqueue messages of a reorged batch to pending', async () => {
     const store = await createMemoryStore();
     const tx = ('0x' + 'ff'.repeat(32)) as Bytes32;
-    const author = '0x000000000000000000000000000000000000aaaa' as Address;
+    const sender = '0x000000000000000000000000000000000000aaaa' as Address;
     await store.withTxn(async (txn) => {
       await txn.upsertBatch(makeBatch({ txHash: tx, blockNumber: 95 }));
       await txn.upsertObserved({
         messageId: ('0x' + '11'.repeat(32)) as Bytes32,
-        author,
+        sender,
         nonce: 1n,
         contentTag: TAG,
         contents: new Uint8Array(32),

@@ -19,8 +19,8 @@ contract ExposureRecord is IExposureRecord {
     /// @dev Array of all exposed message hashes
     bytes32[] private _exposedHashes;
 
-    /// @dev Mapping from author to their exposed message hashes
-    mapping(address => bytes32[]) private _authorExposures;
+    /// @dev Mapping from sender to their exposed message hashes
+    mapping(address => bytes32[]) private _senderExposures;
 
     // ═══════════════════════════════════════════════════════════════════════════════
     // RECORDING
@@ -30,7 +30,7 @@ contract ExposureRecord is IExposureRecord {
     function record(
         bytes32 messageHash,
         uint256,
-        address author,
+        address sender,
         bytes32 contentHash,
         uint64 timestamp
     ) external {
@@ -41,7 +41,7 @@ contract ExposureRecord is IExposureRecord {
         // Note: msg.sender is the exposer contract (e.g., BLSExposer)
         _exposures[messageHash] = SocialBlobsTypes.ExposedTweet({
             contentHash: bytes32(0),
-            author: author,
+            sender: sender,
             messageContentHash: contentHash,
             timestamp: timestamp,
             exposedAt: uint64(block.timestamp),
@@ -49,9 +49,9 @@ contract ExposureRecord is IExposureRecord {
         });
 
         _exposedHashes.push(messageHash);
-        _authorExposures[author].push(messageHash);
+        _senderExposures[sender].push(messageHash);
 
-        emit ExposureRecorded(messageHash, 0, author, msg.sender);
+        emit ExposureRecorded(messageHash, 0, sender, msg.sender);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════════
@@ -85,17 +85,17 @@ contract ExposureRecord is IExposureRecord {
         return _exposedHashes.length;
     }
 
-    /// @notice Get exposures by author
-    /// @param author Author address
-    /// @return hashes Array of message hashes exposed by author
-    function getExposuresByAuthor(address author) external view returns (bytes32[] memory hashes) {
-        return _authorExposures[author];
+    /// @notice Get exposures by sender
+    /// @param sender Sender address
+    /// @return hashes Array of message hashes exposed by sender
+    function getExposuresBySender(address sender) external view returns (bytes32[] memory hashes) {
+        return _senderExposures[sender];
     }
 
-    /// @notice Get exposure count by author
-    /// @param author Author address
-    /// @return count Number of messages exposed by author
-    function exposureCountByAuthor(address author) external view returns (uint256 count) {
-        return _authorExposures[author].length;
+    /// @notice Get exposure count by sender
+    /// @param sender Sender address
+    /// @return count Number of messages exposed by sender
+    function exposureCountBySender(address sender) external view returns (uint256 count) {
+        return _senderExposures[sender].length;
     }
 }

@@ -68,7 +68,7 @@ function asUint8(value: Uint8Array): Uint8Array {
 }
 
 interface RawMessage {
-  author: string;
+  sender: string;
   nonce: string;
   contentTag: string;
   // node-postgres returns Buffer (a Uint8Array subclass) and PGLite
@@ -108,7 +108,7 @@ interface RawBatch {
 function mapMessage(raw: RawMessage): MessageRow {
   return {
     messageId: raw.messageId as Bytes32 | null,
-    author: raw.author as Address,
+    sender: raw.sender as Address,
     nonce: decodeNonce(raw.nonce),
     contentTag: raw.contentTag as Bytes32,
     contents: asUint8(raw.contents),
@@ -152,12 +152,12 @@ function mapPending(raw: RawMessage): StoreTxnPendingRow {
   // we should silently coerce to 0.
   if (raw.ingestedAt === null || raw.ingestSeq === null || raw.chainId === null) {
     throw new Error(
-      `mapPending: pending row (${raw.author}, ${raw.nonce}) has null ingest metadata`
+      `mapPending: pending row (${raw.sender}, ${raw.nonce}) has null ingest metadata`
     );
   }
   return {
     contentTag: raw.contentTag as Bytes32,
-    sender: raw.author as Address,
+    sender: raw.sender as Address,
     nonce: decodeNonce(raw.nonce),
     contents: asUint8(raw.contents),
     signature: asUint8(raw.signature),
@@ -280,22 +280,22 @@ function makeTxn(tx: DrizzleDb): StoreTxn {
   return {
     // ── pending CRUD (bridged to messages) ──────────────────────────
     async insertPending(row: StoreTxnPendingRow): Promise<void> {
-      const author = row.sender.toLowerCase();
+      const sender = row.sender.toLowerCase();
       const nonce = encodeNonce(row.nonce);
       const existing = await tx
         .select({ status: messagesT.status })
         .from(messagesT)
-        .where(and(eq(messagesT.author, author), eq(messagesT.nonce, nonce)));
+        .where(and(eq(messagesT.sender, sender), eq(messagesT.nonce, nonce)));
       if (existing[0]) {
         if (existing[0].status !== 'reorged') {
           throw new Error('insertPending: duplicate (sender, nonce)');
         }
         await tx
           .delete(messagesT)
-          .where(and(eq(messagesT.author, author), eq(messagesT.nonce, nonce)));
+          .where(and(eq(messagesT.sender, sender), eq(messagesT.nonce, nonce)));
       }
       await tx.insert(messagesT).values({
-        author,
+        sender,
         nonce,
         contentTag: row.contentTag,
         contents: row.contents,
@@ -319,7 +319,7 @@ function makeTxn(tx: DrizzleDb): StoreTxn {
         .from(messagesT)
         .where(
           and(
-            eq(messagesT.author, key.sender.toLowerCase()),
+            eq(messagesT.sender, key.sender.toLowerCase()),
             eq(messagesT.nonce, encodeNonce(key.nonce)),
             eq(messagesT.status, 'pending')
           )
@@ -429,7 +429,7 @@ function makeTxn(tx: DrizzleDb): StoreTxn {
         const res = await tx.execute(sql`
           UPDATE messages SET status = 'submitted', batch_ref = ${batchRef}
           WHERE status = 'pending'
-            AND (author, nonce) IN (${tupleList})
+            AND (sender, nonce) IN (${tupleList})
         `);
         const rowCount = execRowCount(res);
         if (rowCount !== slice.length) {
@@ -441,21 +441,21 @@ function makeTxn(tx: DrizzleDb): StoreTxn {
     },
 
     async upsertObserved(row: MessageRow): Promise<void> {
-      const author = row.author.toLowerCase();
+      const sender = row.sender.toLowerCase();
       const nonce = encodeNonce(row.nonce);
       const existing = await tx.execute<{
         status: string;
         message_hash: string;
       }>(sql`
         SELECT status, message_hash FROM messages
-        WHERE author = ${author} AND nonce = ${nonce}
+        WHERE sender = ${sender} AND nonce = ${nonce}
       `);
       const existingRow = (existing as { rows: Array<{ status: string; message_hash: string }> })
         .rows[0];
       if (existingRow) {
         if (existingRow.message_hash !== row.messageHash) {
           throw new Error(
-            'upsertObserved: existing row has a different messageHash at the same (author, nonce). ' +
+            'upsertObserved: existing row has a different messageHash at the same (sender, nonce). ' +
               'The nonce-replay-across-batchers duplicate flow is deferred to 004-reader.'
           );
         }
@@ -465,17 +465,17 @@ function makeTxn(tx: DrizzleDb): StoreTxn {
       }
       await tx.execute(sql`
         INSERT INTO messages
-          (author, nonce, content_tag, contents, signature, message_hash,
+          (sender, nonce, content_tag, contents, signature, message_hash,
            message_id, status, batch_ref, chain_id, ingested_at, ingest_seq,
            block_number, tx_index, message_index_within_batch)
-        VALUES (${author}, ${nonce}, ${row.contentTag},
+        VALUES (${sender}, ${nonce}, ${row.contentTag},
                 ${row.contents}, ${row.signature},
                 ${row.messageHash}, ${row.messageId}, ${row.status},
                 ${row.batchRef}, ${row.chainId},
                 ${row.ingestedAt}, ${row.ingestSeq},
                 ${row.blockNumber}, ${row.txIndex},
                 ${row.messageIndexWithinBatch})
-        ON CONFLICT (author, nonce) DO UPDATE SET
+        ON CONFLICT (sender, nonce) DO UPDATE SET
           content_tag                = EXCLUDED.content_tag,
           contents                   = EXCLUDED.contents,
           signature                  = EXCLUDED.signature,
@@ -530,7 +530,7 @@ function makeTxn(tx: DrizzleDb): StoreTxn {
     async listMessages(query: MessagesQuery): Promise<MessageRow[]> {
       const conds = [
         query.contentTag !== undefined ? eq(messagesT.contentTag, query.contentTag) : undefined,
-        query.author !== undefined ? eq(messagesT.author, query.author.toLowerCase()) : undefined,
+        query.sender !== undefined ? eq(messagesT.sender, query.sender.toLowerCase()) : undefined,
         query.status !== undefined ? eq(messagesT.status, query.status) : undefined,
         query.batchRef !== undefined ? eq(messagesT.batchRef, query.batchRef) : undefined,
         query.sinceBlock !== undefined
@@ -566,13 +566,13 @@ function makeTxn(tx: DrizzleDb): StoreTxn {
       return rows[0] ? mapMessage(rows[0] as unknown as RawMessage) : null;
     },
 
-    async getByAuthorNonce(author: Address, nonce: bigint): Promise<MessageRow | null> {
+    async getBySenderNonce(sender: Address, nonce: bigint): Promise<MessageRow | null> {
       const rows = await tx
         .select()
         .from(messagesT)
         .where(
           and(
-            eq(messagesT.author, author.toLowerCase()),
+            eq(messagesT.sender, sender.toLowerCase()),
             eq(messagesT.nonce, encodeNonce(nonce))
           )
         );

@@ -9,13 +9,13 @@
  * `batches.message_snapshot` is a JSON-encoded
  * `BatchMessageSnapshotEntry[]` written at confirmation. The snapshot is
  * how the substrate represents the M:N batch ↔ messages relationship
- * without a join table: a single message's `(author, nonce)` may appear
+ * without a join table: a single message's `(sender, nonce)` may appear
  * in multiple batches' snapshots over its lifecycle (resubmission after
  * reorg), while `messages.batch_ref` only ever holds the latest batch.
  * Adapters preserve a non-empty snapshot across upserts.
  */
 
-export const SCHEMA_VERSION = 5;
+export const SCHEMA_VERSION = 6;
 
 export {
   bamStoreSchema,

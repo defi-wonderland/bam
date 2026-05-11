@@ -3,12 +3,12 @@
  * @module bam-sdk/exposure/encoder
  *
  * Encodes messages in on-chain raw format for KZG-verifiable exposure.
- * Each message is stored as [author(20)][timestamp(4)][nonce(2)][content],
+ * Each message is stored as [sender(20)][timestamp(4)][nonce(2)][content],
  * which is exactly the format BLSExposer.expose() verifies.
  *
  * Format:
  *   Header: [magic(4)][version(1)][flags(1)][msgCount(2)][aggregateSig(48)]
- *   Messages: [len(2)][rawBytes: author(20)+ts(4)+nonce(2)+content(N)] ...
+ *   Messages: [len(2)][rawBytes: sender(20)+ts(4)+nonce(2)+content(N)] ...
  */
 
 import type { Address } from '../types.js';
@@ -27,7 +27,7 @@ import {
 const FLAG_HAS_AGGREGATE_SIG = 0x01;
 
 export interface ExposureMessage {
-  author: Address;
+  sender: Address;
   timestamp: number;
   nonce: number;
   content: string;
@@ -35,17 +35,17 @@ export interface ExposureMessage {
 
 /**
  * Build raw message bytes in on-chain format.
- * Format: [author(20)][timestamp(4)][nonce(2)][content]
+ * Format: [sender(20)][timestamp(4)][nonce(2)][content]
  */
 export function buildRawMessageBytes(
-  author: Address,
+  sender: Address,
   timestamp: number,
   nonce: number,
   content: string
 ): Uint8Array {
-  const authorHex = author.startsWith('0x') ? author.slice(2) : author;
-  if (!/^[0-9a-fA-F]{40}$/.test(authorHex)) {
-    throw new Error(`Invalid address: ${author} (expected 20-byte hex string)`);
+  const senderHex = sender.startsWith('0x') ? sender.slice(2) : sender;
+  if (!/^[0-9a-fA-F]{40}$/.test(senderHex)) {
+    throw new Error(`Invalid address: ${sender} (expected 20-byte hex string)`);
   }
   if (!Number.isInteger(timestamp) || timestamp < 0 || timestamp > 0xffffffff) {
     throw new Error(`Invalid timestamp: ${timestamp} (must be uint32)`);
@@ -57,7 +57,7 @@ export function buildRawMessageBytes(
   const contentBytes = new TextEncoder().encode(content);
   const result = new Uint8Array(ADDRESS_SIZE + 4 + 2 + contentBytes.length);
   for (let i = 0; i < ADDRESS_SIZE; i++) {
-    result[i] = parseInt(authorHex.slice(i * 2, i * 2 + 2), 16);
+    result[i] = parseInt(senderHex.slice(i * 2, i * 2 + 2), 16);
   }
 
   // Timestamp (4 bytes, big-endian)
@@ -100,7 +100,7 @@ export function encodeExposureBatch(
 
   // Build raw bytes for each message
   const rawBytesList: Uint8Array[] = messages.map((m) =>
-    buildRawMessageBytes(m.author, m.timestamp, m.nonce, m.content)
+    buildRawMessageBytes(m.sender, m.timestamp, m.nonce, m.content)
   );
 
   // Calculate total size
@@ -251,14 +251,14 @@ export function decodeExposureBatch(data: Uint8Array): DecodedExposureBatch {
     const rawBytes = data.slice(offset, offset + rawLen);
     offset += rawLen;
 
-    // Parse: [author(20)][timestamp(4)][nonce(2)][content]
+    // Parse: [sender(20)][timestamp(4)][nonce(2)][content]
     if (rawLen < 26) {
       throw new Error(`Message ${i} too short: ${rawLen} bytes (min 26)`);
     }
 
-    const authorBytes = rawBytes.slice(0, ADDRESS_SIZE);
-    const author = ('0x' +
-      Array.from(authorBytes)
+    const senderBytes = rawBytes.slice(0, ADDRESS_SIZE);
+    const sender = ('0x' +
+      Array.from(senderBytes)
         .map((b) => b.toString(16).padStart(2, '0'))
         .join('')) as Address;
 
@@ -275,7 +275,7 @@ export function decodeExposureBatch(data: Uint8Array): DecodedExposureBatch {
       content = '[Invalid UTF-8]';
     }
 
-    messages.push({ author, timestamp, nonce, content, rawBytes });
+    messages.push({ sender, timestamp, nonce, content, rawBytes });
   }
 
   return {

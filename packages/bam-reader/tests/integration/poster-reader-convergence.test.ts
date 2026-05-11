@@ -76,14 +76,14 @@ describe('Poster + Reader convergence', () => {
       // ── Poster path: write a confirmed BatchRow + MessageRows.
       const posterSnapshot: BatchMessageSnapshotEntry[] = [
         {
-          author: m1.message.sender,
+          sender: m1.message.sender,
           nonce: 1n,
           messageId: computeMessageId(m1.message.sender, 1n, batchContentHash),
           messageHash: m1.messageHash,
           messageIndexWithinBatch: 0,
         },
         {
-          author: m2.message.sender,
+          sender: m2.message.sender,
           nonce: 2n,
           messageId: computeMessageId(m2.message.sender, 2n, batchContentHash),
           messageHash: m2.messageHash,
@@ -111,7 +111,7 @@ describe('Poster + Reader convergence', () => {
         for (const [i, sm] of [m1, m2].entries()) {
           await txn.upsertObserved({
             messageId: computeMessageId(sm.message.sender, sm.message.nonce, batchContentHash),
-            author: sm.message.sender,
+            sender: sm.message.sender,
             nonce: sm.message.nonce,
             contentTag: TAG,
             contents: new Uint8Array(sm.message.contents),
@@ -235,7 +235,7 @@ describe('Poster + Reader convergence', () => {
       const batchContentHash = VERSIONED_HASH;
       const posterSnapshot: BatchMessageSnapshotEntry[] = [
         {
-          author: m1.message.sender,
+          sender: m1.message.sender,
           nonce: 1n,
           messageId: computeMessageId(m1.message.sender, 1n, batchContentHash),
           messageHash: m1.messageHash,

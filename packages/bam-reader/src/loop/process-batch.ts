@@ -14,7 +14,7 @@
  *  - Per-message verify failure → drop that message from the snapshot
  *    *and* from the batch's `MessageRow` writes (red-team C-8).
  *    Increments `skippedVerify`.
- *  - Substrate `(author, nonce)` conflict → catch, log, continue
+ *  - Substrate `(sender, nonce)` conflict → catch, log, continue
  *    (red-team B-2). Increments `skippedConflict`.
  *
  * Multi-tag re-registration of the same `versionedHash` is handled
@@ -96,7 +96,7 @@ function isZeroAddress(addr: Address): boolean {
 
 function isConflictError(err: unknown): boolean {
   if (!(err instanceof Error)) return false;
-  return err.message.includes('different messageHash at the same (author, nonce)');
+  return err.message.includes('different messageHash at the same (sender, nonce)');
 }
 
 function buildBlobSourceLogger(
@@ -338,7 +338,7 @@ export async function processBatch(
   //    of which messages dropped on verify.
   const batchContentHash = opts.event.versionedHash;
   const snapshot: BatchMessageSnapshotEntry[] = verified.map((v) => ({
-    author: v.message.sender,
+    sender: v.message.sender,
     nonce: v.message.nonce,
     messageId: computeMessageId(v.message.sender, v.message.nonce, batchContentHash),
     messageHash: v.messageHash,
@@ -364,7 +364,7 @@ export async function processBatch(
       );
       const row: MessageRow = {
         messageId,
-        author: v.message.sender,
+        sender: v.message.sender,
         nonce: v.message.nonce,
         contentTag: opts.event.contentTag,
         contents: new Uint8Array(v.message.contents),
@@ -389,7 +389,7 @@ export async function processBatch(
             kind: 'message_conflict',
             txHash: opts.event.txHash,
             messageHash: v.messageHash,
-            author: v.message.sender,
+            sender: v.message.sender,
             nonce: v.message.nonce,
           });
           continue;

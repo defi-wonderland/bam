@@ -78,7 +78,7 @@ export function defaultBatchPolicy(
 
       // Age trigger: oldest picked message has been pending too long.
       // Use `ingestedAt` (Poster-side, not caller-controlled); the
-      // author-signed `timestamp` is attacker-controlled and would let
+      // sender-signed `timestamp` is attacker-controlled and would let
       // a malicious client set a far-future timestamp to prevent the
       // age trigger from ever firing for their batch.
       //

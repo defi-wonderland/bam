@@ -27,7 +27,7 @@ interface ReaderBatchRow {
   submittedAt: number | null;
   l1IncludedAtUnixSec: number | null;
   submitter: string | null;
-  messageSnapshot: Array<{ author: string }>;
+  messageSnapshot: Array<{ sender: string }>;
 }
 
 /**
