@@ -35,10 +35,14 @@ All row writes go through idempotent upserts (`upsertBatch`,
 `upsertObserved`), so re-processing a range is safe — the second pass
 just refreshes the same rows. Unreachable blobs (beacon retention is
 ~18 days; older payloads depend on Blobscan as a fallback) surface as
-`counters.undecodable`; a re-pass will retry them. Per-block writes
-and cursor advance are atomic. When `READER_BLOB_ARCHIVE_DIR` is set,
-re-running a range also populates the archive for previously-observed
-batches — `archive.put` fires on every successful network fetch.
+`counters.undecodable`; a re-pass will retry them. The per-batch
+upserts and the subsequent cursor advance land in separate `withTxn`
+calls today, so a crash between the last batch and the cursor write
+will leave durable rows under a stale cursor — the idempotent-upsert
+invariant means the next run reprocesses them safely. When
+`READER_BLOB_ARCHIVE_DIR` is set, re-running a range also populates
+the archive for previously-observed batches — `archive.put` fires on
+every successful network fetch.
 
 **`backfill --from N --to M` rewinds the cursor as a side effect.**
 `setCursor` is an unconditional upsert with no monotonicity guard, so
@@ -58,8 +62,9 @@ bam-reader reset --all    --yes   # also drop batches + messages
 `--yes` is required; without it the command prints what it would
 delete and exits non-zero. `reset` is a pure DB operation — it does
 not contact the RPC and does not touch the blob archive directory
-(content-addressed; clear it separately with `rm -rf $READER_BLOB_ARCHIVE_DIR`
-if desired).
+(content-addressed; clear it separately with
+`rm -rf -- "${READER_BLOB_ARCHIVE_DIR:?READER_BLOB_ARCHIVE_DIR not set}"`
+if desired — double-check the value before running).
 
 **Full blank slate.** To wipe the entire substrate, either
 `TRUNCATE reader_cursor, batches, messages` against the configured
