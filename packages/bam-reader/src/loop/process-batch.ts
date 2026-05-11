@@ -35,6 +35,7 @@ import { extractSegmentBytes } from '../blob-fetch/extract.js';
 import {
   fetchBlob as defaultFetchBlob,
   type BlobSourceLogger,
+  type BlobSources,
 } from '../blob-fetch/multi-source.js';
 import { decode as defaultDecode, type DecodeOptions } from '../decode/dispatch.js';
 import type { ReadContractClient } from '../decode/on-chain-decoder.js';
@@ -59,7 +60,7 @@ export interface ProcessBatchOptions {
   /** L1 block timestamp (seconds) for `BatchRow.l1IncludedAtUnixSec`. */
   l1IncludedAtUnixSec: number | null;
   store: BamStore;
-  sources: { beaconUrl?: string; blobscanUrl?: string };
+  sources: BlobSources;
   chainId: number;
   decodePublicClient?: ReadContractClient;
   verifyPublicClient?: VerifyReadContractClient;
@@ -103,11 +104,30 @@ function buildBlobSourceLogger(
 ): BlobSourceLogger | undefined {
   if (!log) return undefined;
   return (e) => {
-    if (e.kind === 'source_lied') {
-      log({ kind: 'blob_source_lied', versionedHash: e.versionedHash, source: e.source });
+    switch (e.kind) {
+      case 'source_lied':
+        log({ kind: 'blob_source_lied', versionedHash: e.versionedHash, source: e.source });
+        return;
+      case 'archive_hit':
+        log({ kind: 'blob_archive_hit', versionedHash: e.versionedHash });
+        return;
+      case 'archive_read_failed':
+        log({
+          kind: 'blob_archive_read_failed',
+          versionedHash: e.versionedHash,
+          error: e.error,
+        });
+        return;
+      case 'archive_write_failed':
+        log({
+          kind: 'blob_archive_write_failed',
+          versionedHash: e.versionedHash,
+          error: e.error,
+        });
+        return;
+      // The "all_sources_lied" event maps to a `blob_unreachable` log
+      // with classification deferred to the caller (T016 retention check).
     }
-    // The "all_sources_lied" event maps to a `blob_unreachable` log
-    // with classification deferred to the caller (T016 retention check).
   };
 }
 

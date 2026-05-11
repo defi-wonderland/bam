@@ -8,6 +8,8 @@
 
 import type { Address, Bytes32 } from 'bam-sdk';
 
+import type { BlobSourceName } from './blob-fetch/multi-source.js';
+
 // ═══════════════════════════════════════════════════════════════════════
 // ReaderConfig — caller-supplied wiring.
 // ═══════════════════════════════════════════════════════════════════════
@@ -25,6 +27,14 @@ export interface ReaderConfig {
   beaconUrl?: string;
   /** Optional Blobscan base URL. Fallback blob source when set. */
   blobscanUrl?: string;
+  /**
+   * Optional local blob-archive directory. When set, the multi-source
+   * fetcher reads from this directory first (keyed by versioned hash)
+   * and writes successful network fetches back. The default backend is
+   * the filesystem; the factory accepts a pre-built `BlobArchive` via
+   * `extras.archive` to swap substrates (S3, DB-resident bytea, …).
+   */
+  blobArchiveDir?: string;
   /**
    * Optional content-tag allowlist. When present, the discovery scanner
    * filters `BlobBatchRegistered` events by this set; absent ⇒ all tags.
@@ -118,8 +128,11 @@ export type ReaderEvent =
   | {
       kind: 'blob_source_lied';
       versionedHash: Bytes32;
-      source: 'beacon' | 'blobscan';
+      source: BlobSourceName;
     }
+  | { kind: 'blob_archive_hit'; versionedHash: Bytes32 }
+  | { kind: 'blob_archive_read_failed'; versionedHash: Bytes32; error: string }
+  | { kind: 'blob_archive_write_failed'; versionedHash: Bytes32; error: string }
   | { kind: 'cursor_advanced'; chainId: number; blockNumber: number }
   | { kind: 'reorg_detected'; txHash: Bytes32 }
   | {

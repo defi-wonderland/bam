@@ -9,3 +9,14 @@ bounded `eth_call` to the named contract), and persists the resulting
 A separate reorg-watcher loop reconciles in-window confirmed batches
 against the canonical chain. Two operating modes: `serve` (live-tail
 daemon) and `backfill --from N --to M` (one-shot historical run).
+
+### Blob archive (optional)
+
+When `READER_BLOB_ARCHIVE_DIR` is set, the multi-source fetcher reads
+from a local directory (keyed by versioned hash) before going to
+beacon/Blobscan, and writes successful network fetches back. Archived
+blobs are exposed via `GET /blobs/:versionedHash` as
+`application/octet-stream` (131072 bytes); 404 when not in the archive
+or no archive is configured. The substrate is pluggable — supply a
+custom `BlobArchive` via `createReader({...}, { archive })` to back it
+with S3 or DB-resident bytea without touching the env.
