@@ -34,6 +34,21 @@ export async function GET() {
   const baseFees = trimNextBlock(feeResult.result.baseFeePerGas);
   const blobFees = trimNextBlock(feeResult.result.baseFeePerBlobGas);
 
+  // Fail loud rather than silently returning "0 gwei" if the RPC's response
+  // is missing either array — otherwise the UI would display free costs.
+  if (baseFees.length === 0 || blobFees.length === 0) {
+    const missing = [
+      baseFees.length === 0 ? 'baseFeePerGas' : null,
+      blobFees.length === 0 ? 'baseFeePerBlobGas' : null,
+    ]
+      .filter(Boolean)
+      .join(', ');
+    return NextResponse.json(
+      { error: `RPC eth_feeHistory missing ${missing}` },
+      { status: 502 },
+    );
+  }
+
   return NextResponse.json(
     {
       latestBaseFeeWei: latest(baseFees).toString(),
