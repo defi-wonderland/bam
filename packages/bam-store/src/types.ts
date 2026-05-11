@@ -136,6 +136,29 @@ export interface StoreTxn {
   // ── reader cursor ────────────────────────────────────────────────────
   getCursor(chainId: number): Promise<ReaderCursorRow | null>;
   setCursor(row: ReaderCursorRow): Promise<void>;
+  /**
+   * Reader-side: drop the cursor row for `chainId`. No-op if no row
+   * exists. Used by the `bam-reader reset --cursor` CLI to rewind a
+   * deployment to "start from `startBlock` on next serve" without
+   * touching the batch / message tables.
+   */
+  deleteCursor(chainId: number): Promise<void>;
+
+  // ── chain-scoped bulk delete (operator reset) ────────────────────────
+  /**
+   * Reader-side: drop every `batches` row belonging to `chainId`. Used
+   * by `bam-reader reset --all` together with `deleteMessages` to
+   * blank-slate a single chain's observed state. No-op when nothing
+   * matches.
+   */
+  deleteBatches(chainId: number): Promise<void>;
+  /**
+   * Reader-side: drop every `messages` row belonging to `chainId`.
+   * Filters strictly on `chain_id = chainId`; rows with a NULL
+   * `chain_id` (legacy single-chain writes pre-dating the column) are
+   * not touched.
+   */
+  deleteMessages(chainId: number): Promise<void>;
 }
 
 export interface BamStore {

@@ -523,6 +523,79 @@ describe('bam-reader CLI — subprocess', () => {
     }
   }, 15_000);
 
+  it('reset --cursor --yes succeeds without a working RPC (DB-only operation)', async () => {
+    ensureBuilt();
+    // Point at a TCP port that's not listening. If reset still
+    // contacts the RPC (regression of qodo finding #1), it would hang
+    // on chain-id assertion and the test would time out.
+    const dir = mkdtempSync(path.join(tmpdir(), 'bam-reader-reset-norpc-'));
+    try {
+      const child = spawnReader(
+        ['reset', '--cursor', '--yes'],
+        readerEnv('http://127.0.0.1:1', '', 1),
+        dir
+      );
+      let stdout = '';
+      let stderr = '';
+      child.stdout.on('data', (b: Buffer) => (stdout += b.toString()));
+      child.stderr.on('data', (b: Buffer) => (stderr += b.toString()));
+      const code = await new Promise<number>((resolve) => {
+        child.once('exit', (c) => resolve(c ?? -1));
+      });
+      if (code !== 0) {
+        throw new Error(
+          `expected exit 0, got ${code}\nstdout: ${stdout}\nstderr: ${stderr}`
+        );
+      }
+      expect(stdout).toMatch(/reset --cursor: cleared cursor/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 10_000);
+
+  it('reset without --yes refuses to run and exits 4', async () => {
+    ensureBuilt();
+    const dir = mkdtempSync(path.join(tmpdir(), 'bam-reader-reset-confirm-'));
+    try {
+      const child = spawnReader(
+        ['reset', '--all'],
+        readerEnv('http://127.0.0.1:1', '', 11155111),
+        dir
+      );
+      let stderr = '';
+      child.stderr.on('data', (b: Buffer) => (stderr += b.toString()));
+      const code = await new Promise<number>((resolve) => {
+        child.once('exit', (c) => resolve(c ?? -1));
+      });
+      expect(code).toBe(4);
+      expect(stderr).toMatch(/Re-run with --yes/);
+      expect(stderr).toMatch(/chainId=11155111/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 10_000);
+
+  it('reset --help prints usage to stdout and exits 0', async () => {
+    ensureBuilt();
+    const dir = mkdtempSync(path.join(tmpdir(), 'bam-reader-reset-help-'));
+    try {
+      const child = spawnReader(
+        ['reset', '--help'],
+        readerEnv('http://127.0.0.1:1', '', 1),
+        dir
+      );
+      let stdout = '';
+      child.stdout.on('data', (b: Buffer) => (stdout += b.toString()));
+      const code = await new Promise<number>((resolve) => {
+        child.once('exit', (c) => resolve(c ?? -1));
+      });
+      expect(code).toBe(0);
+      expect(stdout).toMatch(/reset --cursor/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 10_000);
+
   it('backfill exits non-zero on a chain-id mismatch', async () => {
     ensureBuilt();
     // mock RPC reports chain id 5; env declares 1 → ChainIdMismatch → exit 3.

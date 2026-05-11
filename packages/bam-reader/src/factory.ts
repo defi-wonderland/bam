@@ -76,6 +76,17 @@ export interface Reader {
    */
   cursorBlock(): Promise<number | null>;
   /**
+   * Drop the `reader_cursor` row for `chainId` (defaults to the
+   * configured chainId). On next `serve`, the live-tail resumes from
+   * `startBlock`. Idempotent: no-op when no row exists.
+   */
+  resetCursor(chainId?: number): Promise<void>;
+  /**
+   * `resetCursor` plus chain-scoped truncation of `batches` and
+   * `messages`. Blank-slates the configured chain's observed state.
+   */
+  resetAll(chainId?: number): Promise<void>;
+  /**
    * Raw blob bytes for `versionedHash` from the local archive, or
    * `null` when the archive is unconfigured or has no entry. No
    * fallback to beacon/Blobscan — the archive populates naturally
@@ -114,7 +125,13 @@ export interface ReaderFactoryExtras {
 
 const DEFAULT_LIVE_POLL_MS = 12_000;
 
-async function createStoreFromDbUrl(dbUrl: string): Promise<BamStore> {
+/**
+ * Resolve a `READER_DB_URL` to a concrete `BamStore`. Exported so the
+ * `reset` subcommand can open the store directly without going through
+ * `createReader` — which would otherwise require a working RPC for its
+ * chain-id assertion.
+ */
+export async function openStore(dbUrl: string): Promise<BamStore> {
   if (dbUrl === 'memory:' || dbUrl === 'memory') {
     return createMemoryStore();
   }
@@ -139,7 +156,7 @@ export async function createReader(
   // 1. Validate chainId at construction (red-team C-3).
   await assertChainIdMatches(extras.l1, config.chainId);
 
-  const store = extras.store ?? (await createStoreFromDbUrl(config.dbUrl));
+  const store = extras.store ?? (await openStore(config.dbUrl));
   const counters = emptyCounters();
   const startBlock = extras.startBlock ?? config.startBlock ?? 0;
   const pollMs = extras.livePollMs ?? DEFAULT_LIVE_POLL_MS;
@@ -282,6 +299,26 @@ export async function createReader(
     async cursorBlock() {
       const cursor = await store.withTxn((txn) => txn.getCursor(config.chainId));
       return cursor?.lastBlockNumber ?? null;
+    },
+
+    async resetCursor(chainId) {
+      const id = chainId ?? config.chainId;
+      await store.withTxn((txn) => txn.deleteCursor(id));
+    },
+
+    async resetAll(chainId) {
+      const id = chainId ?? config.chainId;
+      // Order within the txn doesn't matter — both tables are
+      // independent, and the cursor row is the resume pointer that the
+      // live-tail consults on next serve. We drop messages before
+      // batches purely for log-grep parity with operator intuition
+      // ("messages dropped, then batches, then cursor"); rollback on
+      // partial failure still leaves a coherent state.
+      await store.withTxn(async (txn) => {
+        await txn.deleteMessages(id);
+        await txn.deleteBatches(id);
+        await txn.deleteCursor(id);
+      });
     },
 
     async getBlob(versionedHash) {
