@@ -11,6 +11,7 @@ type FeeHistoryResult = {
 
 type PriceCache = { value: number; fetchedAt: number };
 const PRICE_TTL_MS = 30_000;
+const FETCH_TIMEOUT_MS = 5_000;
 let priceCache: PriceCache | null = null;
 
 export async function GET() {
@@ -27,13 +28,16 @@ export async function GET() {
     return NextResponse.json({ error: feeResult.error }, { status: 502 });
   }
 
-  const baseFees = (feeResult.result.baseFeePerGas ?? []).map((h) => BigInt(h));
-  const blobFees = (feeResult.result.baseFeePerBlobGas ?? []).map((h) => BigInt(h));
+  // eth_feeHistory returns `baseFeePerGas` with blockCount + 1 entries: the
+  // final element is the *next* block's predicted base fee, not historical.
+  // Trim it off before averaging so the historical window matches the request.
+  const baseFees = trimNextBlock(feeResult.result.baseFeePerGas);
+  const blobFees = trimNextBlock(feeResult.result.baseFeePerBlobGas);
 
   return NextResponse.json(
     {
-      latestBaseFeeWei: pick(baseFees).toString(),
-      latestBlobBaseFeeWei: pick(blobFees).toString(),
+      latestBaseFeeWei: latest(baseFees).toString(),
+      latestBlobBaseFeeWei: latest(blobFees).toString(),
       avgBaseFeeWei: avg(baseFees).toString(),
       avgBlobBaseFeeWei: avg(blobFees).toString(),
       blocks: Math.max(baseFees.length, blobFees.length),
@@ -61,6 +65,7 @@ async function fetchFeeHistory(
         params: [blocksHex, 'latest', []],
       }),
       cache: 'no-store',
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     });
     if (!res.ok) return { error: `RPC HTTP ${res.status}` };
     const json = (await res.json()) as { result?: FeeHistoryResult; error?: { message?: string } };
@@ -83,7 +88,7 @@ async function fetchEthUsd(): Promise<{ value: number | null; source: string; fe
   try {
     const res = await fetch(
       'https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd',
-      { cache: 'no-store' },
+      { cache: 'no-store', signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) },
     );
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const json = (await res.json()) as { ethereum?: { usd?: number } };
@@ -104,7 +109,15 @@ async function fetchEthUsd(): Promise<{ value: number | null; source: string; fe
   }
 }
 
-function pick(arr: bigint[]): bigint {
+function trimNextBlock(hex: string[] | undefined): bigint[] {
+  if (!hex || hex.length === 0) return [];
+  // Drop the trailing predicted-next-block entry; keep at least one when only
+  // the prediction is present (so the route still returns something usable).
+  const historical = hex.length > 1 ? hex.slice(0, -1) : hex;
+  return historical.map((h) => BigInt(h));
+}
+
+function latest(arr: bigint[]): bigint {
   return arr.length > 0 ? arr[arr.length - 1] : 0n;
 }
 
