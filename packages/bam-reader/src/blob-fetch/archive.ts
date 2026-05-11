@@ -12,12 +12,16 @@
  * a lying upstream — never as authoritative content.
  */
 import { randomUUID } from 'node:crypto';
-import { open, mkdir, readFile, rename, unlink } from 'node:fs/promises';
+import { open, mkdir, rename, unlink } from 'node:fs/promises';
 import path from 'node:path';
 
 import type { Bytes32 } from 'bam-sdk';
 
-import { assertVersionedHashMatches } from './versioned-hash.js';
+import { VersionedHashMismatch } from '../errors.js';
+import {
+  assertVersionedHashMatches,
+  FULL_BLOB_BYTE_LENGTH,
+} from './versioned-hash.js';
 
 export interface BlobArchive {
   /** Return blob bytes for `versionedHash`, or `null` when absent. */
@@ -29,7 +33,7 @@ export interface BlobArchive {
 }
 
 export interface FilesystemBlobArchiveOptions {
-  /** Root directory for the archive. Created on first write if absent. */
+  /** Root directory for the archive. Created at construction if absent. */
   dir: string;
 }
 
@@ -59,25 +63,57 @@ function pathsFor(root: string, vh: string): { shardDir: string; file: string } 
  * content-addressed naming means a torn file is detected on next read
  * (via `assertVersionedHashMatches`) and treated as a cache miss —
  * the network refetch + rewrite recovers without operator action.
+ *
+ * The root directory is created (and implicitly probed for
+ * writability) at construction so configuration errors surface at
+ * boot rather than as per-batch `archive_write_failed` log spam.
  */
-export function createFilesystemBlobArchive(
+export async function createFilesystemBlobArchive(
   opts: FilesystemBlobArchiveOptions
-): BlobArchive {
+): Promise<BlobArchive> {
   const root = opts.dir;
+  await mkdir(root, { recursive: true });
+
   return {
     async get(versionedHash) {
       const vh = normalizeVersionedHash(versionedHash);
       const { file } = pathsFor(root, vh);
-      let buf: Buffer;
+      let handle;
       try {
-        buf = await readFile(file);
+        handle = await open(file, 'r');
       } catch (err) {
         if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null;
         throw err;
       }
-      const bytes = new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
-      assertVersionedHashMatches(bytes, versionedHash);
-      return bytes;
+      try {
+        // Size-check via the open handle (TOCTOU-safe) before
+        // buffering. Refuses to read a wrong-size file into memory
+        // — surfaces as `VersionedHashMismatch` so the multi-source
+        // layer logs `source_lied(archive)` and falls through to
+        // the network just like a content mismatch.
+        const stat = await handle.stat();
+        if (stat.size !== FULL_BLOB_BYTE_LENGTH) {
+          throw new VersionedHashMismatch(
+            `archive entry size ${stat.size} != ${FULL_BLOB_BYTE_LENGTH} for ${vh}`
+          );
+        }
+        const bytes = new Uint8Array(FULL_BLOB_BYTE_LENGTH);
+        const { bytesRead } = await handle.read(
+          bytes,
+          0,
+          FULL_BLOB_BYTE_LENGTH,
+          0
+        );
+        if (bytesRead !== FULL_BLOB_BYTE_LENGTH) {
+          throw new VersionedHashMismatch(
+            `archive short read: ${bytesRead} of ${FULL_BLOB_BYTE_LENGTH} for ${vh}`
+          );
+        }
+        assertVersionedHashMatches(bytes, versionedHash);
+        return bytes;
+      } finally {
+        await handle.close();
+      }
     },
 
     async put(versionedHash, bytes) {

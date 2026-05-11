@@ -146,7 +146,7 @@ export async function createReader(
   const archive =
     extras.archive ??
     (config.blobArchiveDir
-      ? createFilesystemBlobArchive({ dir: config.blobArchiveDir })
+      ? await createFilesystemBlobArchive({ dir: config.blobArchiveDir })
       : undefined);
 
   const sources = {
