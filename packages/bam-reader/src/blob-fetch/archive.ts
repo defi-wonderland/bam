@@ -100,7 +100,7 @@ export function verifyingArchive(inner: BlobArchive): BlobArchive {
  * file via `stat`-on-handle before any payload read) but does **not**
  * re-hash the bytes — that's the wrapper's job, so the cost is paid
  * exactly once. The factory composes them; direct callers should
- * use `verifyingArchive(createFilesystemBlobArchive(…))`.
+ * use `verifyingArchive(await createFilesystemBlobArchive(…))`.
  *
  * The root directory is created (and implicitly probed for
  * writability) at construction so configuration errors surface at
