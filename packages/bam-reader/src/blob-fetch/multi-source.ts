@@ -2,22 +2,15 @@
  * Multi-source blob fetch orchestrator.
  *
  * Source order: local archive (when configured) → beacon API → Blobscan.
- * Each source is independently hash-checked before bytes are returned:
- *  - `null`  → source had no data, try the next.
- *  - `VersionedHashMismatch` → source lied; logged, treated as no data
- *    for that source, try the next.
- *  - bytes   → return immediately.
+ * Each source is independently hash-checked before bytes are returned.
+ * Returns `null` only when all configured sources returned `null`; if
+ * every source returned wrong-hash bytes (`VersionedHashMismatch`),
+ * emits `all_sources_lied` so the caller can distinguish "no data
+ * anywhere" from "blob_unreachable / sources hostile".
  *
  * On a successful network fetch (beacon or Blobscan), bytes are written
  * back into the archive when one is configured. Archive write failures
  * are logged and swallowed — the archive is a cache, not authoritative.
- *
- * Returns `null` only when *all* configured sources returned `null`
- * without producing usable bytes. If *every* source we tried lied about
- * the bytes, emits `all_sources_lied` and returns `null` so the caller
- * surfaces it as `blob_unreachable` rather than halting.
- *
- * With no sources configured, returns `null` immediately.
  */
 
 import type { Bytes32 } from 'bam-sdk';
@@ -38,19 +31,21 @@ export type BlobSourceEvent =
   | { kind: 'archive_read_failed'; versionedHash: Bytes32; error: string }
   | { kind: 'archive_write_failed'; versionedHash: Bytes32; error: string };
 
+export interface BlobSources {
+  beaconUrl?: string;
+  blobscanUrl?: string;
+  /**
+   * Local archive. Read first; written back on network success. Swap
+   * implementations to change the storage substrate (filesystem, S3,
+   * DB-resident bytea, …) without touching the orchestrator.
+   */
+  archive?: BlobArchive;
+}
+
 export interface MultiSourceOptions {
   versionedHash: Bytes32;
   parentBeaconBlockRoot: Bytes32 | null;
-  sources: {
-    beaconUrl?: string;
-    blobscanUrl?: string;
-  };
-  /**
-   * Optional local archive. Read first; written back on network success.
-   * Swap implementations to change the storage substrate (filesystem,
-   * S3, DB-resident bytea, …) without touching the orchestrator.
-   */
-  archive?: BlobArchive;
+  sources: BlobSources;
   fetchImpl?: FetchLike;
   logger?: BlobSourceLogger;
 }
@@ -61,99 +56,88 @@ function errString(err: unknown): string {
 
 export async function fetchBlob(opts: MultiSourceOptions): Promise<Uint8Array | null> {
   const log = opts.logger ?? (() => {});
+  const vh = opts.versionedHash;
   let triedAny = false;
   let allLied = true;
 
-  if (opts.archive) {
+  /**
+   * Run one source. Updates `triedAny`/`allLied` consistently:
+   * - bytes → return; caller short-circuits.
+   * - null  → tried but had no data; `allLied = false`.
+   * - VersionedHashMismatch → log + treat as no-data for this source,
+   *   but keep `allLied = true` so a fully-hostile fan-in surfaces.
+   *
+   * Non-mismatch errors from network sources rethrow (the loop layer
+   * classifies as `blob_unreachable`). The archive is exempt — a cache
+   * read error never blocks a network fallback.
+   */
+  const trySource = async (
+    name: BlobSourceName,
+    fetcher: () => Promise<Uint8Array | null>
+  ): Promise<Uint8Array | null> => {
     triedAny = true;
     try {
-      const got = await opts.archive.get(opts.versionedHash);
-      if (got !== null) {
-        log({ kind: 'archive_hit', versionedHash: opts.versionedHash });
-        return got;
-      }
+      const got = await fetcher();
+      if (got !== null) return got;
       allLied = false;
+      return null;
     } catch (err) {
       if (err instanceof VersionedHashMismatch) {
-        log({ kind: 'source_lied', source: 'archive', versionedHash: opts.versionedHash });
-      } else {
-        // Disk/transport error reading the archive — log and fall through
-        // to upstream sources. The archive is a cache, not authoritative;
-        // a failed read here should never block a network fallback.
-        log({
-          kind: 'archive_read_failed',
-          versionedHash: opts.versionedHash,
-          error: errString(err),
-        });
-        allLied = false;
+        log({ kind: 'source_lied', source: name, versionedHash: vh });
+        return null;
       }
+      if (name === 'archive') {
+        log({ kind: 'archive_read_failed', versionedHash: vh, error: errString(err) });
+        allLied = false;
+        return null;
+      }
+      throw err;
+    }
+  };
+
+  const archive = opts.sources.archive;
+  if (archive) {
+    const got = await trySource('archive', () => archive.get(vh));
+    if (got !== null) {
+      log({ kind: 'archive_hit', versionedHash: vh });
+      return got;
     }
   }
 
   let networkBytes: Uint8Array | null = null;
-
   if (opts.sources.beaconUrl && opts.parentBeaconBlockRoot) {
-    triedAny = true;
-    try {
-      const got = await fetchFromBeaconApi({
-        beaconUrl: opts.sources.beaconUrl,
-        parentBeaconBlockRoot: opts.parentBeaconBlockRoot,
-        versionedHash: opts.versionedHash,
+    networkBytes = await trySource('beacon', () =>
+      fetchFromBeaconApi({
+        beaconUrl: opts.sources.beaconUrl!,
+        parentBeaconBlockRoot: opts.parentBeaconBlockRoot!,
+        versionedHash: vh,
         fetchImpl: opts.fetchImpl,
-      });
-      if (got !== null) {
-        networkBytes = got;
-      } else {
-        allLied = false;
-      }
-    } catch (err) {
-      if (err instanceof VersionedHashMismatch) {
-        log({ kind: 'source_lied', source: 'beacon', versionedHash: opts.versionedHash });
-      } else {
-        throw err;
-      }
-    }
+      })
+    );
   }
-
   if (networkBytes === null && opts.sources.blobscanUrl) {
-    triedAny = true;
-    try {
-      const got = await fetchFromBlobscan({
-        baseUrl: opts.sources.blobscanUrl,
-        versionedHash: opts.versionedHash,
+    networkBytes = await trySource('blobscan', () =>
+      fetchFromBlobscan({
+        baseUrl: opts.sources.blobscanUrl!,
+        versionedHash: vh,
         fetchImpl: opts.fetchImpl,
-      });
-      if (got !== null) {
-        networkBytes = got;
-      } else {
-        allLied = false;
-      }
-    } catch (err) {
-      if (err instanceof VersionedHashMismatch) {
-        log({ kind: 'source_lied', source: 'blobscan', versionedHash: opts.versionedHash });
-      } else {
-        throw err;
-      }
-    }
+      })
+    );
   }
 
   if (networkBytes !== null) {
-    if (opts.archive) {
+    if (archive) {
       try {
-        await opts.archive.put(opts.versionedHash, networkBytes);
+        await archive.put(vh, networkBytes);
       } catch (err) {
-        log({
-          kind: 'archive_write_failed',
-          versionedHash: opts.versionedHash,
-          error: errString(err),
-        });
+        log({ kind: 'archive_write_failed', versionedHash: vh, error: errString(err) });
       }
     }
     return networkBytes;
   }
 
   if (triedAny && allLied) {
-    log({ kind: 'all_sources_lied', versionedHash: opts.versionedHash });
+    log({ kind: 'all_sources_lied', versionedHash: vh });
   }
   return null;
 }

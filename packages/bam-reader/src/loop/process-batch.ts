@@ -31,11 +31,11 @@ import type {
   MessageRow,
 } from 'bam-store';
 
-import type { BlobArchive } from '../blob-fetch/archive.js';
 import { extractSegmentBytes } from '../blob-fetch/extract.js';
 import {
   fetchBlob as defaultFetchBlob,
   type BlobSourceLogger,
+  type BlobSources,
 } from '../blob-fetch/multi-source.js';
 import { decode as defaultDecode, type DecodeOptions } from '../decode/dispatch.js';
 import type { ReadContractClient } from '../decode/on-chain-decoder.js';
@@ -60,9 +60,7 @@ export interface ProcessBatchOptions {
   /** L1 block timestamp (seconds) for `BatchRow.l1IncludedAtUnixSec`. */
   l1IncludedAtUnixSec: number | null;
   store: BamStore;
-  sources: { beaconUrl?: string; blobscanUrl?: string };
-  /** Optional local blob archive — read first, written back on network hit. */
-  archive?: BlobArchive;
+  sources: BlobSources;
   chainId: number;
   decodePublicClient?: ReadContractClient;
   verifyPublicClient?: VerifyReadContractClient;
@@ -220,7 +218,6 @@ export async function processBatch(
       versionedHash: opts.event.versionedHash,
       parentBeaconBlockRoot: opts.parentBeaconBlockRoot,
       sources: opts.sources,
-      archive: opts.archive,
       fetchImpl: opts.fetchImpl,
       logger: buildBlobSourceLogger(log),
     });

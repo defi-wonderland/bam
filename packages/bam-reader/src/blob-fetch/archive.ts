@@ -44,21 +44,21 @@ function normalizeVersionedHash(vh: Bytes32): string {
 }
 
 function pathsFor(root: string, vh: string): { shardDir: string; file: string } {
-  // One-level shard by the first byte of the hash (`0xab...` → `ab/`)
-  // to keep any single directory under a manageable fanout.
+  // One-level shard by the first byte of the hash to keep any single
+  // directory under a manageable fanout.
   const shard = vh.slice(2, 4);
   const shardDir = path.join(root, shard);
   return { shardDir, file: path.join(shardDir, `${vh}.blob`) };
 }
 
 /**
- * Filesystem-backed `BlobArchive`. Layout:
+ * Filesystem-backed `BlobArchive`. Layout: `<dir>/<aa>/0xaa….blob`.
  *
- *   <dir>/<aa>/0xaabbcc….blob       (raw 131072-byte blob)
- *
- * Writes are atomic: temp file + fsync + rename. Reads re-hash the
- * bytes via `assertVersionedHashMatches`, so a corrupted file surfaces
- * the same way as a lying upstream.
+ * Writes use temp-file + rename for atomicity-of-name. fsync is *not*
+ * called: durability matters less than correctness here, and the
+ * content-addressed naming means a torn file is detected on next read
+ * (via `assertVersionedHashMatches`) and treated as a cache miss —
+ * the network refetch + rewrite recovers without operator action.
  */
 export function createFilesystemBlobArchive(
   opts: FilesystemBlobArchiveOptions
@@ -89,12 +89,10 @@ export function createFilesystemBlobArchive(
       let wrote = false;
       try {
         await handle.writeFile(bytes);
-        await handle.sync();
         wrote = true;
       } finally {
         await handle.close();
         if (!wrote) {
-          // Best-effort cleanup of an aborted write; ignore errors.
           await unlink(tmp).catch(() => {});
         }
       }

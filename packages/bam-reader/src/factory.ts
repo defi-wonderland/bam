@@ -75,12 +75,10 @@ export interface Reader {
    */
   cursorBlock(): Promise<number | null>;
   /**
-   * Return the raw blob bytes for `versionedHash` from the configured
-   * local archive, or `null` when the archive is not configured or
-   * does not have the blob. The Reader does **not** fall back to
-   * beacon/Blobscan here — `/blobs/:versionedHash` is an archive
-   * read endpoint, not a fetch endpoint. The archive populates
-   * naturally as batches are processed with archiving enabled.
+   * Raw blob bytes for `versionedHash` from the local archive, or
+   * `null` when the archive is unconfigured or has no entry. No
+   * fallback to beacon/Blobscan — the archive populates naturally
+   * as batches are processed with archiving enabled.
    */
   getBlob(versionedHash: Bytes32): Promise<Uint8Array | null>;
 }
@@ -145,16 +143,17 @@ export async function createReader(
   const startBlock = extras.startBlock ?? config.startBlock ?? 0;
   const pollMs = extras.livePollMs ?? DEFAULT_LIVE_POLL_MS;
 
-  const sources = {
-    beaconUrl: config.beaconUrl,
-    blobscanUrl: config.blobscanUrl,
-  };
-
   const archive =
     extras.archive ??
     (config.blobArchiveDir
       ? createFilesystemBlobArchive({ dir: config.blobArchiveDir })
       : undefined);
+
+  const sources = {
+    beaconUrl: config.beaconUrl,
+    blobscanUrl: config.blobscanUrl,
+    archive,
+  };
 
   const reorgWatcher = new ReaderReorgWatcher({
     store,
@@ -185,7 +184,6 @@ export async function createReader(
               ethCallGasCap: config.ethCallGasCap,
               ethCallTimeoutMs: config.ethCallTimeoutMs,
               sources,
-              archive,
               decodePublicClient: extras.decodePublicClient,
               verifyPublicClient: extras.verifyPublicClient,
               counters,
@@ -223,7 +221,6 @@ export async function createReader(
         ethCallGasCap: config.ethCallGasCap,
         ethCallTimeoutMs: config.ethCallTimeoutMs,
         sources,
-        archive,
         decodePublicClient: extras.decodePublicClient,
         verifyPublicClient: extras.verifyPublicClient,
         counters,
@@ -299,7 +296,6 @@ export async function createReader(
         await store.close();
       }
       if (!extras.archive && archive?.close) {
-        // Same ownership rule for the archive: we close what we built.
         await archive.close();
       }
     },

@@ -30,7 +30,7 @@ import type { BamStore } from 'bam-store';
 import type { ReaderCounters, ReaderEvent } from '../types.js';
 import type { ReadContractClient } from '../decode/on-chain-decoder.js';
 import type { VerifyReadContractClient } from '../verify/on-chain-registry.js';
-import type { BlobArchive } from '../blob-fetch/archive.js';
+import type { BlobSources } from '../blob-fetch/multi-source.js';
 import type { FetchLike } from '../blob-fetch/beacon.js';
 
 /** ~18 days × 7200 blocks/day; matches the L1 sidecar retention window. */
@@ -59,8 +59,7 @@ export interface BackfillOptions {
   retentionThresholdBlocks?: number;
   ethCallGasCap: bigint;
   ethCallTimeoutMs: number;
-  sources: { beaconUrl?: string; blobscanUrl?: string };
-  archive?: BlobArchive;
+  sources: BlobSources;
   decodePublicClient?: ReadContractClient;
   verifyPublicClient?: VerifyReadContractClient;
   fetchImpl?: FetchLike;
@@ -174,7 +173,6 @@ export async function backfill(opts: BackfillOptions): Promise<BackfillCounters>
           l1IncludedAtUnixSec,
           store: opts.store,
           sources: opts.sources,
-          archive: opts.archive,
           chainId: opts.chainId,
           decodePublicClient: opts.decodePublicClient,
           verifyPublicClient: opts.verifyPublicClient,

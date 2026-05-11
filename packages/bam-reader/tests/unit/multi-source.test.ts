@@ -271,8 +271,7 @@ describe('fetchBlob', () => {
     const got = await fetchBlob({
       versionedHash: fixtureA.versionedHash,
       parentBeaconBlockRoot: PARENT_ROOT,
-      sources: { beaconUrl: BEACON_URL, blobscanUrl: BLOBSCAN_URL },
-      archive,
+      sources: { beaconUrl: BEACON_URL, blobscanUrl: BLOBSCAN_URL, archive },
       fetchImpl,
       logger: (e) => events.push(e),
     });
@@ -294,8 +293,7 @@ describe('fetchBlob', () => {
     const got = await fetchBlob({
       versionedHash: fixtureA.versionedHash,
       parentBeaconBlockRoot: PARENT_ROOT,
-      sources: { beaconUrl: BEACON_URL, blobscanUrl: BLOBSCAN_URL },
-      archive,
+      sources: { beaconUrl: BEACON_URL, blobscanUrl: BLOBSCAN_URL, archive },
       fetchImpl,
     });
     expect(got).not.toBeNull();
@@ -318,8 +316,7 @@ describe('fetchBlob', () => {
     const got = await fetchBlob({
       versionedHash: fixtureA.versionedHash,
       parentBeaconBlockRoot: PARENT_ROOT,
-      sources: { beaconUrl: BEACON_URL, blobscanUrl: BLOBSCAN_URL },
-      archive,
+      sources: { beaconUrl: BEACON_URL, blobscanUrl: BLOBSCAN_URL, archive },
       fetchImpl,
       logger: (e) => events.push(e),
     });
@@ -341,8 +338,7 @@ describe('fetchBlob', () => {
     const got = await fetchBlob({
       versionedHash: fixtureA.versionedHash,
       parentBeaconBlockRoot: PARENT_ROOT,
-      sources: { beaconUrl: BEACON_URL, blobscanUrl: BLOBSCAN_URL },
-      archive,
+      sources: { beaconUrl: BEACON_URL, blobscanUrl: BLOBSCAN_URL, archive },
       fetchImpl,
       logger: (e) => events.push(e),
     });
@@ -363,8 +359,7 @@ describe('fetchBlob', () => {
     const got = await fetchBlob({
       versionedHash: fixtureA.versionedHash,
       parentBeaconBlockRoot: PARENT_ROOT,
-      sources: { beaconUrl: BEACON_URL, blobscanUrl: BLOBSCAN_URL },
-      archive,
+      sources: { beaconUrl: BEACON_URL, blobscanUrl: BLOBSCAN_URL, archive },
       fetchImpl,
       logger: (e) => events.push(e),
     });

@@ -8,6 +8,8 @@
 
 import type { Address, Bytes32 } from 'bam-sdk';
 
+import type { BlobSourceName } from './blob-fetch/multi-source.js';
+
 // ═══════════════════════════════════════════════════════════════════════
 // ReaderConfig — caller-supplied wiring.
 // ═══════════════════════════════════════════════════════════════════════
@@ -126,7 +128,7 @@ export type ReaderEvent =
   | {
       kind: 'blob_source_lied';
       versionedHash: Bytes32;
-      source: 'archive' | 'beacon' | 'blobscan';
+      source: BlobSourceName;
     }
   | { kind: 'blob_archive_hit'; versionedHash: Bytes32 }
   | { kind: 'blob_archive_read_failed'; versionedHash: Bytes32; error: string }

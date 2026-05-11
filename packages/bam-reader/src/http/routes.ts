@@ -218,16 +218,9 @@ export const batchesHandler: Handler = async (_req, res, ctx, extras) => {
 };
 
 /**
- * Serve a blob's raw bytes from the local archive. Returns 404 when the
- * archive is not configured or does not have the blob (no fallback to
- * beacon/Blobscan — this endpoint is an archive read, not a fetch).
- *
- * Body is `application/octet-stream`, exactly 131072 bytes. The
- * archive's read path re-hashes the bytes via `assertVersionedHashMatches`
- * before they leave the substrate; a corrupted file surfaces as a 500
- * with `internal_error` and is logged server-side as `source_lied(archive)`
- * by the multi-source fetcher path, but here it propagates as an
- * unexpected error from `getBlob` itself.
+ * Serve raw blob bytes (`application/octet-stream`, 131072 bytes) from
+ * the local archive. 404 when the archive is unconfigured or has no
+ * entry. No fallback to beacon/Blobscan.
  */
 export const blobByVersionedHashHandler: Handler = async (_req, res, ctx, extras) => {
   const versionedHash = extras.pathParam;
