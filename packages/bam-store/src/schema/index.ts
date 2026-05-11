@@ -15,7 +15,7 @@
  * Adapters preserve a non-empty snapshot across upserts.
  */
 
-export const SCHEMA_VERSION = 5;
+export const SCHEMA_VERSION = 6;
 
 export {
   bamStoreSchema,
