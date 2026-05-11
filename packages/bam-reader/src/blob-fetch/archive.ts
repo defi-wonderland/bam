@@ -56,6 +56,37 @@ function pathsFor(root: string, vh: string): { shardDir: string; file: string } 
 }
 
 /**
+ * Wrap an arbitrary `BlobArchive` with hash-verification on every
+ * I/O. `get()` re-hashes the bytes against the requested versioned
+ * hash and throws `VersionedHashMismatch` on disagreement; `put()`
+ * length-checks the input (a wrong-length blob can never round-trip
+ * through the versioned-hash check, so refusing it up front avoids
+ * persisting garbage). Use this at the factory boundary so the
+ * orchestrator and HTTP path get the trust guarantee for free —
+ * a custom backend (S3, DB, …) inherits enforcement without having
+ * to remember to verify.
+ */
+export function verifyingArchive(inner: BlobArchive): BlobArchive {
+  return {
+    async get(versionedHash) {
+      const bytes = await inner.get(versionedHash);
+      if (bytes === null) return null;
+      assertVersionedHashMatches(bytes, versionedHash);
+      return bytes;
+    },
+    async put(versionedHash, bytes) {
+      if (bytes.byteLength !== FULL_BLOB_BYTE_LENGTH) {
+        throw new VersionedHashMismatch(
+          `archive put: bytes length ${bytes.byteLength} != ${FULL_BLOB_BYTE_LENGTH}`
+        );
+      }
+      await inner.put(versionedHash, bytes);
+    },
+    close: inner.close ? () => inner.close!() : undefined,
+  };
+}
+
+/**
  * Filesystem-backed `BlobArchive`. Layout: `<dir>/<aa>/0xaa….blob`.
  *
  * Writes use temp-file + rename for atomicity-of-name. fsync is *not*
@@ -121,18 +152,24 @@ export async function createFilesystemBlobArchive(
       const { shardDir, file } = pathsFor(root, vh);
       await mkdir(shardDir, { recursive: true });
       const tmp = `${file}.tmp.${randomUUID()}`;
-      const handle = await open(tmp, 'w');
-      let wrote = false;
+      let published = false;
       try {
-        await handle.writeFile(bytes);
-        wrote = true;
+        const handle = await open(tmp, 'w');
+        try {
+          await handle.writeFile(bytes);
+        } finally {
+          await handle.close();
+        }
+        await rename(tmp, file);
+        published = true;
       } finally {
-        await handle.close();
-        if (!wrote) {
+        if (!published) {
+          // Covers both "write failed" and "rename failed after a
+          // successful write" — without this branch, a failed rename
+          // would leave `<file>.tmp.<uuid>` on disk forever.
           await unlink(tmp).catch(() => {});
         }
       }
-      await rename(tmp, file);
     },
   };
 }

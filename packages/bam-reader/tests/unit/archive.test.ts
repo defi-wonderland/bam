@@ -12,7 +12,11 @@ import path from 'node:path';
 import { createBlob, loadTrustedSetup } from 'bam-sdk';
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
-import { createFilesystemBlobArchive } from '../../src/blob-fetch/archive.js';
+import {
+  createFilesystemBlobArchive,
+  verifyingArchive,
+  type BlobArchive,
+} from '../../src/blob-fetch/archive.js';
 import { VersionedHashMismatch } from '../../src/errors.js';
 import {
   FULL_BLOB_BYTE_LENGTH,
@@ -132,5 +136,85 @@ describe('createFilesystemBlobArchive', () => {
     // No straggling temp files.
     const shardEntries = await readdir(path.join(dir, versionedHash.slice(2, 4)));
     expect(shardEntries.filter((e) => e.includes('.tmp.'))).toEqual([]);
+  });
+
+  it('does not leak the temp file when the final rename fails', async () => {
+    // Build a working FS archive, then stub the inner rename via a
+    // wrapper that simulates a publish failure after a successful write.
+    // The check is: after the put rejects, no `.tmp.*` strays remain
+    // in the shard dir (cubic PR-45).
+    const archive = await createFilesystemBlobArchive({ dir });
+    const shardDir = path.join(dir, versionedHash.slice(2, 4));
+    await mkdir(shardDir, { recursive: true });
+    // Pre-create the destination as a directory so `rename` from a
+    // file to that path is forced to fail with EISDIR — exercises the
+    // "wrote OK, rename failed" path without monkey-patching node:fs.
+    await mkdir(path.join(shardDir, `${versionedHash}.blob`), {
+      recursive: true,
+    });
+    await expect(archive.put(versionedHash, blob)).rejects.toBeDefined();
+    const entries = await readdir(shardDir);
+    expect(entries.filter((e) => e.startsWith(`${versionedHash}.blob.tmp.`))).toEqual([]);
+  });
+});
+
+describe('verifyingArchive', () => {
+  function passthrough(seed?: Map<string, Uint8Array>): BlobArchive {
+    const store = seed ?? new Map<string, Uint8Array>();
+    return {
+      async get(vh) {
+        return store.get(vh.toLowerCase()) ?? null;
+      },
+      async put(vh, bytes) {
+        store.set(vh.toLowerCase(), bytes);
+      },
+    };
+  }
+
+  it('passes correctly-hashed bytes through on get', async () => {
+    const inner = passthrough(new Map([[versionedHash.toLowerCase(), blob]]));
+    const wrapped = verifyingArchive(inner);
+    const got = await wrapped.get(versionedHash);
+    expect(got).not.toBeNull();
+    expect(recomputeVersionedHash(got!)).toBe(versionedHash);
+  });
+
+  it('returns null on miss without throwing', async () => {
+    const wrapped = verifyingArchive(passthrough());
+    expect(await wrapped.get(versionedHash)).toBeNull();
+  });
+
+  it('throws VersionedHashMismatch when the inner backend returns wrong-hash bytes', async () => {
+    // A custom backend forgets to verify and returns wrong bytes; the
+    // wrapper must catch it so the orchestrator sees `source_lied`.
+    const inner = passthrough(new Map([[versionedHash.toLowerCase(), otherBlob]]));
+    const wrapped = verifyingArchive(inner);
+    await expect(wrapped.get(versionedHash)).rejects.toBeInstanceOf(VersionedHashMismatch);
+  });
+
+  it('rejects put with wrong-length bytes before they reach the inner backend', async () => {
+    const inner = passthrough();
+    const wrapped = verifyingArchive(inner);
+    await expect(
+      wrapped.put(versionedHash, new Uint8Array(10))
+    ).rejects.toBeInstanceOf(VersionedHashMismatch);
+    // Inner store must remain untouched.
+    expect(await inner.get(versionedHash)).toBeNull();
+  });
+
+  it('forwards close() to the inner backend when present', async () => {
+    let closed = false;
+    const inner: BlobArchive = {
+      async get() {
+        return null;
+      },
+      async put() {},
+      async close() {
+        closed = true;
+      },
+    };
+    const wrapped = verifyingArchive(inner);
+    await wrapped.close!();
+    expect(closed).toBe(true);
   });
 });

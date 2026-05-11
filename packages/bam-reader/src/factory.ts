@@ -34,6 +34,7 @@ import { ChainIdMismatch } from './errors.js';
 import { assertChainIdMatches } from './bin/env.js';
 import {
   createFilesystemBlobArchive,
+  verifyingArchive,
   type BlobArchive,
 } from './blob-fetch/archive.js';
 import {
@@ -143,11 +144,16 @@ export async function createReader(
   const startBlock = extras.startBlock ?? config.startBlock ?? 0;
   const pollMs = extras.livePollMs ?? DEFAULT_LIVE_POLL_MS;
 
-  const archive =
+  // Wrap with verification at the factory boundary so the trust
+  // model is enforced for every call site (orchestrator + HTTP) and
+  // for every backend (filesystem, S3, DB, …) — not just the FS impl
+  // that happens to verify internally.
+  const rawArchive =
     extras.archive ??
     (config.blobArchiveDir
       ? await createFilesystemBlobArchive({ dir: config.blobArchiveDir })
       : undefined);
+  const archive = rawArchive ? verifyingArchive(rawArchive) : undefined;
 
   const sources = {
     beaconUrl: config.beaconUrl,

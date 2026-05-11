@@ -61,7 +61,7 @@ export type {
   BlobSourceLogger,
   BlobSourceName,
 } from './blob-fetch/multi-source.js';
-export { createFilesystemBlobArchive } from './blob-fetch/archive.js';
+export { createFilesystemBlobArchive, verifyingArchive } from './blob-fetch/archive.js';
 export type { BlobArchive, FilesystemBlobArchiveOptions } from './blob-fetch/archive.js';
 
 // Reorg + dispatch + cursor — exposed for callers who want to compose
