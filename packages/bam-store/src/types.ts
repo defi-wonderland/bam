@@ -52,6 +52,23 @@ export interface StoreTxn {
   // ── nonce tracker CRUD ───────────────────────────────────────────────
   getNonce(sender: Address): Promise<NonceTrackerRow | null>;
   setNonce(row: NonceTrackerRow): Promise<void>;
+  /**
+   * Derive `(sender, lastNonce, lastMessageHash)` from the row in
+   * `messages` with the highest `nonce` for `sender`, considering any
+   * non-`'reorged'` row — `'pending'`, `'submitted'`, and
+   * `'confirmed'` all count as "slot occupied", since each represents
+   * a record the Poster MUST NOT overwrite. Returns `null` when no
+   * qualifying row exists.
+   *
+   * Lets the Poster's monotonicity check lazily reconcile its private
+   * `nonces` tracker against a `messages` table that may have been
+   * populated externally — e.g. a Reader backfill landing into a fresh
+   * Postgres before the Poster has seen any submits. Without this
+   * fallback, the Poster green-lights `nonce = 0` for a sender whose
+   * confirmed history already covers that slot and the eventual
+   * `insertPending` collides on `(sender, nonce)`.
+   */
+  getMaxNonReorgedNonce(sender: Address): Promise<NonceTrackerRow | null>;
 
   // ── unified-schema lifecycle transitions ────────────────────────────
   /**

@@ -615,4 +615,130 @@ export function runConformance(make: StoreFactory): void {
       expect(batches.length).toBe(0);
     });
   });
+
+  describe('getMaxNonReorgedNonce', () => {
+    it('returns null when no row exists for the sender', async () => {
+      const store = await newStore();
+      const row = await store.withTxn((txn) =>
+        txn.getMaxNonReorgedNonce(ADDR_1)
+      );
+      expect(row).toBeNull();
+    });
+
+    it('returns the highest non-reorged (sender, nonce) row', async () => {
+      const store = await newStore();
+      // Seed three confirmed rows for ADDR_1 at nonces 0, 1, 2 and one
+      // for ADDR_2 to confirm the per-sender scope. Each row carries a
+      // distinct messageHash so the returned row's hash is unambiguous.
+      await store.withTxn(async (txn) => {
+        for (const [sender, nonce, hash] of [
+          [ADDR_1, 0n, ('0x' + 'aa'.repeat(32)) as Bytes32],
+          [ADDR_1, 1n, ('0x' + 'bb'.repeat(32)) as Bytes32],
+          [ADDR_1, 2n, ('0x' + 'cc'.repeat(32)) as Bytes32],
+          [ADDR_2, 5n, ('0x' + 'dd'.repeat(32)) as Bytes32],
+        ] as const) {
+          await txn.upsertObserved(
+            messageRow({
+              sender,
+              nonce,
+              messageHash: hash,
+              status: 'confirmed',
+              batchRef: TX_A,
+              blockNumber: 10,
+              txIndex: 0,
+              messageIndexWithinBatch: 0,
+            })
+          );
+        }
+        await txn.upsertBatch(batchRow({ status: 'confirmed', blockNumber: 10 }));
+      });
+      const got = await store.withTxn((txn) =>
+        txn.getMaxNonReorgedNonce(ADDR_1)
+      );
+      expect(got).not.toBeNull();
+      expect(got!.lastNonce).toBe(2n);
+      expect(got!.lastMessageHash.toLowerCase()).toBe(
+        ('0x' + 'cc'.repeat(32)).toLowerCase()
+      );
+    });
+
+    it('returns null when every row for the sender is reorged', async () => {
+      const store = await newStore();
+      // The lazy-fill path must treat a sender with only reorged slots
+      // the same as a brand-new sender — otherwise a reorg cascade
+      // would block re-ingestion of the cleared slot.
+      await store.withTxn(async (txn) => {
+        await txn.upsertBatch(batchRow({ status: 'confirmed', blockNumber: 10 }));
+        for (const nonce of [0n, 1n]) {
+          await txn.upsertObserved(
+            messageRow({
+              sender: ADDR_1,
+              nonce,
+              messageHash: ('0x' + '01'.repeat(32)) as Bytes32,
+              status: 'reorged',
+              batchRef: TX_A,
+              blockNumber: 10,
+              txIndex: 0,
+              messageIndexWithinBatch: Number(nonce),
+            })
+          );
+        }
+      });
+      const got = await store.withTxn((txn) =>
+        txn.getMaxNonReorgedNonce(ADDR_1)
+      );
+      expect(got).toBeNull();
+    });
+
+    it('ignores reorged rows when picking the max', async () => {
+      const store = await newStore();
+      // ADDR_1 has confirmed rows at 0 and 1, plus a reorged row at 2.
+      // The reorged slot is reclaimable — getMaxNonReorgedNonce should
+      // return nonce 1, not 2.
+      await store.withTxn(async (txn) => {
+        await txn.upsertBatch(batchRow({ status: 'confirmed', blockNumber: 10 }));
+        await txn.upsertObserved(
+          messageRow({
+            sender: ADDR_1,
+            nonce: 0n,
+            messageHash: ('0x' + '01'.repeat(32)) as Bytes32,
+            status: 'confirmed',
+            batchRef: TX_A,
+            blockNumber: 10,
+            txIndex: 0,
+            messageIndexWithinBatch: 0,
+          })
+        );
+        await txn.upsertObserved(
+          messageRow({
+            sender: ADDR_1,
+            nonce: 1n,
+            messageHash: ('0x' + '02'.repeat(32)) as Bytes32,
+            status: 'confirmed',
+            batchRef: TX_A,
+            blockNumber: 10,
+            txIndex: 1,
+            messageIndexWithinBatch: 0,
+          })
+        );
+        await txn.upsertObserved(
+          messageRow({
+            sender: ADDR_1,
+            nonce: 2n,
+            messageHash: ('0x' + '03'.repeat(32)) as Bytes32,
+            status: 'reorged',
+            batchRef: TX_A,
+            blockNumber: 10,
+            txIndex: 2,
+            messageIndexWithinBatch: 0,
+          })
+        );
+      });
+      const got = await store.withTxn((txn) =>
+        txn.getMaxNonReorgedNonce(ADDR_1)
+      );
+      expect(got).not.toBeNull();
+      expect(got!.lastNonce).toBe(1n);
+    });
+  });
 }

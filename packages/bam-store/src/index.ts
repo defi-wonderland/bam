@@ -33,3 +33,4 @@ export {
 } from './db-store.js';
 export { PostgresBamStore } from './postgres.js';
 export { SCHEMA_VERSION } from './schema/index.js';
+export { DuplicateMessageError } from './errors.js';
