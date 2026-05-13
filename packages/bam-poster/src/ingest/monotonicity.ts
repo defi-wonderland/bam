@@ -23,6 +23,19 @@ export type MonotonicityOutcome =
  *
  * `messageHash` is a pure function of `(sender, nonce, contents)`, so
  * byte-equal retry ≡ same messageHash.
+ *
+ * Lazy reconciliation: when the `nonces` tracker has no row for
+ * `sender`, fall back to the highest non-reorged `(sender, nonce)`
+ * in `messages` and cache it via `setNonce`. This catches the case
+ * where a Reader has populated `messages` from chain (backfill or
+ * live tail) into a Postgres whose Poster-private `nonces` tracker
+ * is empty — typically a fresh DB attached to an existing on-chain
+ * history. Without the fallback the check green-lights `nonce = 0`
+ * and the subsequent `insertPending` collides on `(sender, nonce)`,
+ * surfacing to clients as `internal_error`. The cached row makes
+ * later submits hit the fast path; concurrent first-time ingests
+ * reconcile to the same source-of-truth row, so the cache fill is
+ * idempotent.
  */
 export async function checkMonotonicity(
   sender: Address,
@@ -30,7 +43,14 @@ export async function checkMonotonicity(
   messageHash: Bytes32,
   txn: StoreTxn
 ): Promise<MonotonicityOutcome> {
-  const row = await txn.getNonce(sender);
+  let row = await txn.getNonce(sender);
+  if (row === null) {
+    const seed = await txn.getMaxNonReorgedNonce(sender);
+    if (seed !== null) {
+      await txn.setNonce(seed);
+      row = seed;
+    }
+  }
   if (row === null) return { decision: 'accept' };
   if (nonce > row.lastNonce) return { decision: 'accept' };
   if (nonce === row.lastNonce) {

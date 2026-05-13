@@ -1,4 +1,4 @@
-import { and, asc, eq, gt, gte, isNotNull, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, gte, isNotNull, ne, sql } from 'drizzle-orm';
 import { drizzle as drizzlePglite } from 'drizzle-orm/pglite';
 import type { PgDatabase, PgQueryResultHKT } from 'drizzle-orm/pg-core';
 import { PGlite } from '@electric-sql/pglite';
@@ -18,6 +18,7 @@ import type {
   StoreTxn,
   StoreTxnPendingRow,
 } from './types.js';
+import { DuplicateMessageError } from './errors.js';
 import { decodeNonce, encodeNonce } from './nonce-codec.js';
 import { SCHEMA_VERSION } from './schema/index.js';
 import {
@@ -57,6 +58,15 @@ function isSerializationFailure(err: unknown): boolean {
   // chain carries the original `code`.
   const cause = (err as { cause?: unknown }).cause;
   if (cause) return isSerializationFailure(cause);
+  return false;
+}
+
+function isUniqueViolation(err: unknown): boolean {
+  if (typeof err !== 'object' || err === null) return false;
+  const code = (err as { code?: unknown }).code;
+  if (code === '23505') return true;
+  const cause = (err as { cause?: unknown }).cause;
+  if (cause) return isUniqueViolation(cause);
   return false;
 }
 
@@ -288,29 +298,44 @@ function makeTxn(tx: DrizzleDb): StoreTxn {
         .where(and(eq(messagesT.sender, sender), eq(messagesT.nonce, nonce)));
       if (existing[0]) {
         if (existing[0].status !== 'reorged') {
-          throw new Error('insertPending: duplicate (sender, nonce)');
+          throw new DuplicateMessageError(row.sender, row.nonce);
         }
         await tx
           .delete(messagesT)
           .where(and(eq(messagesT.sender, sender), eq(messagesT.nonce, nonce)));
       }
-      await tx.insert(messagesT).values({
-        sender,
-        nonce,
-        contentTag: row.contentTag,
-        contents: row.contents,
-        signature: row.signature,
-        messageHash: row.messageHash,
-        messageId: null,
-        status: 'pending',
-        batchRef: null,
-        chainId: row.chainId,
-        ingestedAt: row.ingestedAt,
-        ingestSeq: row.ingestSeq,
-        blockNumber: null,
-        txIndex: null,
-        messageIndexWithinBatch: null,
-      });
+      // The pre-check above is best-effort. Under concurrent ingests
+      // two txns can both observe "no row" and proceed to INSERT; one
+      // loses with Postgres `23505` (unique_violation) on the
+      // `(sender, nonce)` PK. `withTxn` retries only serialization
+      // failures (`40001`), so a unique violation would otherwise leak
+      // out of the store boundary and surface as a 500 `internal_error`
+      // at the HTTP layer. Translate to the typed error so the
+      // Poster's ingest pipeline maps it to `{reason:'duplicate'}`.
+      try {
+        await tx.insert(messagesT).values({
+          sender,
+          nonce,
+          contentTag: row.contentTag,
+          contents: row.contents,
+          signature: row.signature,
+          messageHash: row.messageHash,
+          messageId: null,
+          status: 'pending',
+          batchRef: null,
+          chainId: row.chainId,
+          ingestedAt: row.ingestedAt,
+          ingestSeq: row.ingestSeq,
+          blockNumber: null,
+          txIndex: null,
+          messageIndexWithinBatch: null,
+        });
+      } catch (err) {
+        if (isUniqueViolation(err)) {
+          throw new DuplicateMessageError(row.sender, row.nonce);
+        }
+        throw err;
+      }
     },
 
     async getPendingByKey(key: PendingKey): Promise<StoreTxnPendingRow | null> {
@@ -414,6 +439,33 @@ function makeTxn(tx: DrizzleDb): StoreTxn {
             lastMessageHash: row.lastMessageHash,
           },
         });
+    },
+    async getMaxNonReorgedNonce(
+      sender: Address
+    ): Promise<NonceTrackerRow | null> {
+      const senderKey = sender.toLowerCase();
+      // `messages.nonce` is the fixed-width zero-padded decimal string
+      // produced by `encodeNonce`, so a lexicographic ORDER BY on the
+      // text column matches numeric order. Reorged slots are
+      // reclaimable, so they don't count as "occupied".
+      const rows = await tx
+        .select({
+          nonce: messagesT.nonce,
+          messageHash: messagesT.messageHash,
+        })
+        .from(messagesT)
+        .where(
+          and(eq(messagesT.sender, senderKey), ne(messagesT.status, 'reorged'))
+        )
+        .orderBy(desc(messagesT.nonce))
+        .limit(1);
+      const r = rows[0];
+      if (!r) return null;
+      return {
+        sender: senderKey as Address,
+        lastNonce: decodeNonce(r.nonce),
+        lastMessageHash: r.messageHash as Bytes32,
+      };
     },
 
     // ── unified-schema lifecycle transitions ─────────────────────────

@@ -1,4 +1,5 @@
 import { computeMessageHash, type Address, type Bytes32 } from 'bam-sdk';
+import { DuplicateMessageError } from 'bam-store';
 
 import type {
   DecodedMessage,
@@ -111,42 +112,62 @@ export class IngestPipeline {
     // 4-6. Monotonicity, validator, insert — all inside one txn so
     // two concurrent ingests on `(sender, nonce)` resolve to exactly
     // one acceptance.
-    return this.opts.store.withTxn(async (txn) => {
-      const mono = await checkMonotonicity(decoded.sender, decoded.nonce, messageHash, txn);
-      if (mono.decision === 'reject') {
-        return { accepted: false, reason: mono.reason };
-      }
-      if (mono.decision === 'no_op') {
-        // Byte-equal retry — acknowledge with the existing messageHash.
-        return { accepted: true, messageHash: mono.existingMessageHash };
-      }
+    //
+    // A `DuplicateMessageError` surfaces here when `insertPending`
+    // discovers a non-`reorged` row at `(sender, nonce)` that the
+    // monotonicity check didn't already filter out — e.g. a Reader
+    // raced ahead and observed the on-chain confirmation between the
+    // mono check and the insert, or the `nonces` tracker drifted. Map
+    // to the stable `duplicate` rejection rather than letting it
+    // surface as a 500 `internal_error`.
+    try {
+      return await this.opts.store.withTxn(async (txn) => {
+        const mono = await checkMonotonicity(
+          decoded.sender,
+          decoded.nonce,
+          messageHash,
+          txn
+        );
+        if (mono.decision === 'reject') {
+          return { accepted: false, reason: mono.reason };
+        }
+        if (mono.decision === 'no_op') {
+          // Byte-equal retry — acknowledge with the existing messageHash.
+          return { accepted: true, messageHash: mono.existingMessageHash };
+        }
 
-      // 5. Validator runs last — after every cheap gate.
-      const val = this.opts.validator.validate(decoded);
-      if (!val.ok) {
-        return { accepted: false, reason: val.reason };
-      }
+        // 5. Validator runs last — after every cheap gate.
+        const val = this.opts.validator.validate(decoded);
+        if (!val.ok) {
+          return { accepted: false, reason: val.reason };
+        }
 
-      // 6. Atomic: record nonce tracker + insert pending row.
-      await txn.setNonce({
-        sender: decoded.sender,
-        lastNonce: decoded.nonce,
-        lastMessageHash: messageHash,
+        // 6. Atomic: record nonce tracker + insert pending row.
+        await txn.setNonce({
+          sender: decoded.sender,
+          lastNonce: decoded.nonce,
+          lastMessageHash: messageHash,
+        });
+        const seq = await txn.nextIngestSeq(contentTag);
+        await txn.insertPending({
+          contentTag,
+          sender: decoded.sender,
+          nonce: decoded.nonce,
+          contents: decoded.contents,
+          signature: decoded.signature,
+          messageHash,
+          chainId: this.opts.chainId,
+          ingestedAt: this.opts.now().getTime(),
+          ingestSeq: seq,
+        });
+        return { accepted: true, messageHash };
       });
-      const seq = await txn.nextIngestSeq(contentTag);
-      await txn.insertPending({
-        contentTag,
-        sender: decoded.sender,
-        nonce: decoded.nonce,
-        contents: decoded.contents,
-        signature: decoded.signature,
-        messageHash,
-        chainId: this.opts.chainId,
-        ingestedAt: this.opts.now().getTime(),
-        ingestSeq: seq,
-      });
-      return { accepted: true, messageHash };
-    });
+    } catch (err) {
+      if (err instanceof DuplicateMessageError) {
+        return { accepted: false, reason: 'duplicate' };
+      }
+      throw err;
+    }
   }
 
   private rateLimitKey(decoded: DecodedMessage): Address {

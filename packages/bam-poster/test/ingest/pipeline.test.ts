@@ -256,6 +256,66 @@ describe('IngestPipeline — nonce monotonicity end-to-end', () => {
   });
 });
 
+describe('IngestPipeline — duplicate (sender, nonce) defense-in-depth', () => {
+  // Lazy fill (monotonicity) covers the common Reader-populated-DB
+  // scenario; this test pins the seatbelt: if a non-reorged row at
+  // (sender, nonce) is somehow already in `messages` AND the
+  // monotonicity tracker has been seeded inconsistently with it, the
+  // pipeline must surface a clean `duplicate` rejection instead of a
+  // 500 `internal_error`.
+  it('returns {accepted:false, reason:"duplicate"} on a colliding insert', async () => {
+    const h = await mkHarness();
+    // Seed a confirmed row at (SENDER, 5) directly via the store.
+    await h.store.withTxn(async (txn) => {
+      await txn.upsertBatch({
+        chainId: 1,
+        txHash: ('0x' + '01'.repeat(32)) as Bytes32,
+        contentTag: TAG,
+        blobVersionedHash: ('0x' + '03'.repeat(32)) as Bytes32,
+        batchContentHash: ('0x' + '04'.repeat(32)) as Bytes32,
+        blockNumber: 10,
+        txIndex: 0,
+        status: 'confirmed',
+        replacedByTxHash: null,
+        submittedAt: null,
+        invalidatedAt: null,
+        messageSnapshot: [],
+        submitter: null,
+        l1IncludedAtUnixSec: null,
+      });
+      await txn.upsertObserved({
+        messageId: null,
+        sender: SENDER,
+        nonce: 5n,
+        contentTag: TAG,
+        contents: new Uint8Array(40),
+        signature: new Uint8Array(65),
+        messageHash: ('0x' + 'ee'.repeat(32)) as Bytes32,
+        status: 'confirmed',
+        batchRef: ('0x' + '01'.repeat(32)) as Bytes32,
+        chainId: 1,
+        ingestedAt: null,
+        ingestSeq: null,
+        blockNumber: 10,
+        txIndex: 0,
+        messageIndexWithinBatch: 0,
+      });
+      // Backdoor the tracker into an inconsistent state: claim the
+      // last-accepted nonce is 4 even though `messages` covers 5.
+      // Mono check will green-light nonce=5 with a different hash;
+      // insertPending will then throw DuplicateMessageError.
+      await txn.setNonce({
+        sender: SENDER,
+        lastNonce: 4n,
+        lastMessageHash: ('0x' + 'dd'.repeat(32)) as Bytes32,
+      });
+    });
+    const res = await h.pipeline.ingest(signedEnvelope({ nonce: 5n }));
+    expect(res.accepted).toBe(false);
+    if (!res.accepted) expect(res.reason).toBe('duplicate');
+  });
+});
+
 describe('IngestPipeline — contentTag canonicalization', () => {
   it('mixed-case contentTag is canonicalized (lowercase) at ingest so queries match', async () => {
     // Allowlist canonical; envelope ships the same tag in mixed case.
