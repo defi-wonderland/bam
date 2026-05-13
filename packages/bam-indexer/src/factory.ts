@@ -8,7 +8,8 @@
 
 import type { Pool } from 'pg';
 import pg from 'pg';
-import { createPublicClient, http, type PublicClient } from 'viem';
+import { createPublicClient, http, type Chain, type PublicClient } from 'viem';
+import * as viemChains from 'viem/chains';
 
 import type { IndexerHandler } from './framework/handler.js';
 import { HandlerRegistry } from './framework/registry.js';
@@ -59,7 +60,15 @@ export async function createIndexer(
 
   let publicClient: PublicClient | undefined = extras.publicClient;
   if (publicClient === undefined && config.rpcUrl !== undefined && config.rpcUrl !== '') {
-    publicClient = createPublicClient({ transport: http(config.rpcUrl) }) as PublicClient;
+    // ENS reverse-resolution requires `client.chain.contracts.ensUniversalResolver`.
+    // Without a chain, getEnsName throws and the enricher silently caches null.
+    const chain = chainFromId(config.chainId);
+    publicClient = createPublicClient({ chain, transport: http(config.rpcUrl) }) as PublicClient;
+    if (chain === undefined) {
+      process.stderr.write(
+        `[bam-indexer] warn: no viem chain definition for chainId=${config.chainId}; ENS will resolve as null\n`,
+      );
+    }
   }
   const ens = publicClient ? new EnsEnricher({ client: publicClient }) : undefined;
   const enrichers = new BatchEnricherPool({ ens });
@@ -154,6 +163,20 @@ export async function createIndexer(
   };
 
   return indexer;
+}
+
+function chainFromId(id: number): Chain | undefined {
+  for (const value of Object.values(viemChains)) {
+    if (
+      typeof value === 'object' &&
+      value !== null &&
+      'id' in value &&
+      (value as Chain).id === id
+    ) {
+      return value as Chain;
+    }
+  }
+  return undefined;
 }
 
 function defaultLogger(event: IndexerEvent): void {

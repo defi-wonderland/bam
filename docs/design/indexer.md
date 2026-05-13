@@ -337,6 +337,26 @@ shape) lives in `packages/bam-indexer/README.md`. This file is the
   red-team C-1; operator fronts it with a reverse proxy if
   exposed.
 
+## Open questions
+
+- **Late ENS attribution.** A sender posts at block N with no ENS,
+  then registers / sets a primary name at block N+k. The post was
+  already projected, so `twitter.posts.sender_ens` is frozen at
+  `null`. The enricher cache will pick up the new name eventually
+  (5min miss TTL), but that only affects *future* projections —
+  existing rows are never revisited. Two responsibilities are
+  conflated today: "ENS at message inclusion block" (stake-style,
+  reproducible) and "ENS as displayed in the UI" (live, follows
+  the sender). The current code does neither cleanly — it captures
+  ENS at indexer-head at first-projection time, which is a function
+  of indexer lag rather than the sender's intent. Candidate
+  resolutions: (a) drop `sender_ens` from `twitter.posts` and JOIN
+  against a `senders` table keyed on address that a background
+  job refreshes; (b) keep the column but add a periodic
+  reproject-ens sweep; (c) make ENS strictly query-time and let the
+  BFF resolve. Decision deferred until comments / blobble handlers
+  land and we see whether the same shape applies to them.
+
 ## Out of scope (deferred)
 
 - **Comments + blobble handlers** — Phase 2. The framework should

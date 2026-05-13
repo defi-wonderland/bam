@@ -14,6 +14,8 @@ import type { ConfirmedRow } from './confirmed-row';
 export interface DisplayTweet {
   id: string;
   sender: string;
+  /** Indexer-resolved primary ENS for `sender`. Null when not set on the indexed chain, undefined when source isn't the indexer. */
+  senderEns?: string | null;
   nonce: string;
   timestamp: number;
   content: string;
@@ -100,6 +102,7 @@ async function fetchConfirmed(): Promise<DisplayTweet[]> {
       out.push({
         id: m.message_id,
         sender: m.sender,
+        senderEns: m.sender_ens ?? null,
         nonce: m.nonce,
         timestamp: m.timestamp,
         content: m.content,
