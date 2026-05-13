@@ -22,43 +22,29 @@ out the application-logic line.
 
 ## End-to-end lifecycle (Twitter as the worked example)
 
-```
-        ┌─────────────┐  POST /submit   ┌──────────┐  type-3 blob tx   ┌──────┐
-Composer├────────────►│ bam-poster ├──►│   L1     │
-        └─────────────┘                  └──────────┘                   └──────┘
-                                                                            │
-                                                BlobBatchRegistered event   │
-                                                                            ▼
-        ┌──────────────────────────────────────────────────────────────┐
-        │ bam-reader: log-scan → blob fetch → decode → verify          │
-        │             upserts MessageRow into bam-store.messages       │
-        └──────────────────────────────────────────────────────────────┘
-                                                                            │
-                                                  read-only role            │
-                                                  (indexer_reader)          │
-                                                                            ▼
-        ┌──────────────────────────────────────────────────────────────┐
-        │ bam-indexer tick (every INDEXER_POLL_MS):                    │
-        │  1. forward pass — pull confirmed rows past handler cursor   │
-        │  2. for each: decode → enrich → project (one write txn)      │
-        │  3. reorg pass — apply onReorg for batches reorged since     │
-        │     last tick (cursors on batches.invalidated_at)            │
-        │  writes go to per-handler schema (e.g. twitter.posts)        │
-        └──────────────────────────────────────────────────────────────┘
-                                                                            │
-                                              GET /twitter/posts            │
-                                                                            ▼
-        ┌──────────────────────────────────────────────────────────────┐
-        │ apps/bam-twitter Next route /api/confirmed-messages:         │
-        │  - prefers indexer (decoded server-side, ENS resolved)       │
-        │  - falls back to bam-reader /messages when indexer is down   │
-        └──────────────────────────────────────────────────────────────┘
-                                                                            │
-                                                                            ▼
-                                                                       Timeline UI
+```mermaid
+graph TD
+    Composer["Composer<br/>(FE wallet)"]
+    Poster["bam-poster"]
+    L1(("L1"))
+    Reader["bam-reader<br/>log-scan → blob fetch → decode → verify"]
+    Store[("bam-store (Postgres)<br/>messages + batches")]
+    Indexer["bam-indexer tick<br/>forward + reorg passes<br/>writes per-handler schema<br/>(e.g. twitter.posts)"]
+    App["apps/bam-twitter<br/>/api/confirmed-messages"]
+    UI(["Timeline UI"])
+
+    Composer -->|POST /submit| Poster
+    Poster -->|type-3 blob tx| L1
+    L1 -->|BlobBatchRegistered| Reader
+    Reader -->|upserts MessageRow| Store
+    Store -->|"read-only role<br/>(indexer_reader)"| Indexer
+    Indexer -->|GET /twitter/posts| App
+    App --> UI
+
+    Reader -.->|"degraded-mode fallback<br/>(GET /messages)"| App
 ```
 
-The fallback in the last step is the constitution's "degraded mode"
+The dotted edge is the constitution's "degraded mode"
 (`.specify/memory/constitution.md:105`): the Reader is the only
 required dependency; the indexer is a richer cache on top.
 
