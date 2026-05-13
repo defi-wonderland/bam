@@ -37,7 +37,7 @@ bytes 2..     : kind-specific payload
 
 `parentMessageHash` is the ERC-8180 `messageHash` (`keccak256(sender ‖ nonce ‖ contents)`) — chain-agnostic, computable pre-batch, and stable across the pending → confirmed transition. The Timeline groups replies under their parent on this hash; orphan replies (parent not in the visible window) are hidden.
 
-The single source of truth for this codec is `src/lib/contents-codec.ts`. A round-trip + negative test suite lives at `test/lib/contents-codec.test.ts`.
+The single source of truth for this codec is the `bam-app-codecs` package — entrypoint `bam-app-codecs/twitter` (`packages/bam-app-codecs/src/twitter/index.ts`). A round-trip + negative test suite lives alongside it at `packages/bam-app-codecs/src/twitter/index.test.ts`. The codec is browser-safe (audited in `packages/bam-app-codecs/tests/browser-audit.test.ts`) and used by the Composer here as well as by the `bam-indexer` Twitter handler.
 
 ## Setup
 
