@@ -36,6 +36,12 @@ class FakeClient {
   readonly queries: Recorded[] = [];
   cursorRow: Record<string, unknown> | null = null;
   shouldFailProject = false;
+  // Per-attempt failure: throw on the first N project / delete attempts,
+  // then succeed. Lets tests model failure-then-success scenarios.
+  projectFailFirst = 0;
+  deleteFailFirst = 0;
+  private projectAttempts = 0;
+  private deleteAttempts = 0;
   twitterRows: Array<{ messageId: string; batchRef: string }> = [];
 
   async query(sql: string, params: unknown[] = []): Promise<{ rowCount: number; rows: unknown[] }> {
@@ -58,7 +64,8 @@ class FakeClient {
       return { rowCount: 1, rows: [] };
     }
     if (sql.includes('INSERT INTO twitter.posts')) {
-      if (this.shouldFailProject) {
+      this.projectAttempts += 1;
+      if (this.shouldFailProject || this.projectAttempts <= this.projectFailFirst) {
         throw new Error('synthetic project failure');
       }
       const messageId = String(params[0]);
@@ -69,6 +76,10 @@ class FakeClient {
       return { rowCount: 1, rows: [] };
     }
     if (sql.includes('DELETE FROM twitter.posts')) {
+      this.deleteAttempts += 1;
+      if (this.deleteAttempts <= this.deleteFailFirst) {
+        throw new Error('synthetic onReorg failure');
+      }
       const ref = String(params[0]);
       this.twitterRows = this.twitterRows.filter((r) => r.batchRef !== ref);
       return { rowCount: 1, rows: [] };
@@ -219,6 +230,25 @@ describe('tick — forward pass', () => {
     // Cursor was seeded at -1/-1/-1; nothing should have advanced it.
     expect(client.cursorRow?.last_block_number).toBe(String(-1));
   });
+
+  it('stops at first project failure; later rows are not processed and cursor stays put', async () => {
+    // Regression: previously the loop bumped `forward` in-memory on a project
+    // failure, so a subsequent successful row's `upsertCursor` would persist
+    // a coordinate past the failure — permanently skipping the retry.
+    const a = encodeTwitterContents(TWITTER_TAG, { kind: 'post', timestamp: 1, content: 'a' });
+    const b = encodeTwitterContents(TWITTER_TAG, { kind: 'post', timestamp: 2, content: 'b' });
+    const source = new FakeSource([row(1, a), row(2, b)]);
+    const client = new FakeClient();
+    client.projectFailFirst = 1; // first INSERT throws, second would succeed
+    const pool = new FakePool(client);
+    const result = await tick(makeTickOpts({ source: source as never, pool }));
+    expect(result.byHandler.twitter.skippedConflict).toBe(1);
+    expect(result.byHandler.twitter.projected).toBe(0);
+    expect(client.twitterRows).toHaveLength(0);
+    // Cursor MUST still be at genesis so the next tick re-pulls both rows.
+    expect(client.cursorRow?.last_block_number).toBe(String(-1));
+    expect(client.cursorRow?.last_tx_index).toBe(String(-1));
+  });
 });
 
 describe('tick — reorg pass', () => {
@@ -257,5 +287,27 @@ describe('tick — reorg pass', () => {
     const pool = new FakePool(client);
     const result = await tick(makeTickOpts({ source: source as never, pool }));
     expect(result.byHandler.twitter.reorged).toBe(0);
+  });
+
+  it('stops at first onReorg failure; later reorgs are not processed and cursor stays put', async () => {
+    // Regression: same shape as the forward-pass bug — a failed onReorg
+    // followed by a successful one would persist a reorg cursor past the
+    // failure and silently lose the cascade.
+    const txA = ('0x' + '11'.repeat(32)) as Bytes32;
+    const txB = ('0x' + '22'.repeat(32)) as Bytes32;
+    const source = new FakeSource(
+      [],
+      [
+        { txHash: txA, invalidatedAt: 500 },
+        { txHash: txB, invalidatedAt: 1000 },
+      ]
+    );
+    const client = new FakeClient();
+    client.deleteFailFirst = 1; // first onReorg DELETE throws, second would succeed
+    const pool = new FakePool(client);
+    const result = await tick(makeTickOpts({ source: source as never, pool }));
+    expect(result.byHandler.twitter.reorged).toBe(0);
+    // Reorg cursor must stay at genesis (-1) so the next tick re-pulls both.
+    expect(client.cursorRow?.last_reorg_invalidated_at).toBe(String(-1));
   });
 });

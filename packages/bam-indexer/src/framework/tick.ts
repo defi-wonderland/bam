@@ -86,20 +86,18 @@ async function tickHandler<E>(
   for (const row of rows) {
     const next = await projectOne(handler, row, forward, opts, counters);
     if (next === null) {
-      // `null` here means the project step itself threw and we
-      // logged-and-continued — advance forward anyway so we don't
-      // wedge on a poison row.
-      forward = {
-        ...forward,
-        lastBlockNumber: row.blockNumber ?? forward.lastBlockNumber,
-        lastTxIndex: row.txIndex ?? forward.lastTxIndex,
-        lastMsgIndex:
-          row.messageIndexWithinBatch ?? forward.lastMsgIndex,
-        updatedAt: Date.now(),
-      };
-    } else {
-      forward = next;
+      // `null` means `handler.project` threw — `projectOne` rolled
+      // back the txn so the cursor was NOT persisted. We must stop
+      // the loop here: if we kept going and a later row succeeded,
+      // its successful `upsertCursor` would persist a coordinate
+      // strictly past this failed row and we'd never retry it. Next
+      // tick re-pulls from the unchanged persisted cursor.
+      // (Decode failure is a different path — `projectOne` returns
+      //  the advanced cursor in that case so a poison payload doesn't
+      //  wedge the loop.)
+      break;
     }
+    forward = next;
   }
 
   // ── Reorg pass ─────────────────────────────────────────────────
@@ -113,17 +111,13 @@ async function tickHandler<E>(
   for (const r of reorged) {
     const next = await reorgOne(handler, r, forward, opts, counters);
     if (next === null) {
-      forward = {
-        ...forward,
-        lastReorgInvalidatedAt: Math.max(
-          forward.lastReorgInvalidatedAt,
-          r.invalidatedAt
-        ),
-        updatedAt: Date.now(),
-      };
-    } else {
-      forward = next;
+      // Same invariant as the forward loop: `onReorg` threw, the txn
+      // rolled back, the reorg cursor was NOT persisted. Stop here
+      // so a later success can't jump the persisted cursor past this
+      // failure and silently lose the reorg cascade.
+      break;
     }
+    forward = next;
   }
 
   return counters;
