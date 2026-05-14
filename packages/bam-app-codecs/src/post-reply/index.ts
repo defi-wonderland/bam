@@ -1,7 +1,9 @@
 /**
- * bam-twitter's app-opaque codec for the bytes after the 32-byte
- * contentTag prefix. Multiple message kinds (post, reply) share the
- * same contentTag and one feed; the kind byte discriminates.
+ * Generic post/reply codec for the bytes after the 32-byte contentTag
+ * prefix. Two message kinds (`post`, `reply`) share one contentTag /
+ * one feed; the kind byte discriminates. Used by bam-twitter today;
+ * any app that wants flat post + one-level reply threading can
+ * pick a unique contentTag and reuse this codec.
  *
  * Layout inside `contents[32:]` (`appBytes`):
  *   byte  0       : version (uint8) — currently 0x01
@@ -21,8 +23,8 @@
  *
  * The 32-byte contentTag prefix is added by `encodeContents` in
  * bam-sdk; this module produces / consumes only the app-opaque
- * portion. Single source of truth for both Composer and indexer
- * handlers.
+ * portion. Single source of truth for Composers (FE) and indexer
+ * `post-reply` handlers.
  */
 
 import { encodeContents, splitContents, type Bytes32 } from 'bam-sdk/browser';
@@ -31,7 +33,7 @@ const ENVELOPE_VERSION = 0x01;
 const KIND_POST = 0x00;
 const KIND_REPLY = 0x01;
 
-export type TwitterMessage =
+export type PostReplyMessage =
   | { kind: 'post'; timestamp: number; content: string }
   | {
       kind: 'reply';
@@ -43,9 +45,9 @@ export type TwitterMessage =
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder('utf-8', { fatal: true });
 
-export function encodeTwitterContents(
+export function encodePostReplyContents(
   contentTag: Bytes32,
-  msg: TwitterMessage
+  msg: PostReplyMessage
 ): Uint8Array {
   if (
     !Number.isInteger(msg.timestamp) ||
@@ -85,17 +87,17 @@ export function encodeTwitterContents(
 }
 
 /**
- * Inverse of `encodeTwitterContents`. Throws on short buffer, unknown
+ * Inverse of `encodePostReplyContents`. Throws on short buffer, unknown
  * version/kind, declared content length that overruns the payload, or
  * invalid UTF-8.
  */
-export function decodeTwitterContents(contents: Uint8Array): {
+export function decodePostReplyContents(contents: Uint8Array): {
   contentTag: Bytes32;
-  app: TwitterMessage;
+  app: PostReplyMessage;
 } {
   const { contentTag, appBytes } = splitContents(contents);
   if (appBytes.length < 2) {
-    throw new RangeError('twitter contents too short for envelope header');
+    throw new RangeError('post-reply contents too short for envelope header');
   }
   const version = appBytes[0];
   const kind = appBytes[1];
@@ -133,7 +135,7 @@ export function decodeTwitterContents(contents: Uint8Array): {
     };
   }
 
-  throw new RangeError(`unknown twitter kind: ${kind}`);
+  throw new RangeError(`unknown post-reply kind: ${kind}`);
 }
 
 function writeU32BE(buf: Uint8Array, offset: number, value: number): void {
