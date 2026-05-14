@@ -24,11 +24,11 @@ export class HandlerRegistry {
     const seenName = new Set<string>();
     const seenSchema = new Set<string>();
     for (const h of handlers) {
-      const tagKey = h.contentTag.toLowerCase();
+      const tagKey = h.contentTag.toLowerCase() as Bytes32;
       if (seenTag.has(tagKey)) {
         throw new Error(
           `duplicate contentTag among handlers: ${h.contentTag} ` +
-            `(handlers ${this.byTag.get(h.contentTag as Bytes32)?.name} and ${h.name})`
+            `(handlers ${this.byTag.get(tagKey)?.name} and ${h.name})`
         );
       }
       if (seenName.has(h.name)) {
@@ -40,7 +40,9 @@ export class HandlerRegistry {
       seenTag.add(tagKey);
       seenName.add(h.name);
       seenSchema.add(h.schema);
-      this.byTag.set(h.contentTag, h);
+      // Store under the lowercased tag so lookups are case-insensitive
+      // and stay consistent with the uniqueness invariant above.
+      this.byTag.set(tagKey, h);
       this.byName.set(h.name, h);
     }
     this.order = handlers;
@@ -51,7 +53,7 @@ export class HandlerRegistry {
   }
 
   byContentTag(tag: Bytes32): IndexerHandler<unknown> | undefined {
-    return this.byTag.get(tag);
+    return this.byTag.get(tag.toLowerCase() as Bytes32);
   }
 
   get(name: string): IndexerHandler<unknown> {

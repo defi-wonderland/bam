@@ -45,6 +45,16 @@ describe('HandlerRegistry', () => {
     expect(r.byContentTag(('0x' + 'cc'.repeat(32)) as Bytes32)).toBeUndefined();
   });
 
+  it('lookup is case-insensitive (matches the uniqueness invariant)', () => {
+    // Handler registered with mixed-case tag…
+    const tagMixed = ('0x' + 'AbCd'.repeat(16)) as Bytes32;
+    const a = stub(tagMixed, 'a', 'a');
+    const r = new HandlerRegistry([a]);
+    // …and the same tag in lowercase / uppercase both resolve to it.
+    expect(r.byContentTag(tagMixed.toLowerCase() as Bytes32)).toBe(a);
+    expect(r.byContentTag(tagMixed.toUpperCase().replace('0X', '0x') as Bytes32)).toBe(a);
+  });
+
   it('rejects duplicate contentTag', () => {
     const a = stub('0x' + 'aa'.repeat(32), 'a', 'a');
     const b = stub('0x' + 'aa'.repeat(32), 'b', 'b');
