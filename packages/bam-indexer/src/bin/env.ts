@@ -32,9 +32,12 @@ export function parseEnv(env: NodeJS.ProcessEnv = process.env): IndexerConfig {
   // local stack works out of the box.
 
   const rpcUrl = nonEmpty(env.INDEXER_RPC_URL);
-  const pollMs = parsePositiveInt(env.INDEXER_POLL_MS, DEFAULT_POLL_MS, 'INDEXER_POLL_MS');
-  const batchSize = parsePositiveInt(env.INDEXER_BATCH_SIZE, DEFAULT_BATCH_SIZE, 'INDEXER_BATCH_SIZE');
+  // poll cadence and batch size must be > 0: a zero poll spins the
+  // serve loop tightly, a zero batch wedges forward progress.
+  const pollMs = parsePositiveInt(env.INDEXER_POLL_MS, DEFAULT_POLL_MS, 'INDEXER_POLL_MS', 1);
+  const batchSize = parsePositiveInt(env.INDEXER_BATCH_SIZE, DEFAULT_BATCH_SIZE, 'INDEXER_BATCH_SIZE', 1);
   const httpBind = env.INDEXER_HTTP_BIND ?? DEFAULT_HTTP_BIND;
+  // Port 0 is legitimate: Node binds an OS-assigned port (handy in tests).
   const httpPort = parsePositiveInt(env.INDEXER_HTTP_PORT, DEFAULT_HTTP_PORT, 'INDEXER_HTTP_PORT');
 
   return {
@@ -49,7 +52,12 @@ export function parseEnv(env: NodeJS.ProcessEnv = process.env): IndexerConfig {
   };
 }
 
-function parsePositiveInt(raw: string | undefined, fallback: number, name: string): number {
+function parsePositiveInt(
+  raw: string | undefined,
+  fallback: number,
+  name: string,
+  min = 0,
+): number {
   if (raw === undefined || raw === '') return fallback;
   if (!/^[0-9]+$/.test(raw)) {
     throw new EnvConfigError(`${name} is not a non-negative integer: ${raw}`);
@@ -57,6 +65,9 @@ function parsePositiveInt(raw: string | undefined, fallback: number, name: strin
   const n = Number(raw);
   if (!Number.isSafeInteger(n)) {
     throw new EnvConfigError(`${name} is not a safe integer: ${raw}`);
+  }
+  if (n < min) {
+    throw new EnvConfigError(`${name} must be >= ${min}: ${raw}`);
   }
   return n;
 }
