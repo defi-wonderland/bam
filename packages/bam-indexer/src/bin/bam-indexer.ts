@@ -60,9 +60,8 @@ async function runServe(): Promise<number> {
     throw err;
   }
   const indexer = await createIndexer(cfg, { handlers: HANDLERS });
-  process.stderr.write(
-    `[bam-indexer] listening on http://${indexer['port']?.() ? `${(await indexer.health()).host}:${(await indexer.health()).port}` : 'unknown'}\n`
-  );
+  const { host, port } = await indexer.health();
+  process.stderr.write(`[bam-indexer] listening on http://${host}:${port}\n`);
   const shutdown = async (signal: string): Promise<void> => {
     process.stderr.write(`[bam-indexer] ${signal} received; shutting down\n`);
     await indexer.close();
