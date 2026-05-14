@@ -184,7 +184,7 @@ const repliesHandler = async (
             message_index_within_batch, sender_ens
        FROM twitter.posts
       WHERE kind = 1 AND parent_message_hash = $1
-      ORDER BY timestamp ASC, block_number ASC, tx_index ASC
+      ORDER BY timestamp ASC, block_number ASC, tx_index ASC, message_index_within_batch ASC
       LIMIT $2`,
     [parent.toLowerCase(), limit]
   );
