@@ -19,12 +19,21 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { config as dotenvConfig } from 'dotenv';
 
+import type { Bytes32 } from 'bam-sdk';
+
 import { createIndexer } from '../factory.js';
 import { EnvConfigError, parseEnv } from './env.js';
-import { twitterHandler } from '../handlers/twitter/handler.js';
+import { createPostReplyHandler } from '../handlers/post-reply/handler.js';
 import { UnknownHandlerError } from '../errors.js';
 
-const HANDLERS = [twitterHandler];
+// keccak256(utf8("bam-twitter.v1")) — must stay in sync with
+// `apps/bam-twitter/src/lib/constants.ts`.
+const TWITTER_TAG =
+  '0xf0fea94ffd2ae32ed878c57e3427bbffab46d333d09837bc640d952795090718' as Bytes32;
+
+const HANDLERS = [
+  createPostReplyHandler({ name: 'twitter', contentTag: TWITTER_TAG, schema: 'twitter' }),
+];
 
 function loadDotenv(): void {
   const explicit = process.env.INDEXER_ENV_FILE;

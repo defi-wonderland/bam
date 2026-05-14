@@ -4,7 +4,7 @@
  * Each app's codec is exposed via a subpath export so consumers only
  * pull in what they need:
  *
- *   import { encodeTwitterContents } from 'bam-app-codecs/twitter';
+ *   import { encodePostReplyContents } from 'bam-app-codecs/post-reply';
  *
  * The top-level barrel is intentionally empty. The browser-bundle
  * audit at `tests/browser-audit.test.ts` enforces that every codec

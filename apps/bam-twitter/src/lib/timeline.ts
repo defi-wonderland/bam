@@ -6,7 +6,7 @@
  * interval regardless of how many components subscribe.
  */
 
-import { decodeTwitterContents } from 'bam-app-codecs/twitter';
+import { decodePostReplyContents } from 'bam-app-codecs/post-reply';
 import type { Bytes32 } from 'bam-sdk/browser';
 
 import type { ConfirmedRow } from './confirmed-row';
@@ -52,7 +52,7 @@ function safeDecode(contentsHex: string): {
   parentMessageHash: Bytes32 | null;
 } | null {
   try {
-    const { app } = decodeTwitterContents(hexToBytes(contentsHex));
+    const { app } = decodePostReplyContents(hexToBytes(contentsHex));
     if (app.kind === 'reply') {
       return {
         timestamp: app.timestamp,

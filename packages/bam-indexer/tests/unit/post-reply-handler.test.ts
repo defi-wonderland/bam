@@ -1,26 +1,35 @@
 /**
- * Twitter handler unit tests against a recording fake `PoolClient`.
+ * `post-reply` handler unit tests against a recording fake `PoolClient`.
+ *
+ * The handler is constructed via `createPostReplyHandler` with
+ * twitter-shaped opts (`{name:'twitter', schema:'twitter', ...}`) so the
+ * SQL and route shape match what bam-twitter sees at runtime.
  *
  * Covers:
  *  - decode happy path (post + reply round-trip)
- *  - decode null on malformed input (string instead of bytes, etc.)
- *  - project emits the expected INSERT with the canonical column
- *    order and lowercases hex inputs
+ *  - decode null on malformed input
+ *  - project emits the expected INSERT with canonical column order +
+ *    lowercased hex
  *  - project refuses confirmed rows missing chain coord
  *  - onReorg deletes by batch_ref
  *  - migrate runs the expected DDL set
  */
 
 import { describe, expect, it } from 'vitest';
-import { encodeTwitterContents } from 'bam-app-codecs/twitter';
+import { encodePostReplyContents } from 'bam-app-codecs/post-reply';
 import type { Address, Bytes32 } from 'bam-sdk';
 import type { MessageRow } from 'bam-store';
 
-import {
-  twitterHandler,
-  TWITTER_TAG,
-} from '../../src/handlers/twitter/handler.js';
-import { TWITTER_DDL } from '../../src/handlers/twitter/schema.js';
+import { createPostReplyHandler } from '../../src/handlers/post-reply/handler.js';
+import { postReplyDdl } from '../../src/handlers/post-reply/schema.js';
+
+const TWITTER_TAG = ('0x' + 'f0'.repeat(32)) as Bytes32;
+const handler = createPostReplyHandler({
+  name: 'twitter',
+  contentTag: TWITTER_TAG,
+  schema: 'twitter',
+});
+const DDL = postReplyDdl('twitter');
 
 interface RecordedQuery {
   sql: string;
@@ -65,60 +74,60 @@ function confirmedRow(overrides: Partial<MessageRow> & { contents: Uint8Array })
   };
 }
 
-describe('twitterHandler.decode', () => {
+describe('post-reply handler.decode', () => {
   it('round-trips a post payload', () => {
-    const bytes = encodeTwitterContents(TWITTER_TAG, {
+    const bytes = encodePostReplyContents(TWITTER_TAG, {
       kind: 'post',
       timestamp: 1700,
       content: 'hello',
     });
-    const decoded = twitterHandler.decode(bytes);
+    const decoded = handler.decode(bytes);
     expect(decoded).toEqual({ kind: 'post', timestamp: 1700, content: 'hello' });
   });
 
   it('round-trips a reply payload', () => {
-    const bytes = encodeTwitterContents(TWITTER_TAG, {
+    const bytes = encodePostReplyContents(TWITTER_TAG, {
       kind: 'reply',
       timestamp: 1700,
       parentMessageHash: PARENT_HASH,
       content: 'reply',
     });
-    const decoded = twitterHandler.decode(bytes);
+    const decoded = handler.decode(bytes);
     expect(decoded?.kind).toBe('reply');
     expect((decoded as { content: string }).content).toBe('reply');
   });
 
   it('returns null on truncated input rather than throwing', () => {
     const bytes = new Uint8Array(10);
-    expect(twitterHandler.decode(bytes)).toBeNull();
+    expect(handler.decode(bytes)).toBeNull();
   });
 });
 
-describe('twitterHandler.migrate', () => {
+describe('post-reply handler.migrate', () => {
   it('runs the documented DDL set', async () => {
     const c = new FakeClient();
-    await twitterHandler.migrate(c as never);
-    expect(c.queries).toHaveLength(TWITTER_DDL.length);
-    for (let i = 0; i < TWITTER_DDL.length; i++) {
-      expect(c.queries[i].sql).toBe(TWITTER_DDL[i]);
+    await handler.migrate(c as never);
+    expect(c.queries).toHaveLength(DDL.length);
+    for (let i = 0; i < DDL.length; i++) {
+      expect(c.queries[i].sql).toBe(DDL[i]);
     }
   });
 });
 
-describe('twitterHandler.project', () => {
+describe('post-reply handler.project', () => {
   it('inserts a post row with lowercased hex and resolved ENS', async () => {
-    const bytes = encodeTwitterContents(TWITTER_TAG, {
+    const bytes = encodePostReplyContents(TWITTER_TAG, {
       kind: 'post',
       timestamp: 9001,
       content: 'gm',
     });
     const row = confirmedRow({ contents: bytes });
     const c = new FakeClient();
-    await twitterHandler.project(
+    await handler.project(
       row,
       { kind: 'post', timestamp: 9001, content: 'gm' },
       { ens: 'ace.eth' },
-      c as never
+      c as never,
     );
     expect(c.queries).toHaveLength(1);
     const q = c.queries[0];
@@ -142,7 +151,7 @@ describe('twitterHandler.project', () => {
   });
 
   it('inserts a reply row with lowercased parent hash', async () => {
-    const bytes = encodeTwitterContents(TWITTER_TAG, {
+    const bytes = encodePostReplyContents(TWITTER_TAG, {
       kind: 'reply',
       timestamp: 9001,
       parentMessageHash: PARENT_HASH,
@@ -150,7 +159,7 @@ describe('twitterHandler.project', () => {
     });
     const row = confirmedRow({ contents: bytes });
     const c = new FakeClient();
-    await twitterHandler.project(
+    await handler.project(
       row,
       {
         kind: 'reply',
@@ -159,7 +168,7 @@ describe('twitterHandler.project', () => {
         content: 're',
       },
       { ens: null },
-      c as never
+      c as never,
     );
     expect(c.queries[0].params[4]).toBe(1); // kind = reply
     expect(c.queries[0].params[7]).toBe(PARENT_HASH.toLowerCase());
@@ -167,7 +176,7 @@ describe('twitterHandler.project', () => {
   });
 
   it('throws when messageId is null (Reader-side bug guard)', async () => {
-    const bytes = encodeTwitterContents(TWITTER_TAG, {
+    const bytes = encodePostReplyContents(TWITTER_TAG, {
       kind: 'post',
       timestamp: 1,
       content: 'x',
@@ -175,17 +184,17 @@ describe('twitterHandler.project', () => {
     const row = confirmedRow({ contents: bytes, messageId: null });
     const c = new FakeClient();
     await expect(
-      twitterHandler.project(
+      handler.project(
         row,
         { kind: 'post', timestamp: 1, content: 'x' },
         {},
-        c as never
-      )
+        c as never,
+      ),
     ).rejects.toThrow(/missing message_id/);
   });
 
   it('throws when chain coord is incomplete', async () => {
-    const bytes = encodeTwitterContents(TWITTER_TAG, {
+    const bytes = encodePostReplyContents(TWITTER_TAG, {
       kind: 'post',
       timestamp: 1,
       content: 'x',
@@ -193,20 +202,20 @@ describe('twitterHandler.project', () => {
     const row = confirmedRow({ contents: bytes, blockNumber: null });
     const c = new FakeClient();
     await expect(
-      twitterHandler.project(
+      handler.project(
         row,
         { kind: 'post', timestamp: 1, content: 'x' },
         {},
-        c as never
-      )
+        c as never,
+      ),
     ).rejects.toThrow(/chain coord/);
   });
 });
 
-describe('twitterHandler.onReorg', () => {
+describe('post-reply handler.onReorg', () => {
   it('deletes by lowercased batch_ref', async () => {
     const c = new FakeClient();
-    await twitterHandler.onReorg(TX_HASH, 11155111, c as never);
+    await handler.onReorg(TX_HASH, 11155111, c as never);
     expect(c.queries).toHaveLength(1);
     expect(c.queries[0].sql).toMatch(/DELETE FROM twitter\.posts WHERE batch_ref = \$1/);
     expect(c.queries[0].params).toEqual([TX_HASH.toLowerCase()]);

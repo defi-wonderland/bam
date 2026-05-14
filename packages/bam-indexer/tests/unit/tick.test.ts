@@ -13,7 +13,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { encodeTwitterContents } from 'bam-app-codecs/twitter';
+import { encodePostReplyContents } from 'bam-app-codecs/post-reply';
 import type { Address, Bytes32 } from 'bam-sdk';
 import type { MessageRow } from 'bam-store';
 
@@ -22,10 +22,16 @@ import { tick } from '../../src/framework/tick.js';
 import type { BamStoreSource, ReorgEntry } from '../../src/source/bam-store-source.js';
 import type { EnricherPool } from '../../src/enrichers/types.js';
 import type { IndexerHandler } from '../../src/framework/handler.js';
-import {
-  twitterHandler,
-  TWITTER_TAG,
-} from '../../src/handlers/twitter/handler.js';
+import { createPostReplyHandler } from '../../src/handlers/post-reply/handler.js';
+
+// Local fixture: a `post-reply` handler with twitter-shaped opts so the
+// SQL these tests assert against (twitter.posts) stays byte-identical.
+const TWITTER_TAG = ('0x' + 'f0'.repeat(32)) as Bytes32;
+const twitterHandler = createPostReplyHandler({
+  name: 'twitter',
+  contentTag: TWITTER_TAG,
+  schema: 'twitter',
+});
 
 interface Recorded {
   sql: string;
@@ -186,8 +192,8 @@ function makeTickOpts(opts: {
 
 describe('tick — forward pass', () => {
   it('projects every confirmed row and advances the cursor monotonically', async () => {
-    const bytesA = encodeTwitterContents(TWITTER_TAG, { kind: 'post', timestamp: 1, content: 'a' });
-    const bytesB = encodeTwitterContents(TWITTER_TAG, { kind: 'post', timestamp: 2, content: 'b' });
+    const bytesA = encodePostReplyContents(TWITTER_TAG, { kind: 'post', timestamp: 1, content: 'a' });
+    const bytesB = encodePostReplyContents(TWITTER_TAG, { kind: 'post', timestamp: 2, content: 'b' });
     const source = new FakeSource([row(1, bytesA), row(2, bytesB)]);
     const client = new FakeClient();
     const pool = new FakePool(client);
@@ -205,7 +211,7 @@ describe('tick — forward pass', () => {
   });
 
   it('skips malformed payloads but advances the cursor past them', async () => {
-    const good = encodeTwitterContents(TWITTER_TAG, { kind: 'post', timestamp: 1, content: 'a' });
+    const good = encodePostReplyContents(TWITTER_TAG, { kind: 'post', timestamp: 1, content: 'a' });
     const bad = new Uint8Array(5); // too short
     const source = new FakeSource([row(1, bad), row(2, good)]);
     const client = new FakeClient();
@@ -219,7 +225,7 @@ describe('tick — forward pass', () => {
   });
 
   it('does NOT advance the cursor when project itself throws', async () => {
-    const good = encodeTwitterContents(TWITTER_TAG, { kind: 'post', timestamp: 1, content: 'a' });
+    const good = encodePostReplyContents(TWITTER_TAG, { kind: 'post', timestamp: 1, content: 'a' });
     const source = new FakeSource([row(1, good)]);
     const client = new FakeClient();
     client.shouldFailProject = true;
@@ -235,8 +241,8 @@ describe('tick — forward pass', () => {
     // Regression: previously the loop bumped `forward` in-memory on a project
     // failure, so a subsequent successful row's `upsertCursor` would persist
     // a coordinate past the failure — permanently skipping the retry.
-    const a = encodeTwitterContents(TWITTER_TAG, { kind: 'post', timestamp: 1, content: 'a' });
-    const b = encodeTwitterContents(TWITTER_TAG, { kind: 'post', timestamp: 2, content: 'b' });
+    const a = encodePostReplyContents(TWITTER_TAG, { kind: 'post', timestamp: 1, content: 'a' });
+    const b = encodePostReplyContents(TWITTER_TAG, { kind: 'post', timestamp: 2, content: 'b' });
     const source = new FakeSource([row(1, a), row(2, b)]);
     const client = new FakeClient();
     client.projectFailFirst = 1; // first INSERT throws, second would succeed
@@ -253,7 +259,7 @@ describe('tick — forward pass', () => {
 
 describe('tick — reorg pass', () => {
   it('calls onReorg for each reorged batch and bumps the reorg cursor', async () => {
-    const good = encodeTwitterContents(TWITTER_TAG, { kind: 'post', timestamp: 1, content: 'a' });
+    const good = encodePostReplyContents(TWITTER_TAG, { kind: 'post', timestamp: 1, content: 'a' });
     const source = new FakeSource(
       [row(1, good)],
       [

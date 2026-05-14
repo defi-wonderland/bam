@@ -37,9 +37,21 @@ bam-reader ── upserts ──► bam-store (Postgres)
 
 ## Handlers shipped in this package
 
-| Handler | `contentTag` | Schema | Routes |
+The package ships one handler **factory** — `createPostReplyHandler` —
+for the flat post + one-level reply primitive (post / reply with utf-8
+content, parent linked by ERC-8180 `messageHash`). Each app that wants
+this shape calls the factory with its own `(contentTag, schema, name)`
+and the framework registers the result side-by-side with any other
+handlers.
+
+`src/bin/bam-indexer.ts` instantiates it once for the bam-twitter demo:
+
+| Instance | `contentTag` | Schema | Routes |
 |---|---|---|---|
-| `twitter` | `keccak256(utf8("bam-twitter.v1"))` | `twitter` | `GET /twitter/posts`, `GET /twitter/posts/:messageId`, `GET /twitter/replies`, `GET /twitter/profile/:sender` |
+| `twitter` (post-reply) | `keccak256(utf8("bam-twitter.v1"))` | `twitter` | `GET /twitter/posts`, `GET /twitter/posts/:messageId`, `GET /twitter/replies`, `GET /twitter/profile/:sender` |
+
+A second app sharing this Poster appends another `createPostReplyHandler({...})`
+to the `HANDLERS` array — that's the whole change on the indexer side.
 
 The framework's built-in route is `GET /health`.
 
@@ -115,12 +127,37 @@ as advisory.
 under that `batch_ref` (`status='reorged'`). The indexer cursors on
 `batches.invalidated_at` — a per-handler "highest seen" — and calls
 `handler.onReorg(reorgedTxHash, chainId, txn)` for each newly
-reorged batch. The Twitter handler `DELETE`s by `batch_ref`, which
+reorged batch. The post-reply handler `DELETE`s by `batch_ref`, which
 matches Reader's cascade.
 
 ## Adding a handler
 
-A handler is a TypeScript module exporting an `IndexerHandler<E>`:
+### Reusing the `post-reply` primitive
+
+If your app fits the flat post + one-level reply shape (utf-8 content,
+optional `parentMessageHash`, ENS-resolved sender), call the factory
+directly and add it to `HANDLERS` in `src/bin/bam-indexer.ts`:
+
+```ts
+import { createPostReplyHandler } from 'bam-indexer';
+
+const MY_APP_TAG = '0x…' as Bytes32; // keccak256("my-app.v1")
+const myAppHandler = createPostReplyHandler({
+  name: 'my-app',
+  contentTag: MY_APP_TAG,
+  schema: 'my_app',
+  // routePrefix defaults to `/${name}`
+});
+```
+
+The factory wires the schema (`<schema>.posts`), the four routes
+(`/${name}/posts`, `/${name}/posts/:messageId`, `/${name}/replies`,
+`/${name}/profile/:sender`), the ENS enricher, and the reorg cascade.
+
+### Authoring a new handler shape
+
+If your app needs a different entity model (nested threads, comments
+keyed by post-id, etc.), implement `IndexerHandler<E>` from scratch:
 
 ```ts
 import { decodeMyContents } from 'bam-app-codecs/my-app';

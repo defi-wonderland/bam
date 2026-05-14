@@ -12,9 +12,9 @@
       "import": "./dist/esm/index.js",
       "types": "./dist/types/index.d.ts"
     },
-    "./twitter": {
-      "import": "./dist/esm/twitter/index.js",
-      "types": "./dist/types/twitter/index.d.ts"
+    "./post-reply": {
+      "import": "./dist/esm/post-reply/index.js",
+      "types": "./dist/types/post-reply/index.d.ts"
     }
   },
   "files": [

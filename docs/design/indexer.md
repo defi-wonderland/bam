@@ -20,7 +20,13 @@ application logic"* — that phrasing is BFF-shaped, not
 indexer-shaped, and we kept the layer indexer-shaped by stripping
 out the application-logic line.
 
-## End-to-end lifecycle (Twitter as the worked example)
+## End-to-end lifecycle (bam-twitter as the worked example)
+
+The shape below is generic — the indexer ships one `post-reply` handler
+factory, and bam-twitter is the first instantiation of it (the next
+app that wants flat post + one-level reply threading appends another
+`createPostReplyHandler({...})` to the CLI's `HANDLERS` array).
+
 
 ```mermaid
 graph TD
@@ -93,14 +99,14 @@ packages/bam-indexer/
 │   │   ├── server.ts     # framework + handler routes; :param matching
 │   │   └── routes.ts     # GET /health
 │   ├── handlers/
-│   │   └── twitter/
-│   │       ├── handler.ts # IndexerHandler<TwitterMessage>
-│   │       ├── schema.ts  # twitter.posts DDL
-│   │       └── routes.ts  # GET /twitter/posts, /:messageId, /replies, /profile/:sender
+│   │   └── post-reply/
+│   │       ├── handler.ts # createPostReplyHandler(opts): IndexerHandler<PostReplyMessage>
+│   │       ├── schema.ts  # postReplyDdl(schema) — <schema>.posts table
+│   │       └── routes.ts  # buildPostReplyRoutes({schema, routePrefix})
 │   └── bin/
-│       ├── bam-indexer.ts # serve | reset --handler X --yes
+│       ├── bam-indexer.ts # serve | reset --handler X --yes; HANDLERS array
 │       └── env.ts         # INDEXER_* parsing
-└── tests/unit/            # registry, tick, twitter handler
+└── tests/unit/            # registry, tick, env, post-reply handler
 ```
 
 ## Handler interface

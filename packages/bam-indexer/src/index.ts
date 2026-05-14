@@ -65,7 +65,13 @@ export type { EnricherPool, EnrichmentKind } from './enrichers/types.js';
 // HTTP.
 export { IndexerHttpServer } from './http/server.js';
 
-// Twitter handler — published so consumers can use it from
-// `createIndexer({ ... }, { handlers: [twitterHandler] })`.
-export { twitterHandler, TWITTER_TAG } from './handlers/twitter/handler.js';
-export { TWITTER_SCHEMA_NAME, TWITTER_DDL } from './handlers/twitter/schema.js';
+// `post-reply` handler factory — apps that want a flat post + one-level
+// reply primitive instantiate this with their own (contentTag, schema,
+// routePrefix). bam-twitter is the in-tree consumer; see
+// `src/bin/bam-indexer.ts`.
+export {
+  createPostReplyHandler,
+  type PostReplyHandlerOptions,
+} from './handlers/post-reply/handler.js';
+export { postReplyDdl } from './handlers/post-reply/schema.js';
+export { buildPostReplyRoutes } from './handlers/post-reply/routes.js';
