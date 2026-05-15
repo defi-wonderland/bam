@@ -126,11 +126,19 @@ export function decodeBatchBPE(
   dict: BPEDictionary,
   signatureSize: number
 ): { messages: BAMMessage[]; signatureData: Uint8Array } {
+  if (!Number.isInteger(signatureSize) || signatureSize < 0) {
+    throw new RangeError(`signatureSize must be a non-negative integer, got ${signatureSize}`);
+  }
   if (payload.length === 0) {
     return { messages: [], signatureData: new Uint8Array(0) };
   }
   if (payload.length < 2) {
     throw new RangeError(`payload too short: ${payload.length}`);
+  }
+  if (signatureSize > payload.length) {
+    throw new RangeError(
+      `signatureSize ${signatureSize} exceeds payload length ${payload.length}`
+    );
   }
   const n = u16beRead(payload, 0);
   const headerSize = HEADER_BASE + 2 * n;

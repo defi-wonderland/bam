@@ -141,6 +141,21 @@ describe('BPE batch codec — edge cases', () => {
     expect(() => decodeBatchBPE(payload, dict, payload.length)).toThrow();
   });
 
+  it('rejects negative / non-integer / oversized signatureSize', () => {
+    const dict = buildDict();
+    const payload = encodeBatchBPE(
+      [{ sender: senderHex(1), nonce: 1n, contents: new TextEncoder().encode('hi') }],
+      fakeSig(8, 0x10),
+      dict
+    );
+    expect(() => decodeBatchBPE(payload, dict, -1)).toThrow(/non-negative integer/);
+    expect(() => decodeBatchBPE(payload, dict, 1.5)).toThrow(/non-negative integer/);
+    expect(() => decodeBatchBPE(payload, dict, NaN)).toThrow(/non-negative integer/);
+    expect(() => decodeBatchBPE(payload, dict, payload.length + 1)).toThrow(
+      /exceeds payload length/
+    );
+  });
+
   it('byte-sweep contents survive the roundtrip (1-byte fallback tier)', () => {
     const dict = buildDict();
     const sweep = new Uint8Array(256);

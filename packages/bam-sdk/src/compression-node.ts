@@ -11,6 +11,7 @@ import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { createHash } from 'node:crypto';
+import { keccak256 } from 'viem';
 import { DICTIONARY_SIZE, DICTIONARY_V1_HASH } from './constants.js';
 import { loadDictionary } from './compression.js';
 import type { ZstdDictionary } from './compression.js';
@@ -126,6 +127,14 @@ export async function loadBundledBPEDictionary(): Promise<BPEDictionary> {
   const fromSrc = join(__dirname, '..', 'data', 'dictionaries', 'bpe-v1.bin');
   const fromDist = join(__dirname, '..', '..', 'data', 'dictionaries', 'bpe-v1.bin');
   const dictPath = existsSync(fromSrc) ? fromSrc : fromDist;
-  const data = await readFile(dictPath);
-  return bpeDictionaryFromBytes(new Uint8Array(data));
+  const bytes = new Uint8Array(await readFile(dictPath));
+  // Integrity check: the bundled file ships with the package, so a mismatch
+  // points at corruption / tampering / a stale build — not user input.
+  const actual = keccak256(bytes);
+  if (actual.toLowerCase() !== BPE_V1_IDENTITY.toLowerCase()) {
+    throw new Error(
+      `Bundled BPE v1 dict identity mismatch: expected ${BPE_V1_IDENTITY}, got ${actual}`
+    );
+  }
+  return bpeDictionaryFromBytes(bytes);
 }
