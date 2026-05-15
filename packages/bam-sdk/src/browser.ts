@@ -140,6 +140,13 @@ export {
   estimateBatchSizeABI,
 } from './codec/abi.js';
 
+// BPE batch codec — reference shape for the on-chain BPEDecoder.
+export {
+  decodeBatchBPE,
+  decodeBatchBPEPerMessage,
+  encodeBatchBPE,
+} from './codec/bpe.js';
+
 // Compression functions (browser-safe only — no loadBundledDictionary/loadDictionaryFromFile)
 export {
   compress,
@@ -155,6 +162,7 @@ export type { ZstdDictionary } from './compression.js';
 // BPE codec (pure TypeScript, browser-safe)
 export {
   bpeDecode,
+  bpeDictionaryFromBytes,
   bpeEncode,
   buildDictionary as buildBPEDictionary,
   deserializeDictionary as deserializeBPEDictionary,
@@ -163,6 +171,13 @@ export {
 } from './bpe.js';
 
 export type { BPEDictionary } from './bpe.js';
+
+// Load a BPEDictionary directly from a deployed contract (uses viem's PublicClient).
+export { loadBPEDictionaryFromChain } from './codec/bpe-chain.js';
+export type {
+  LoadBPEDictionaryOptions,
+  OnChainBPEDictionary,
+} from './codec/bpe-chain.js';
 
 // Signature functions
 export {

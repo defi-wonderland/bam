@@ -6,6 +6,7 @@
  * For browser-safe compression utilities, use compression.ts directly.
  */
 
+import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -13,6 +14,7 @@ import { createHash } from 'node:crypto';
 import { DICTIONARY_SIZE, DICTIONARY_V1_HASH } from './constants.js';
 import { loadDictionary } from './compression.js';
 import type { ZstdDictionary } from './compression.js';
+import { bpeDictionaryFromBytes, type BPEDictionary } from './bpe.js';
 
 /**
  * Load the bundled v1 compression dictionary
@@ -90,4 +92,40 @@ export async function loadBundledDictionary(): Promise<ZstdDictionary> {
 export async function loadDictionaryFromFile(path: string): Promise<ZstdDictionary> {
   const data = await readFile(path);
   return loadDictionary(new Uint8Array(data));
+}
+
+/**
+ * Bundled BPE v1 dictionary identity (keccak256 of the 10240 dict bytes).
+ *
+ * Matches the `IDENTITY` field that `DeployBPEDecoder.s.sol` writes when
+ * deploying a `BPEDictionary` contract from this exact dict file.
+ */
+export const BPE_V1_IDENTITY =
+  '0xddb40bbb8fc7605ce970c5dd9b8a68cc70031aa313bba956e9d83002bbfa0bb0' as const;
+
+/**
+ * Load the bundled BPE v1 dictionary (Node only).
+ *
+ * The dict is trained from vbuterin/SocialBlobs `corpus.txt` (~55 MB of
+ * Farcaster-style social posts). Regenerate via
+ * `packages/bam-sdk/data/dictionaries/_train-bpe-v1.mjs`.
+ *
+ * @example
+ * ```typescript
+ * import { loadBundledBPEDictionary, encodeBatchBPE } from 'bam-sdk';
+ *
+ * const dict = await loadBundledBPEDictionary();
+ * const payload = encodeBatchBPE(messages, sigTrailer, dict);
+ * ```
+ */
+export async function loadBundledBPEDictionary(): Promise<BPEDictionary> {
+  // Dual probe: `fromSrc` resolves when running TS source (vitest, __dirname = src/);
+  // `fromDist` resolves when running the built ESM (__dirname = dist/esm/).
+  const __filename = fileURLToPath(import.meta.url);
+  const __dirname = dirname(__filename);
+  const fromSrc = join(__dirname, '..', 'data', 'dictionaries', 'bpe-v1.bin');
+  const fromDist = join(__dirname, '..', '..', 'data', 'dictionaries', 'bpe-v1.bin');
+  const dictPath = existsSync(fromSrc) ? fromSrc : fromDist;
+  const data = await readFile(dictPath);
+  return bpeDictionaryFromBytes(new Uint8Array(data));
 }

@@ -28,6 +28,27 @@
     "ABIDecoder": {
       "address": "0x3a1bB111079cBaF4CAc320545Bfd1f6A92250425",
       "deployBlock": 10751263
+    },
+    "BPEDictionary": {
+      "address": "0x2265A46e594a67E1d54755BF45362deaacF55A64",
+      "deployBlock": 10857072,
+      "identity": "0xddb40bbb8fc7605ce970c5dd9b8a68cc70031aa313bba956e9d83002bbfa0bb0",
+      "dictData": "0xceF49C5c483611bD5928D90E0539F1Efe5CED0E3",
+      "notes": "10 KB BPE-12 dict trained from vbuterin/SocialBlobs corpus.txt; bundled as bam-sdk/data/dictionaries/bpe-v1.bin"
+    },
+    "BPEDecoderAggregate": {
+      "address": "0x71Ce0a68B1DFB9CcaE6C2A1a00840c9248d7B41f",
+      "deployBlock": 10861565,
+      "sigUnitSize": 256,
+      "perMessage": false,
+      "notes": "BPE batch decoder, BLS-aggregate trailer (256B)"
+    },
+    "BPEDecoderPerMessage": {
+      "address": "0xCF8c9477f2EaB21Db47a66AA18805350c2F714c6",
+      "deployBlock": 10861565,
+      "sigUnitSize": 65,
+      "perMessage": true,
+      "notes": "BPE batch decoder, ECDSA per-message trailer (65B × N)"
     }
   }
 }
