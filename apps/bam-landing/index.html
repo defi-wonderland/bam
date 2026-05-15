@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>BAM — Blob Authenticated Messaging</title>
+    <meta
+      name="description"
+      content="Cheap, verifiable social data over EIP-4844 blobs."
+    />
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="hero">
+        <p class="eyebrow">EIP-4844 · ERC-8180 · ERC-8179</p>
+        <h1>BAM</h1>
+        <p class="tagline">
+          Blob Authenticated Messaging. Cheap, verifiable social data,
+          packed into blobs.
+        </p>
+
+        <div class="stage" aria-hidden="true">
+          <span class="msg m1">farcaster</span>
+          <span class="msg m2">lens</span>
+          <span class="msg m3">x</span>
+          <span class="msg m4">bluesky</span>
+          <span class="msg m5">mastodon</span>
+          <span class="msg m6">nostr</span>
+          <svg
+            class="blob"
+            viewBox="0 0 240 160"
+            xmlns="http://www.w3.org/2000/svg"
+          >
+            <defs>
+              <radialGradient id="g" cx="50%" cy="40%" r="60%">
+                <stop offset="0%" stop-color="#a78bfa" stop-opacity="0.9" />
+                <stop offset="100%" stop-color="#6366f1" stop-opacity="0.6" />
+              </radialGradient>
+            </defs>
+            <path
+              d="M60,40 C100,10 160,20 195,55 C225,90 215,140 165,150 C115,160 55,150 35,115 C15,80 25,65 60,40 Z"
+              fill="url(#g)"
+            />
+          </svg>
+        </div>
+      </header>
+
+      <section class="stack">
+        <h2>The bamstack</h2>
+        <pre class="diagram"><code>
+  apps (twitter, comments, ...)
+        ↓
+  bam-sdk      ── encode · sign · KZG prove
+        ↓
+  bam-poster   ── batch · submit blob tx
+        ↓
+  ┌──────────────── L1 ────────────────┐
+  │  BAM Core (events)   ·  EIP-4844   │
+  └────────────────────────────────────┘
+        ↑
+  bam-reader   ── tail · verify · serve
+        ↑
+  bam-store    ── sqlite / postgres
+</code></pre>
+      </section>
+
+      <section class="ercs">
+        <h2>Specs</h2>
+        <ul>
+          <li>
+            <a href="https://ethereum-magicians.org/t/erc-8180-blob-authenticated-messaging-bam/27868">ERC-8180</a>
+            <span>Blob Authenticated Messaging — decoder + signature registry</span>
+          </li>
+          <li>
+            <a href="https://ethereum-magicians.org/t/erc-8179-blob-space-segments-bss/27867">ERC-8179</a>
+            <span>Blob Space Segments — sub-blob coordination</span>
+          </li>
+        </ul>
+      </section>
+
+      <section class="demos">
+        <h2>Built with bam</h2>
+        <ul>
+          <li>
+            <a href="https://github.com/defi-wonderland/bam/tree/main/apps/message-in-a-blobble">message-in-a-blobble</a>
+            <span>sign a message in the browser, post it to a blob</span>
+          </li>
+          <li>
+            <a href="https://github.com/defi-wonderland/bam/tree/main/apps/bam-twitter">bam-twitter</a>
+            <span>twitter-style feed sharing one poster + reader</span>
+          </li>
+          <li>
+            <a href="https://github.com/defi-wonderland/bam/tree/main/apps/bam-blog-demo">bam-comments</a>
+            <span>embeddable comments widget, one script tag</span>
+          </li>
+          <li>
+            <a href="https://github.com/defi-wonderland/bam/tree/main/apps/bam-explorer">bam-explorer</a>
+            <span>read-only dashboard for posters and readers</span>
+          </li>
+          <li>
+            <a href="https://github.com/defi-wonderland/bam/tree/main/apps/bam-sdk-test">bam-sdk-test</a>
+            <span>playground for every sdk surface</span>
+          </li>
+          <li>
+            <a href="https://github.com/defi-wonderland/bam/tree/main/apps/bam-blob-calc">bam-blob-calc</a>
+            <span>blob cost calculator</span>
+          </li>
+        </ul>
+      </section>
+
+      <footer class="foot">
+        <a class="primary" href="https://github.com/defi-wonderland/bam">github.com/defi-wonderland/bam →</a>
+        <span class="by">by <a href="https://wonderland.xyz">wonderland</a></span>
+      </footer>
+    </main>
+  </body>
+</html>
