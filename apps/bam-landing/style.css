@@ -100,35 +100,52 @@ h1 {
 .s2 { left: 50%; transform: translateX(-50%); }
 .s3 { right: 24px; }
 
-/* falling messages — mini blob shapes streaming from each source */
+/* falling messages — tiny text pills streaming from each source */
 .msg {
   position: absolute;
   top: 48px;
-  width: 18px;
-  height: 12px;
+  padding: 2px 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  line-height: 1;
+  color: #ddd6fe;
+  background: rgba(99, 102, 241, 0.18);
+  border: 1px solid rgba(167, 139, 250, 0.4);
+  border-radius: 999px;
+  white-space: nowrap;
   opacity: 0;
-  filter: drop-shadow(0 0 4px rgba(167, 139, 250, 0.45));
   animation: drip 3s linear infinite;
 }
 
-.c1 { left: 56px;                 animation-duration: 3s;   }
-.c2 { left: calc(50% - 9px);      animation-duration: 3.4s; }
-.c3 { right: 56px;                animation-duration: 2.7s; }
+.c1 { left: 56px;                   animation-duration: 3s;   }
+.c2 { left: 50%;
+       transform: translateX(-50%); animation-duration: 3.4s; }
+.c3 { right: 56px;                  animation-duration: 2.7s; }
 
 @keyframes drip {
-  0%   { transform: translateY(0)    scale(0.9); opacity: 0; }
+  0%   { transform: translateY(0)   scale(0.9); opacity: 0; }
   10%  { opacity: 1; }
-  82%  { transform: translateY(120px) scale(1);  opacity: 1; }
-  95%  { transform: translateY(138px) scale(0.5); opacity: 0.35; }
-  100% { transform: translateY(146px) scale(0.2); opacity: 0; }
+  82%  { transform: translateY(120px) scale(1);   opacity: 1; }
+  95%  { transform: translateY(136px) scale(0.55); opacity: 0.4; }
+  100% { transform: translateY(142px) scale(0.2);  opacity: 0; }
 }
 
-/* batch label sits where the dots vanish */
+/* center column needs to keep its horizontal centering through translateY */
+.c2 { animation-name: drip-center; }
+@keyframes drip-center {
+  0%   { transform: translate(-50%, 0)    scale(0.9); opacity: 0; }
+  10%  { opacity: 1; }
+  82%  { transform: translate(-50%, 120px) scale(1);   opacity: 1; }
+  95%  { transform: translate(-50%, 136px) scale(0.55); opacity: 0.4; }
+  100% { transform: translate(-50%, 142px) scale(0.2);  opacity: 0; }
+}
+
+/* batch pill sits where the messages vanish — pulses each cycle to suggest
+   a batch sealing before a blob lands on the chain */
 .batch {
   position: absolute;
   left: 50%;
   top: 198px;
-  transform: translateX(-50%);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 10px;
   letter-spacing: 0.2em;
@@ -138,6 +155,39 @@ h1 {
   border: 1px dashed var(--border);
   border-radius: 999px;
   padding: 4px 14px;
+  transform: translateX(-50%);
+  animation: batch-pulse 3s ease-in-out infinite;
+}
+
+@keyframes batch-pulse {
+  0%, 55% {
+    transform: translateX(-50%) scale(1);
+    background: rgba(0, 0, 0, 0.35);
+    border-color: var(--border);
+    color: var(--muted);
+    box-shadow: none;
+  }
+  68% {
+    transform: translateX(-50%) scale(1.08);
+    background: rgba(167, 139, 250, 0.22);
+    border-color: var(--accent);
+    color: var(--accent);
+    box-shadow: 0 0 18px rgba(167, 139, 250, 0.45);
+  }
+  82% {
+    transform: translateX(-50%) scale(1);
+    background: rgba(167, 139, 250, 0.1);
+    border-color: var(--border);
+    color: var(--muted);
+    box-shadow: none;
+  }
+  100% {
+    transform: translateX(-50%) scale(1);
+    background: rgba(0, 0, 0, 0.35);
+    border-color: var(--border);
+    color: var(--muted);
+    box-shadow: none;
+  }
 }
 
 /* chain of blobs at the bottom */
