@@ -136,9 +136,14 @@ function makeDictBlobs(tokenToCode: Map<string, number>): {
     groups[tok.length - 1].push({ tok, code });
   }
 
-  // Write tokens contiguously: 4-byte, 3-byte, 2-byte, 1-byte
-  let pos = 0;
+  // Write tokens with tier boundaries fixed at 0 / 4096 / 7168 / 9216 / 10240. This
+  // matches the on-chain BPEDecoder, which computes offsets directly from the code
+  // value (no per-code offset table on-chain). Under-populated tiers leave a gap of
+  // zero bytes between the last real token and the next tier boundary; those gaps
+  // are never read because their codes never appear in encoder output.
+  const tierStart: Record<number, number> = { 4: 0, 3: 4096, 2: 7168, 1: 9216 };
   for (const length of [4, 3, 2, 1]) {
+    let pos = tierStart[length];
     const group = groups[length - 1].sort((a, b) => a.code - b.code);
     for (const { tok, code } of group) {
       dictOffsets[code] = pos;
@@ -165,6 +170,58 @@ export function buildDictionary(corpus: Uint8Array): BPEDictionary {
   const { dictBytes, dictOffsets, dictLengths } = makeDictBlobs(tokenToCode);
 
   return { tokenToCode, dictBytes, dictOffsets: dictOffsets, dictLengths: dictLengths };
+}
+
+/**
+ * Reconstruct a BPE dictionary JS object from just the 10240-byte dictionary
+ * table -- the form that lives on-chain in `BPEDictionary.DICT_DATA`.
+ *
+ * Offsets and lengths are derived from the canonical tier layout (no offsets
+ * table needed):
+ *   codes [   0..1024)   4-byte tokens at offset code*4
+ *   codes [1024..2048)   3-byte tokens at offset 4096 + (code-1024)*3
+ *   codes [2048..3072)   2-byte tokens at offset 7168 + (code-2048)*2
+ *   codes [3072..4096)   1-byte tokens at offset 9216 + (code-3072)
+ *
+ * Building `tokenToCode`: codes are scanned in ascending order, and the first
+ * code mapping to a given token wins. That means a fully-populated dictionary
+ * (every tier filled with real tokens) reconstructs identically to the original
+ * built from corpus. On an undersized dictionary (zero-padded tier slots), the
+ * encoded *plaintext* still roundtrips, but encoded *wire bytes* may differ
+ * from those a corpus-built dict would produce on inputs containing zero runs.
+ */
+export function bpeDictionaryFromBytes(dictBytes: Uint8Array): BPEDictionary {
+  if (dictBytes.length !== DICT_BYTES_SIZE) {
+    throw new Error(`BPE dict must be ${DICT_BYTES_SIZE} bytes, got ${dictBytes.length}`);
+  }
+
+  const dictOffsets = new Uint16Array(TOTAL_CODES);
+  const dictLengths = new Uint8Array(TOTAL_CODES);
+  const tokenToCode = new Map<string, number>();
+
+  for (let code = 0; code < TOTAL_CODES; code++) {
+    let off: number;
+    let len: number;
+    if (code < 1024) {
+      off = code * 4;
+      len = 4;
+    } else if (code < 2048) {
+      off = 4096 + (code - 1024) * 3;
+      len = 3;
+    } else if (code < 3072) {
+      off = 7168 + (code - 2048) * 2;
+      len = 2;
+    } else {
+      off = 9216 + (code - 3072);
+      len = 1;
+    }
+    dictOffsets[code] = off;
+    dictLengths[code] = len;
+    const key = toKey(dictBytes, off, len);
+    if (!tokenToCode.has(key)) tokenToCode.set(key, code);
+  }
+
+  return { tokenToCode, dictBytes: new Uint8Array(dictBytes), dictOffsets, dictLengths };
 }
 
 /**
@@ -321,13 +378,19 @@ export function bpeDecode(data: Uint8Array, dict: BPEDictionary): Uint8Array {
 
   const { dictBytes, dictOffsets, dictLengths } = dict;
 
+  // Code 0 is reserved as a padding sentinel: `bpeEncode` emits it to pad an
+  // odd codes count to an even one before packing pairs into 3-byte words.
+  // Matches the on-chain BPEDecoder.sol (and upstream Vyper decoder.vy), which
+  // both skip code 0 when decoding.
+
   // First pass: calculate output size
   let totalLen = 0;
   for (let i = 0; i < data.length; i += 3) {
     const word = (data[i] << 16) | (data[i + 1] << 8) | data[i + 2];
     const code1 = (word >> 12) & 0xfff;
     const code2 = word & 0xfff;
-    totalLen += dictLengths[code1] + dictLengths[code2];
+    if (code1 !== 0) totalLen += dictLengths[code1];
+    if (code2 !== 0) totalLen += dictLengths[code2];
   }
 
   // Second pass: write output
@@ -339,16 +402,15 @@ export function bpeDecode(data: Uint8Array, dict: BPEDictionary): Uint8Array {
     const code1 = (word >> 12) & 0xfff;
     const code2 = word & 0xfff;
 
-    const off1 = dictOffsets[code1];
-    const len1 = dictLengths[code1];
-    for (let j = 0; j < len1; j++) {
-      out[pos++] = dictBytes[off1 + j];
+    if (code1 !== 0) {
+      const off1 = dictOffsets[code1];
+      const len1 = dictLengths[code1];
+      for (let j = 0; j < len1; j++) out[pos++] = dictBytes[off1 + j];
     }
-
-    const off2 = dictOffsets[code2];
-    const len2 = dictLengths[code2];
-    for (let j = 0; j < len2; j++) {
-      out[pos++] = dictBytes[off2 + j];
+    if (code2 !== 0) {
+      const off2 = dictOffsets[code2];
+      const len2 = dictLengths[code2];
+      for (let j = 0; j < len2; j++) out[pos++] = dictBytes[off2 + j];
     }
   }
 

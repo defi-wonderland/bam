@@ -134,6 +134,14 @@ export {
   estimateBatchSizeABI,
 } from './codec/abi.js';
 
+// BPE batch codec — reference shape for the on-chain BPEDecoder (Solidity port
+// of vbuterin/SocialBlobs decoder.vy). Pairs with a BPEDictionary contract.
+export {
+  decodeBatchBPE,
+  decodeBatchBPEPerMessage,
+  encodeBatchBPE,
+} from './codec/bpe.js';
+
 // Compression functions
 export {
   compress,
@@ -149,6 +157,7 @@ export type { ZstdDictionary } from './compression.js';
 // BPE codec
 export {
   bpeDecode,
+  bpeDictionaryFromBytes,
   bpeEncode,
   buildDictionary as buildBPEDictionary,
   deserializeDictionary as deserializeBPEDictionary,
@@ -158,8 +167,21 @@ export {
 
 export type { BPEDictionary } from './bpe.js';
 
-// Node-only compression functions (loadBundledDictionary, loadDictionaryFromFile)
-export { loadBundledDictionary, loadDictionaryFromFile } from './compression-node.js';
+// Load a BPEDictionary directly from a deployed contract.
+export { loadBPEDictionaryFromChain } from './codec/bpe-chain.js';
+export type {
+  LoadBPEDictionaryOptions,
+  OnChainBPEDictionary,
+} from './codec/bpe-chain.js';
+
+// Node-only compression functions (loadBundledDictionary, loadDictionaryFromFile,
+// loadBundledBPEDictionary).
+export {
+  BPE_V1_IDENTITY,
+  loadBundledBPEDictionary,
+  loadBundledDictionary,
+  loadDictionaryFromFile,
+} from './compression-node.js';
 
 // Signature functions (BLS + ECDSA key utilities + registry helpers)
 export {
