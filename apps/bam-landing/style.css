@@ -70,78 +70,136 @@ h1 {
 /* animation stage */
 .stage {
   position: relative;
-  height: 260px;
+  height: 300px;
   border: 1px solid var(--border);
   border-radius: 12px;
   overflow: hidden;
   background:
     radial-gradient(
-      circle at 50% 110%,
+      circle at 50% 100%,
       rgba(167, 139, 250, 0.08),
-      transparent 60%
+      transparent 65%
     ),
     var(--panel);
 }
 
-.blob {
+/* source labels */
+.source {
+  position: absolute;
+  top: 18px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  color: var(--muted);
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 10px;
+  white-space: nowrap;
+}
+.s1 { left: 24px; }
+.s2 { left: 50%; transform: translateX(-50%); }
+.s3 { right: 24px; }
+
+/* falling dots */
+.dot {
+  position: absolute;
+  top: 50px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 8px rgba(167, 139, 250, 0.7);
+  opacity: 0;
+  animation: drip 3s linear infinite;
+}
+
+.c1 { left: 60px; animation-duration: 3s;   }
+.c2 { left: calc(50% - 2.5px); animation-duration: 3.4s; }
+.c3 { right: 60px; animation-duration: 2.7s; }
+
+.t1 { animation-delay: 0s; }
+.t2 { animation-delay: 0.6s; }
+.t3 { animation-delay: 1.2s; }
+.t4 { animation-delay: 1.8s; }
+.t5 { animation-delay: 2.4s; }
+
+@keyframes drip {
+  0%   { transform: translateY(0)    scale(1); opacity: 0; }
+  10%  { opacity: 1; }
+  80%  { transform: translateY(120px) scale(1); opacity: 1; }
+  95%  { transform: translateY(140px) scale(0.4); opacity: 0.3; }
+  100% { transform: translateY(150px) scale(0.2); opacity: 0; }
+}
+
+/* batch label sits where the dots vanish */
+.batch {
   position: absolute;
   left: 50%;
-  bottom: -10px;
-  width: 280px;
-  height: 180px;
+  top: 198px;
   transform: translateX(-50%);
-  filter: drop-shadow(0 0 24px rgba(167, 139, 250, 0.35));
-  animation: pulse 4s ease-in-out infinite;
-}
-
-@keyframes pulse {
-  0%, 100% {
-    transform: translateX(-50%) scale(1);
-  }
-  50% {
-    transform: translateX(-50%) scale(1.04);
-  }
-}
-
-.msg {
-  position: absolute;
-  top: -28px;
-  font-size: 12px;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  color: var(--fg);
-  background: var(--panel);
-  border: 1px solid var(--border);
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--muted);
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px dashed var(--border);
   border-radius: 999px;
-  padding: 6px 12px;
-  white-space: nowrap;
-  opacity: 0;
-  animation: drop 6s linear infinite;
+  padding: 4px 14px;
 }
 
-.m1 { left: 8%;  animation-delay: 0s;   }
-.m2 { left: 24%; animation-delay: 1s;   }
-.m3 { left: 42%; animation-delay: 2s;   }
-.m4 { left: 58%; animation-delay: 3s;   }
-.m5 { left: 74%; animation-delay: 4s;   }
-.m6 { left: 88%; animation-delay: 5s;   }
+/* chain of blobs at the bottom */
+.chain {
+  position: absolute;
+  bottom: 26px;
+  left: 0;
+  right: 0;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 6px;
+}
 
-@keyframes drop {
-  0%   { transform: translateY(0)    scale(1);   opacity: 0; }
-  10%  {                               opacity: 1; }
-  60%  { transform: translateY(160px) scale(1);   opacity: 1; }
-  80%  { transform: translateY(200px) scale(0.4); opacity: 0.4; }
-  100% { transform: translateY(220px) scale(0.1); opacity: 0; }
+.chain .b {
+  width: 56px;
+  height: 36px;
+  filter: drop-shadow(0 0 6px rgba(167, 139, 250, 0.25));
+}
+.chain .b.dim {
+  opacity: 0.45;
+}
+.chain .link {
+  color: var(--muted);
+  font-size: 12px;
+  opacity: 0.6;
+}
+
+.chain .fresh {
+  transform-origin: center;
+  animation: land 3s ease-in-out infinite;
+}
+
+@keyframes land {
+  0%, 60% {
+    transform: scale(1);
+    filter: drop-shadow(0 0 6px rgba(167, 139, 250, 0.35));
+  }
+  72% {
+    transform: scale(1.18);
+    filter: drop-shadow(0 0 18px rgba(167, 139, 250, 0.95));
+  }
+  100% {
+    transform: scale(1);
+    filter: drop-shadow(0 0 6px rgba(167, 139, 250, 0.35));
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .blob,
-  .msg {
+  .dot,
+  .chain .fresh {
     animation: none;
   }
-  .msg {
-    opacity: 1;
-    top: 16px;
-  }
+  .dot { opacity: 0.6; }
 }
 
 /* sections */
