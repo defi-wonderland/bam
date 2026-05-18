@@ -13,6 +13,7 @@
   <body>
     <main class="shell">
       <header class="hero">
+        <p class="status"><span class="dot" aria-hidden="true"></span>live on sepolia</p>
         <p class="eyebrow">EIP-4844 · ERC-8180 · ERC-8179</p>
         <h1>BAM</h1>
         <p class="tagline">
@@ -59,43 +60,69 @@
           <span class="batch">batch</span>
 
           <div class="chain">
-            <svg class="b dim"><use href="#blob-shape" /></svg>
-            <span class="link">—</span>
-            <svg class="b"><use href="#blob-shape" /></svg>
-            <span class="link">—</span>
-            <svg class="b fresh"><use href="#blob-shape" /></svg>
+            <svg class="b" style="animation-delay: 0s"><use href="#blob-shape" /></svg>
+            <svg class="b" style="animation-delay: -1.4s"><use href="#blob-shape" /></svg>
+            <svg class="b" style="animation-delay: -2.8s"><use href="#blob-shape" /></svg>
+            <svg class="b" style="animation-delay: -4.2s"><use href="#blob-shape" /></svg>
+            <svg class="b" style="animation-delay: -5.6s"><use href="#blob-shape" /></svg>
           </div>
         </div>
       </header>
 
       <section class="stack">
         <h2>The bamstack</h2>
-        <pre class="diagram"><code>
-  apps (twitter, comments, ...)
-        ↓
-  bam-sdk      ── encode · sign · KZG prove
-        ↓
-  bam-poster   ── batch · submit blob tx
-        ↓
-  ┌──────────────── L1 ────────────────┐
-  │  BAM Core (events)   ·  EIP-4844   │
-  └────────────────────────────────────┘
-        ↑
-  bam-reader   ── tail · verify · serve
-        ↑
-  bam-store    ── sqlite / postgres
-</code></pre>
+        <div class="layers">
+          <div class="layer">
+            <div class="layer-tag">apps</div>
+            <div class="layer-body">twitter · comments · blog · ...</div>
+          </div>
+
+          <div class="layer-edge">
+            <span>read</span><span class="bar">⇅</span><span>write</span>
+          </div>
+
+          <div class="layer layer-main">
+            <div class="layer-tag">bamstack<span class="layer-badge">open alpha</span></div>
+            <div class="layer-cells">
+              <div class="cell">
+                <div class="cell-name">bam-sdk</div>
+                <div class="cell-desc">encode · sign · prove</div>
+              </div>
+              <div class="cell">
+                <div class="cell-name">bam-poster</div>
+                <div class="cell-desc">batch · submit</div>
+              </div>
+              <div class="cell">
+                <div class="cell-name">bam-reader</div>
+                <div class="cell-desc">tail · verify · serve</div>
+              </div>
+              <div class="cell">
+                <div class="cell-name">bam-store</div>
+                <div class="cell-desc">postgres</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="layer-edge">
+            <span>post</span><span class="bar">⇅</span><span>tail</span>
+          </div>
+
+          <div class="layer">
+            <div class="layer-tag">L1</div>
+            <div class="layer-body">EIP-4844 blob data availability</div>
+          </div>
+        </div>
       </section>
 
       <section class="ercs">
         <h2>Specs</h2>
         <ul>
           <li>
-            <a href="https://ethereum-magicians.org/t/erc-8180-blob-authenticated-messaging-bam/27868">ERC-8180</a>
+            <a target="_blank" rel="noopener noreferrer" href="https://ethereum-magicians.org/t/erc-8180-blob-authenticated-messaging-bam/27868">ERC-8180</a>
             <span>Blob Authenticated Messaging — decoder + signature registry</span>
           </li>
           <li>
-            <a href="https://ethereum-magicians.org/t/erc-8179-blob-space-segments-bss/27867">ERC-8179</a>
+            <a target="_blank" rel="noopener noreferrer" href="https://ethereum-magicians.org/t/erc-8179-blob-space-segments-bss/27867">ERC-8179</a>
             <span>Blob Space Segments — sub-blob coordination</span>
           </li>
         </ul>
@@ -105,35 +132,35 @@
         <h2>Built with bam</h2>
         <ul>
           <li>
-            <a href="https://github.com/defi-wonderland/bam/tree/main/apps/message-in-a-blobble">message-in-a-blobble</a>
+            <a target="_blank" rel="noopener noreferrer" href="https://github.com/defi-wonderland/bam/tree/main/apps/message-in-a-blobble">message-in-a-blobble</a>
             <span>sign a message in the browser, post it to a blob</span>
           </li>
           <li>
-            <a href="https://github.com/defi-wonderland/bam/tree/main/apps/bam-twitter">bam-twitter</a>
+            <a target="_blank" rel="noopener noreferrer" href="https://github.com/defi-wonderland/bam/tree/main/apps/bam-twitter">bam-twitter</a>
             <span>twitter-style feed sharing one poster + reader</span>
           </li>
           <li>
-            <a href="https://github.com/defi-wonderland/bam/tree/main/apps/bam-blog-demo">bam-comments</a>
+            <a target="_blank" rel="noopener noreferrer" href="https://github.com/defi-wonderland/bam/tree/main/apps/bam-blog-demo">bam-comments</a>
             <span>embeddable comments widget, one script tag</span>
           </li>
           <li>
-            <a href="https://github.com/defi-wonderland/bam/tree/main/apps/bam-explorer">bam-explorer</a>
+            <a target="_blank" rel="noopener noreferrer" href="https://github.com/defi-wonderland/bam/tree/main/apps/bam-explorer">bam-explorer</a>
             <span>read-only dashboard for posters and readers</span>
           </li>
           <li>
-            <a href="https://github.com/defi-wonderland/bam/tree/main/apps/bam-sdk-test">bam-sdk-test</a>
+            <a target="_blank" rel="noopener noreferrer" href="https://github.com/defi-wonderland/bam/tree/main/apps/bam-sdk-test">bam-sdk-test</a>
             <span>playground for every sdk surface</span>
           </li>
           <li>
-            <a href="https://github.com/defi-wonderland/bam/tree/main/apps/bam-blob-calc">bam-blob-calc</a>
+            <a target="_blank" rel="noopener noreferrer" href="https://github.com/defi-wonderland/bam/tree/main/apps/bam-blob-calc">bam-blob-calc</a>
             <span>blob cost calculator</span>
           </li>
         </ul>
       </section>
 
       <footer class="foot">
-        <a class="primary" href="https://github.com/defi-wonderland/bam">github.com/defi-wonderland/bam →</a>
-        <span class="by">by <a href="https://wonderland.xyz">wonderland</a></span>
+        <a class="primary" target="_blank" rel="noopener noreferrer" href="https://github.com/defi-wonderland/bam">github.com/defi-wonderland/bam →</a>
+        <span class="by">by <a target="_blank" rel="noopener noreferrer" href="https://wonderland.xyz">wonderland</a></span>
       </footer>
     </main>
   </body>
