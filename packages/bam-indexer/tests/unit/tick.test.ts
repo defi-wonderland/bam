@@ -238,9 +238,6 @@ describe('tick — forward pass', () => {
   });
 
   it('stops at first project failure; later rows are not processed and cursor stays put', async () => {
-    // Regression: previously the loop bumped `forward` in-memory on a project
-    // failure, so a subsequent successful row's `upsertCursor` would persist
-    // a coordinate past the failure — permanently skipping the retry.
     const a = encodePostReplyContents(TWITTER_TAG, { kind: 'post', timestamp: 1, content: 'a' });
     const b = encodePostReplyContents(TWITTER_TAG, { kind: 'post', timestamp: 2, content: 'b' });
     const source = new FakeSource([row(1, a), row(2, b)]);
@@ -296,9 +293,6 @@ describe('tick — reorg pass', () => {
   });
 
   it('stops at first onReorg failure; later reorgs are not processed and cursor stays put', async () => {
-    // Regression: same shape as the forward-pass bug — a failed onReorg
-    // followed by a successful one would persist a reorg cursor past the
-    // failure and silently lose the cascade.
     const txA = ('0x' + '11'.repeat(32)) as Bytes32;
     const txB = ('0x' + '22'.repeat(32)) as Bytes32;
     const source = new FakeSource(

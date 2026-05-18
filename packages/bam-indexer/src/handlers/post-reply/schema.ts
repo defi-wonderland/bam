@@ -35,8 +35,6 @@ export function postReplyDdl(schema: string): string[] {
       message_index_within_batch  bigint NOT NULL,
       sender_ens                  text NULL,
       -- post (kind=0) ⇒ no parent; reply (kind=1) ⇒ parent is set.
-      -- Handler.project enforces this in code (handler.ts:101); the
-      -- CHECK is defense in depth for direct SQL writes / restores.
       CONSTRAINT posts_kind_parent_consistent CHECK (
         (kind = 0 AND parent_message_hash IS NULL)
         OR (kind = 1 AND parent_message_hash IS NOT NULL)

@@ -45,9 +45,6 @@ export function createPostReplyHandler(
   opts: PostReplyHandlerOptions,
 ): IndexerHandler<PostReplyMessage> {
   const { name, contentTag, schema } = opts;
-  // Pre-quote once; the project/onReorg SQL below splice this in directly.
-  // postReplyDdl and buildPostReplyRoutes quote their own copy from the
-  // raw `schema`, so a malformed value would surface there too.
   const s = quoteIdent(schema);
   const routePrefix = opts.routePrefix ?? `/${name}`;
   const version = opts.version ?? 1;
