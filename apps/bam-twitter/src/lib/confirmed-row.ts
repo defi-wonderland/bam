@@ -1,16 +1,11 @@
 /**
- * Wire shape returned by `GET /api/confirmed-messages` (the route in
- * `src/app/api/confirmed-messages/route.ts`) and consumed by the
- * Timeline's `fetchConfirmed` in `src/lib/timeline.ts`. One contract,
- * two sides — declaring it twice (as we did pre-refactor) let the
- * two ends drift independently.
+ * Wire shape returned by `GET /api/confirmed-messages` and consumed by
+ * the Timeline's `fetchConfirmed`. The route serves two upstream paths
+ * and merges their wire shape into this single envelope:
  *
- * The route serves two upstream paths and merges their wire shape
- * into this single envelope:
- *
- *   - **Indexer path** — `bam-indexer`'s `/twitter/posts`. The
- *     payload is already decoded, so `timestamp` + `content` +
- *     `kind` + `parent_message_hash` + `sender_ens` are populated;
+ *   - **Indexer path** — `bam-indexer`'s `/twitter/posts`. The payload
+ *     is already decoded, so `timestamp` + `content` + `kind` +
+ *     `parent_message_hash` + `sender_ens` are populated;
  *     `contents`/`signature` are not shipped.
  *   - **Reader fallback** — `bam-reader`'s `/messages`. The raw
  *     `contents` and `signature` hex are shipped and the consumer
