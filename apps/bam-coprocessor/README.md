@@ -92,6 +92,8 @@ cargo run --release --bin prove-app -- \
 
 ### Prove mode (Succinct network)
 
+> **Not yet run.** The instructions below are correct and the code is wired up, but prove mode has not been tested against Succinct's prover network. Execute mode works end-to-end; this is the next step.
+
 Before proving for the first time, or after any change to Circuit 1's code, derive the C1 verifying key hash and paste it into `program-app/src/main.rs`. The file currently holds a `[0u32; 8]` placeholder that is safe for execute mode but produces an unsound recursive proof in prove mode.
 
 ```bash
@@ -136,9 +138,7 @@ cargo build -p bam-coprocessor-script
 
 ## Open issues
 
-See [`ISSUES.md`](ISSUES.md) for full detail on issues 1 and 2.
-
 1. `start_fe` and `end_fe` are not committed to C1 public outputs, so a verifier can confirm which blob was used but not which segment of it was processed. Fixing this requires a coordinated update to the bam-store schema and C1 output layout.
 2. The circuit panics on ZSTD-compressed batches (codec 0x01). None of the current demo blobs use ZSTD, but any production blob that does is outside Circuit 1's scope.
 3. The blob archive was not deployed on the bam-reader instance when this was built, so `prove-from-reader` has not been tested end-to-end against a live archive. The demo was run from a locally cached blob set.
-4. Prove mode has not been tested on Succinct's prover network. Execute mode works end-to-end; the prove path is wired correctly but unverified at the network level.
+4. Prove mode has not been tested on Succinct's prover network — see the note in the prove mode section above.

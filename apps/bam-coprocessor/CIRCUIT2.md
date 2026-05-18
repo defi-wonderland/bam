@@ -179,7 +179,8 @@ cargo run --release --bin prove-app -- \
 
 - **`[0u32; 8]` VK placeholder** — safe for execute mode, must be replaced via
   `print-vk` before network prove mode produces a sound recursive proof.
-- **`start_fe`/`end_fe` not in C1 public outputs** (Issue 1 in ISSUES.md) — not
-  a blocker for this demo; all 9 cached batches are correctly bounded.
-- **ZSTD not supported** (Issue 2 in ISSUES.md) — none of the current batches
-  use ZSTD compression.
+- **`start_fe`/`end_fe` not in C1 public outputs** — not a blocker for this
+  demo; all 9 cached batches are correctly bounded, but a verifier cannot
+  confirm which segment of the blob was processed.
+- **ZSTD not supported** — none of the current batches use ZSTD compression,
+  but any production blob that does is outside Circuit 1's scope.
