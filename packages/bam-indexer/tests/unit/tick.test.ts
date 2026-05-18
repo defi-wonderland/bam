@@ -69,7 +69,7 @@ class FakeClient {
       };
       return { rowCount: 1, rows: [] };
     }
-    if (sql.includes('INSERT INTO twitter.posts')) {
+    if (sql.includes('INSERT INTO "twitter".posts')) {
       this.projectAttempts += 1;
       if (this.shouldFailProject || this.projectAttempts <= this.projectFailFirst) {
         throw new Error('synthetic project failure');
@@ -81,7 +81,7 @@ class FakeClient {
       this.twitterRows.push({ messageId, batchRef });
       return { rowCount: 1, rows: [] };
     }
-    if (sql.includes('DELETE FROM twitter.posts')) {
+    if (sql.includes('DELETE FROM "twitter".posts')) {
       this.deleteAttempts += 1;
       if (this.deleteAttempts <= this.deleteFailFirst) {
         throw new Error('synthetic onReorg failure');

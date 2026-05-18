@@ -23,6 +23,7 @@ import {
   deleteCursor,
   getCursor,
 } from './cursor.js';
+import { quoteIdent } from './sql.js';
 
 export interface MigrateOptions {
   writePool: Pool;
@@ -90,16 +91,3 @@ export async function resetHandler(
   }
 }
 
-/**
- * Bare-minimum identifier quoter. Handler `name` / `schema` are
- * authored in-tree (not user input), so the surface area is small,
- * but quoting is still correct discipline — and it lets a handler
- * pick a schema like `bam_twitter` without worrying about reserved
- * words.
- */
-function quoteIdent(id: string): string {
-  if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(id)) {
-    throw new Error(`unsafe identifier: ${JSON.stringify(id)}`);
-  }
-  return `"${id}"`;
-}

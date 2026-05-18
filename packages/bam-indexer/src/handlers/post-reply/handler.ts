@@ -22,6 +22,7 @@ import type {
   EnrichmentRequest,
   IndexerHandler,
 } from '../../framework/handler.js';
+import { quoteIdent } from '../../framework/sql.js';
 import { postReplyDdl } from './schema.js';
 import { buildPostReplyRoutes } from './routes.js';
 
@@ -44,6 +45,10 @@ export function createPostReplyHandler(
   opts: PostReplyHandlerOptions,
 ): IndexerHandler<PostReplyMessage> {
   const { name, contentTag, schema } = opts;
+  // Pre-quote once; the project/onReorg SQL below splice this in directly.
+  // postReplyDdl and buildPostReplyRoutes quote their own copy from the
+  // raw `schema`, so a malformed value would surface there too.
+  const s = quoteIdent(schema);
   const routePrefix = opts.routePrefix ?? `/${name}`;
   const version = opts.version ?? 1;
   const ddl = postReplyDdl(schema);
@@ -96,7 +101,7 @@ export function createPostReplyHandler(
         decoded.kind === 'reply' ? decoded.parentMessageHash.toLowerCase() : null;
 
       await txn.query(
-        `INSERT INTO ${schema}.posts
+        `INSERT INTO ${s}.posts
            (message_id, message_hash, sender, nonce, kind, timestamp, content,
             parent_message_hash, batch_ref, block_number, tx_index,
             message_index_within_batch, sender_ens)
@@ -135,7 +140,7 @@ export function createPostReplyHandler(
       // every row whose `batch_ref = reorgedTxHash`. Our row keys off
       // the same `batch_ref`, so a single DELETE evicts the cascade.
       await txn.query(
-        `DELETE FROM ${schema}.posts WHERE batch_ref = $1`,
+        `DELETE FROM ${s}.posts WHERE batch_ref = $1`,
         [reorgedTxHash.toLowerCase()],
       );
     },

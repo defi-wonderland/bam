@@ -14,6 +14,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { PoolClient } from 'pg';
 
 import type { BoundHandlerRoute } from '../../framework/handler.js';
+import { quoteIdent } from '../../framework/sql.js';
 
 const HEX_BYTES32_RE = /^0x[0-9a-fA-F]{64}$/;
 const HEX_ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
@@ -103,6 +104,7 @@ export function buildPostReplyRoutes(
   opts: BuildPostReplyRoutesOptions,
 ): BoundHandlerRoute[] {
   const { schema, routePrefix } = opts;
+  const s = quoteIdent(schema);
   const POST_BY_ID_PREFIX = `${routePrefix}/posts/`;
   const PROFILE_PREFIX = `${routePrefix}/profile/`;
 
@@ -139,7 +141,7 @@ export function buildPostReplyRoutes(
       SELECT message_id, message_hash, sender, nonce, kind, timestamp, content,
              parent_message_hash, batch_ref, block_number, tx_index,
              message_index_within_batch, sender_ens
-        FROM ${schema}.posts
+        FROM ${s}.posts
        WHERE ${where.join(' AND ')}
        ORDER BY block_number DESC, tx_index DESC, message_index_within_batch DESC
        LIMIT $${params.length}`;
@@ -165,7 +167,7 @@ export function buildPostReplyRoutes(
       `SELECT message_id, message_hash, sender, nonce, kind, timestamp, content,
               parent_message_hash, batch_ref, block_number, tx_index,
               message_index_within_batch, sender_ens
-         FROM ${schema}.posts
+         FROM ${s}.posts
         WHERE message_id = $1`,
       [id.toLowerCase()],
     );
@@ -193,7 +195,7 @@ export function buildPostReplyRoutes(
       `SELECT message_id, message_hash, sender, nonce, kind, timestamp, content,
               parent_message_hash, batch_ref, block_number, tx_index,
               message_index_within_batch, sender_ens
-         FROM ${schema}.posts
+         FROM ${s}.posts
         WHERE kind = 1 AND parent_message_hash = $1
         ORDER BY timestamp ASC, block_number ASC, tx_index ASC, message_index_within_batch ASC
         LIMIT $2`,
@@ -224,7 +226,7 @@ export function buildPostReplyRoutes(
       `SELECT message_id, message_hash, sender, nonce, kind, timestamp, content,
               parent_message_hash, batch_ref, block_number, tx_index,
               message_index_within_batch, sender_ens
-         FROM ${schema}.posts
+         FROM ${s}.posts
         WHERE sender = $1
         ORDER BY block_number DESC, tx_index DESC, message_index_within_batch DESC
         LIMIT $2`,

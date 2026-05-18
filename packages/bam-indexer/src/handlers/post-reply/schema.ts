@@ -15,9 +15,12 @@
  * "did my reply land?" lookup (by message_hash).
  */
 
+import { quoteIdent } from '../../framework/sql.js';
+
 export function postReplyDdl(schema: string): string[] {
+  const s = quoteIdent(schema);
   return [
-    `CREATE TABLE IF NOT EXISTS ${schema}.posts (
+    `CREATE TABLE IF NOT EXISTS ${s}.posts (
       message_id                  text PRIMARY KEY,
       message_hash                text NOT NULL,
       sender                      text NOT NULL,
@@ -33,19 +36,19 @@ export function postReplyDdl(schema: string): string[] {
       sender_ens                  text NULL
     )`,
     `CREATE INDEX IF NOT EXISTS posts_by_sender
-      ON ${schema}.posts (sender, block_number DESC, tx_index DESC)`,
+      ON ${s}.posts (sender, block_number DESC, tx_index DESC)`,
     `CREATE INDEX IF NOT EXISTS posts_by_parent
-      ON ${schema}.posts (parent_message_hash)
+      ON ${s}.posts (parent_message_hash)
       WHERE parent_message_hash IS NOT NULL`,
     `CREATE INDEX IF NOT EXISTS posts_by_time
-      ON ${schema}.posts (timestamp DESC)`,
+      ON ${s}.posts (timestamp DESC)`,
     `CREATE INDEX IF NOT EXISTS posts_by_batch_ref
-      ON ${schema}.posts (batch_ref)`,
+      ON ${s}.posts (batch_ref)`,
     // ERC-8180 messageHash is the pre-batch identifier that replies
     // bind to (parent_message_hash). Indexing it lets the
     // messageHash → posts lookup serve the Composer's optimistic
     // "did my reply land?" check.
     `CREATE INDEX IF NOT EXISTS posts_by_message_hash
-      ON ${schema}.posts (message_hash)`,
+      ON ${s}.posts (message_hash)`,
   ];
 }
