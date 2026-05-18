@@ -1,0 +1,10 @@
+[package]
+name = "bam-coprocessor-lib"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+serde      = { workspace = true }
+sha2       = { workspace = true }
+tiny-keccak = { workspace = true }
+k256       = { workspace = true }

@@ -1,0 +1,10 @@
+[package]
+name = "bam-reader-program"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+sp1-zkvm            = { version = "6.0.1" }
+bam-coprocessor-lib = { path = "../lib" }
+kzg-rs              = "0.2.8"
+sha2                = { workspace = true }

@@ -1,0 +1,8 @@
+target/
+.env
+*.bin
+results.json
+EXPLAINER.md
+ISSUES.md
+PROGRESS.md
+kzg-rs-migration.md

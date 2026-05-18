@@ -1,0 +1,42 @@
+[package]
+name = "bam-coprocessor-script"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "prove-reader"
+path = "src/bin/prove-reader.rs"
+
+[[bin]]
+name = "prove-from-reader"
+path = "src/bin/prove-from-reader.rs"
+
+[[bin]]
+name = "show-proof"
+path = "src/bin/show-proof.rs"
+
+[[bin]]
+name = "prove-app"
+path = "src/bin/prove-app.rs"
+
+[[bin]]
+name = "print-vk"
+path = "src/bin/print-vk.rs"
+
+[dependencies]
+sp1-sdk             = { version = "6.0.1", features = ["blocking"] }
+bam-coprocessor-lib = { path = "../lib" }
+serde               = { workspace = true }
+serde_json          = { workspace = true }
+hex                 = "0.4.3"
+c-kzg               = { version = "2.1", default-features = true }
+sha2                = { workspace = true }
+clap                = { version = "4.0", features = ["derive"] }
+ureq                = { version = "2", features = ["json"] }
+
+[dev-dependencies]
+k256         = { workspace = true }
+tiny-keccak  = { workspace = true }
+
+[build-dependencies]
+sp1-build = { version = "6.0.1" }
