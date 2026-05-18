@@ -1,0 +1,491 @@
+:root {
+  --bg: #0b0d12;
+  --panel: #11141c;
+  --fg: #e6e8ee;
+  --muted: #8a93a6;
+  --border: #1c2030;
+  --accent: #a78bfa;
+  --accent-2: #6366f1;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+    Roboto, "Helvetica Neue", Arial, sans-serif;
+  line-height: 1.55;
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--fg);
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+a:hover {
+  text-decoration: underline;
+}
+
+.shell {
+  position: relative;
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 56px 20px 80px;
+}
+
+/* hero */
+.hero {
+  text-align: left;
+  margin-bottom: 48px;
+}
+
+.eyebrow {
+  margin: 0 0 12px;
+  color: var(--muted);
+  font-size: 12px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+/* live status pill — floats in the shell's top-right so it doesn't push hero content down */
+.status {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 4px 12px 4px 10px;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(6px);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  z-index: 2;
+}
+
+.status .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #4ade80;
+  box-shadow: 0 0 8px rgba(74, 222, 128, 0.7);
+  animation: status-pulse 2s ease-in-out infinite;
+}
+
+@keyframes status-pulse {
+  0%, 100% { opacity: 1;   box-shadow: 0 0 8px rgba(74, 222, 128, 0.7); }
+  50%      { opacity: 0.55; box-shadow: 0 0 3px rgba(74, 222, 128, 0.3); }
+}
+
+h1 {
+  margin: 0;
+  font-size: 64px;
+  line-height: 1;
+  letter-spacing: -0.03em;
+  font-weight: 800;
+}
+
+.tagline {
+  margin: 12px 0 32px;
+  color: var(--muted);
+  font-size: 18px;
+  max-width: 36ch;
+}
+
+/* animation stage */
+.stage {
+  position: relative;
+  height: 300px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  background:
+    radial-gradient(
+      circle at 50% 100%,
+      rgba(167, 139, 250, 0.08),
+      transparent 65%
+    ),
+    var(--panel);
+}
+
+/* source labels */
+.source {
+  position: absolute;
+  top: 18px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  color: var(--muted);
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 10px;
+  white-space: nowrap;
+}
+.s1 { left: 24px; }
+.s2 { left: 50%; transform: translateX(-50%); }
+.s3 { right: 24px; }
+
+/* falling messages — tiny text pills streaming from each source */
+.msg {
+  position: absolute;
+  top: 48px;
+  max-width: 150px;
+  padding: 2px 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  line-height: 1;
+  color: #ddd6fe;
+  background: rgba(99, 102, 241, 0.18);
+  border: 1px solid rgba(167, 139, 250, 0.4);
+  border-radius: 999px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0;
+  animation: drip 3s linear infinite;
+}
+
+.c1 { left: 56px;                   animation-duration: 3s;   }
+.c2 { left: 50%;
+       transform: translateX(-50%); animation-duration: 3.4s; }
+.c3 { right: 56px;                  animation-duration: 2.7s; }
+
+@keyframes drip {
+  0%   { transform: translateY(0)   scale(0.9); opacity: 0; }
+  10%  { opacity: 1; }
+  82%  { transform: translateY(120px) scale(1);   opacity: 1; }
+  95%  { transform: translateY(136px) scale(0.55); opacity: 0.4; }
+  100% { transform: translateY(142px) scale(0.2);  opacity: 0; }
+}
+
+/* center column needs to keep its horizontal centering through translateY */
+.c2 { animation-name: drip-center; }
+@keyframes drip-center {
+  0%   { transform: translate(-50%, 0)    scale(0.9); opacity: 0; }
+  10%  { opacity: 1; }
+  82%  { transform: translate(-50%, 120px) scale(1);   opacity: 1; }
+  95%  { transform: translate(-50%, 136px) scale(0.55); opacity: 0.4; }
+  100% { transform: translate(-50%, 142px) scale(0.2);  opacity: 0; }
+}
+
+/* batch pill sits where the messages vanish — pulses each cycle to suggest
+   a batch sealing before a blob lands on the chain */
+.batch {
+  position: absolute;
+  left: 50%;
+  top: 198px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--muted);
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px dashed var(--border);
+  border-radius: 999px;
+  padding: 4px 14px;
+  transform: translateX(-50%);
+  animation: batch-pulse 3s ease-in-out infinite;
+}
+
+@keyframes batch-pulse {
+  0%, 55% {
+    transform: translateX(-50%) scale(1);
+    background: rgba(0, 0, 0, 0.35);
+    border-color: var(--border);
+    color: var(--muted);
+    box-shadow: none;
+  }
+  68% {
+    transform: translateX(-50%) scale(1.08);
+    background: rgba(167, 139, 250, 0.22);
+    border-color: var(--accent);
+    color: var(--accent);
+    box-shadow: 0 0 18px rgba(167, 139, 250, 0.45);
+  }
+  82% {
+    transform: translateX(-50%) scale(1);
+    background: rgba(167, 139, 250, 0.1);
+    border-color: var(--border);
+    color: var(--muted);
+    box-shadow: none;
+  }
+  100% {
+    transform: translateX(-50%) scale(1);
+    background: rgba(0, 0, 0, 0.35);
+    border-color: var(--border);
+    color: var(--muted);
+    box-shadow: none;
+  }
+}
+
+/* chain of blobs at the bottom — flows left → right like a conveyor:
+   each blob fades in on the left, pulses bright as it emerges, then
+   drifts right and fades out, so the chain feels continuously produced */
+.chain {
+  position: absolute;
+  bottom: 22px;
+  left: 0;
+  right: 0;
+  height: 50px;
+  overflow: hidden;
+  mask-image: linear-gradient(
+    to right,
+    transparent 0%,
+    black 10%,
+    black 90%,
+    transparent 100%
+  );
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent 0%,
+    black 10%,
+    black 90%,
+    transparent 100%
+  );
+}
+
+.chain .b {
+  position: absolute;
+  top: 7px;
+  width: 56px;
+  height: 36px;
+  margin-left: -28px;
+  transform-origin: center;
+  filter: drop-shadow(0 0 6px rgba(167, 139, 250, 0.25));
+  animation: travel 7s linear infinite;
+  opacity: 0;
+}
+
+@keyframes travel {
+  0% {
+    left: -4%;
+    opacity: 0;
+    transform: scale(0.65);
+    filter: drop-shadow(0 0 3px rgba(167, 139, 250, 0.2));
+  }
+  10% {
+    left: 12%;
+    opacity: 1;
+    transform: scale(1.2);
+    filter: drop-shadow(0 0 18px rgba(167, 139, 250, 0.95));
+  }
+  18% {
+    left: 18%;
+    opacity: 1;
+    transform: scale(1);
+    filter: drop-shadow(0 0 6px rgba(167, 139, 250, 0.4));
+  }
+  85% {
+    left: 96%;
+    opacity: 0.55;
+  }
+  100% {
+    left: 108%;
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .msg,
+  .batch,
+  .chain .b,
+  .status .dot {
+    animation: none;
+  }
+  .msg { opacity: 0.7; }
+  .chain .b { opacity: 0.6; left: 50%; }
+}
+
+/* sections */
+section {
+  margin-top: 56px;
+}
+
+h2 {
+  font-size: 13px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 0 0 16px;
+  font-weight: 600;
+}
+
+/* stack diagram — layered architecture */
+.layers {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.layer {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px 18px;
+}
+
+.layer-tag {
+  flex: 0 0 auto;
+  min-width: 84px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.layer-badge {
+  padding: 2px 6px;
+  background: rgba(167, 139, 250, 0.12);
+  border: 1px solid rgba(167, 139, 250, 0.4);
+  border-radius: 4px;
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: lowercase;
+  color: var(--accent);
+}
+
+.layer-body {
+  flex: 1 1 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+  color: var(--fg);
+}
+
+.layer-main {
+  border-color: rgba(167, 139, 250, 0.45);
+  background:
+    linear-gradient(
+      180deg,
+      rgba(167, 139, 250, 0.04),
+      rgba(99, 102, 241, 0.04)
+    ),
+    var(--panel);
+}
+
+.layer-cells {
+  flex: 1 1 0;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+
+.cell {
+  background: rgba(0, 0, 0, 0.28);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.cell-name {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+  color: var(--fg);
+}
+
+.cell-desc {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 3px;
+}
+
+.layer-edge {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 10px;
+  padding: 2px 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.layer-edge .bar {
+  color: var(--accent);
+  font-size: 14px;
+}
+
+/* lists */
+.ercs ul,
+.demos ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  border-top: 1px solid var(--border);
+}
+
+.ercs li,
+.demos li {
+  display: flex;
+  gap: 16px;
+  align-items: baseline;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 15px;
+}
+
+.ercs a,
+.demos a {
+  flex: 0 0 auto;
+  min-width: 160px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 14px;
+}
+
+.ercs span,
+.demos span {
+  color: var(--muted);
+  font-size: 14px;
+}
+
+/* footer */
+.foot {
+  margin-top: 64px;
+  padding-top: 24px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.foot .primary {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 14px;
+}
+
+.foot .by {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+@media (max-width: 520px) {
+  h1 { font-size: 48px; }
+  .ercs li, .demos li { flex-direction: column; gap: 4px; }
+  .ercs a, .demos a { min-width: 0; }
+  .layer { flex-direction: column; align-items: stretch; gap: 10px; }
+  .layer-tag { min-width: 0; }
+  .layer-cells { grid-template-columns: repeat(2, 1fr); }
+  .shell { padding-top: 64px; }
+  .eyebrow { max-width: calc(100% - 160px); }
+}

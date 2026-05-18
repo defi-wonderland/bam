@@ -135,6 +135,12 @@ importers:
         specifier: ^1.2.0
         version: 1.6.1(@types/node@20.19.37)(happy-dom@15.11.7)(jsdom@25.0.1(bufferutil@4.1.0)(utf-8-validate@6.0.6))
 
+  apps/bam-landing:
+    devDependencies:
+      vite:
+        specifier: ^5.4.0
+        version: 5.4.21(@types/node@25.5.0)
+
   apps/bam-sdk-test:
     dependencies:
       bam-sdk:
@@ -5056,6 +5062,7 @@ packages:
 
   uuid@9.0.1:
     resolution: {integrity: sha512-b+1eJOlsR9K8HJpow9Ok3fiWOWSIcIzXodvv0rQjVoOVNpWMpxf1wZNpt4y9h10odCNrqnYp1OBzRktckBe3sA==}
+    deprecated: uuid@10 and below is no longer supported.  For ESM codebases, update to uuid@latest.  For CommonJS codebases, use uuid@11 (but be aware this version will likely be deprecated in 2028).
     hasBin: true
 
   valtio@1.13.2:
