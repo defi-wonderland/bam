@@ -13,7 +13,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { encodePostReplyContents } from 'bam-app-codecs/post-reply';
+import { encodePostReplyContents } from 'bam-sdk/post-reply';
 import type { Address, Bytes32 } from 'bam-sdk';
 import type { MessageRow } from 'bam-store';
 

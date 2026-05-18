@@ -27,7 +27,7 @@
  * `post-reply` handlers.
  */
 
-import { encodeContents, splitContents, type Bytes32 } from 'bam-sdk/browser';
+import { encodeContents, splitContents, type Bytes32 } from '../browser.js';
 
 const ENVELOPE_VERSION = 0x01;
 const KIND_POST = 0x00;

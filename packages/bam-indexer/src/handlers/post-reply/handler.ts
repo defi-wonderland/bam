@@ -5,7 +5,7 @@
  * them side-by-side. bam-twitter is the first consumer (see
  * `src/bin/bam-indexer.ts`).
  *
- * The handler decodes via `bam-app-codecs/post-reply` and projects into
+ * The handler decodes via `bam-sdk/post-reply` and projects into
  * `<opts.schema>.posts`. Reorg cascade is a single `DELETE WHERE
  * batch_ref = $1` per affected tx-hash — clean because every row is
  * anchored to exactly one batch.
@@ -14,7 +14,7 @@
 import {
   decodePostReplyContents,
   type PostReplyMessage,
-} from 'bam-app-codecs/post-reply';
+} from 'bam-sdk/post-reply';
 import type { Bytes32 } from 'bam-sdk';
 import type { PoolClient } from 'pg';
 

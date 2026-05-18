@@ -160,7 +160,7 @@ If your app needs a different entity model (nested threads, comments
 keyed by post-id, etc.), implement `IndexerHandler<E>` from scratch:
 
 ```ts
-import { decodeMyContents } from 'bam-app-codecs/my-app';
+import { decodeMyContents } from 'bam-sdk/my-app';
 import type { IndexerHandler } from 'bam-indexer';
 
 export const myHandler: IndexerHandler<MyPayload> = {

@@ -6,7 +6,7 @@
  * interval regardless of how many components subscribe.
  */
 
-import { decodePostReplyContents } from 'bam-app-codecs/post-reply';
+import { decodePostReplyContents } from 'bam-sdk/post-reply';
 import type { Bytes32 } from 'bam-sdk/browser';
 
 import type { ConfirmedRow } from './confirmed-row';

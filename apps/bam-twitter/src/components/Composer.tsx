@@ -13,7 +13,7 @@ import {
 import type { Address } from 'viem';
 
 import { MAX_POST_CHARS, SEPOLIA_CHAIN_ID, TWITTER_TAG } from '@/lib/constants';
-import { encodePostReplyContents, type PostReplyMessage } from 'bam-app-codecs/post-reply';
+import { encodePostReplyContents, type PostReplyMessage } from 'bam-sdk/post-reply';
 import { TWEETS_QUERY_KEY } from '@/lib/timeline';
 
 /**

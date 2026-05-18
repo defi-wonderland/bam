@@ -13,7 +13,6 @@
   "dependencies": {
     "@rainbow-me/rainbowkit": "^2.2.4",
     "@tanstack/react-query": "^5.62.16",
-    "bam-app-codecs": "workspace:*",
     "bam-sdk": "workspace:*",
     "next": "^15.1.4",
     "react": "^19.0.0",

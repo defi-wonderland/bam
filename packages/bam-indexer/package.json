@@ -27,7 +27,6 @@
     "lint": "eslint src tests"
   },
   "dependencies": {
-    "bam-app-codecs": "workspace:*",
     "bam-sdk": "workspace:*",
     "bam-store": "workspace:*",
     "dotenv": "^16.4.5",

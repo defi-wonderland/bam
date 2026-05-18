@@ -149,9 +149,6 @@ importers:
       '@tanstack/react-query':
         specifier: ^5.62.16
         version: 5.90.21(react@19.2.4)
-      bam-app-codecs:
-        specifier: workspace:*
-        version: link:../../packages/bam-app-codecs
       bam-sdk:
         specifier: workspace:*
         version: link:../../packages/bam-sdk
@@ -251,16 +248,6 @@ importers:
         specifier: ^1.2.0
         version: 1.6.1(@types/node@20.19.37)(happy-dom@15.11.7)(jsdom@29.0.2(@noble/hashes@1.8.0))
 
-  packages/bam-app-codecs:
-    dependencies:
-      bam-sdk:
-        specifier: workspace:*
-        version: link:../bam-sdk
-    devDependencies:
-      '@types/node':
-        specifier: ^20.11.0
-        version: 20.19.37
-
   packages/bam-cli:
     dependencies:
       bam-sdk:
@@ -301,9 +288,6 @@ importers:
 
   packages/bam-indexer:
     dependencies:
-      bam-app-codecs:
-        specifier: workspace:*
-        version: link:../bam-app-codecs
       bam-sdk:
         specifier: workspace:*
         version: link:../bam-sdk

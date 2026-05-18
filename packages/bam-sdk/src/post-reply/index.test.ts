@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { Bytes32 } from 'bam-sdk/browser';
+import type { Bytes32 } from '../browser.js';
 
 import {
   decodePostReplyContents,
