@@ -26,6 +26,12 @@ export interface IndexerConfig {
   httpBind: string;
   /** Default 8789. */
   httpPort: number;
+  /**
+   * `contentTag` for the bam-twitter post-reply handler instance.
+   * keccak256(utf8("bam-twitter.v1")) on production, but operators
+   * point at staging / fork tags by overriding the env var.
+   */
+  twitterTag: Bytes32;
 }
 
 export type IndexerEventName =

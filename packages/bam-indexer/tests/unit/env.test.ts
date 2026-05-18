@@ -2,9 +2,12 @@ import { describe, expect, it } from 'vitest';
 
 import { parseEnv, EnvConfigError } from '../../src/bin/env.js';
 
+const VALID_TAG = '0x' + 'f0'.repeat(32);
+
 const REQUIRED = {
   INDEXER_CHAIN_ID: '11155111',
   INDEXER_DB_URL: 'postgres://x:y@localhost/z',
+  INDEXER_TWITTER_TAG: VALID_TAG,
 };
 
 describe('parseEnv', () => {
@@ -34,8 +37,21 @@ describe('parseEnv', () => {
     expect(() => parseEnv({ ...REQUIRED, INDEXER_BATCH_SIZE: '-1' })).toThrow(EnvConfigError);
   });
 
-  it('requires INDEXER_CHAIN_ID and INDEXER_DB_URL', () => {
-    expect(() => parseEnv({ INDEXER_DB_URL: 'postgres://x' })).toThrow(EnvConfigError);
-    expect(() => parseEnv({ INDEXER_CHAIN_ID: '1' })).toThrow(EnvConfigError);
+  it('requires INDEXER_CHAIN_ID, INDEXER_DB_URL, INDEXER_TWITTER_TAG', () => {
+    const { INDEXER_CHAIN_ID, INDEXER_DB_URL, INDEXER_TWITTER_TAG, ...rest } = REQUIRED;
+    expect(() => parseEnv({ ...rest, INDEXER_DB_URL, INDEXER_TWITTER_TAG })).toThrow(/INDEXER_CHAIN_ID/);
+    expect(() => parseEnv({ ...rest, INDEXER_CHAIN_ID, INDEXER_TWITTER_TAG })).toThrow(/INDEXER_DB_URL/);
+    expect(() => parseEnv({ ...rest, INDEXER_CHAIN_ID, INDEXER_DB_URL })).toThrow(/INDEXER_TWITTER_TAG/);
+  });
+
+  it('rejects INDEXER_TWITTER_TAG that is not a 32-byte 0x-hex string', () => {
+    expect(() => parseEnv({ ...REQUIRED, INDEXER_TWITTER_TAG: '0xabc' })).toThrow(/INDEXER_TWITTER_TAG/);
+    expect(() => parseEnv({ ...REQUIRED, INDEXER_TWITTER_TAG: 'f0'.repeat(32) })).toThrow(/INDEXER_TWITTER_TAG/);
+    expect(() => parseEnv({ ...REQUIRED, INDEXER_TWITTER_TAG: '0x' + 'zz'.repeat(32) })).toThrow(/INDEXER_TWITTER_TAG/);
+  });
+
+  it('lowercases the parsed tag', () => {
+    const cfg = parseEnv({ ...REQUIRED, INDEXER_TWITTER_TAG: '0x' + 'F0'.repeat(32) });
+    expect(cfg.twitterTag).toBe('0x' + 'f0'.repeat(32));
   });
 });

@@ -70,6 +70,7 @@ bam-indexer reset --handler twitter --yes    # truncate twitter.*, drop cursor
 |---|---|---|
 | `INDEXER_CHAIN_ID` | — | Required. Used as the `chain_id` filter on every `messages` / `batches` read. |
 | `INDEXER_DB_URL` | — | Required. Read-only DSN for `bam-store` (`messages` + `batches`). |
+| `INDEXER_TWITTER_TAG` | — | Required. 0x-prefixed 32-byte hex — the `contentTag` the post-reply handler registers for. `keccak256(utf8("bam-twitter.v1"))` on production. |
 | `INDEXER_WRITE_DB_URL` | falls back to `INDEXER_DB_URL` | DSN for the indexer's own schemas (`indexer.*`, `twitter.*`). In production, give the indexer a writer role on these schemas only and a reader role on `bam-store`'s tables. |
 | `INDEXER_RPC_URL` | — | viem JSON-RPC endpoint for enrichers (ENS today). When unset, ENS resolves as `null`. |
 | `INDEXER_POLL_MS` | `5000` | Tick cadence. |

@@ -4,6 +4,8 @@
  * maps to exit code 2 (matches `bam-reader`'s pattern).
  */
 
+import type { Bytes32 } from 'bam-sdk';
+
 import type { IndexerConfig } from '../types.js';
 import { EnvConfigError } from '../errors.js';
 
@@ -40,6 +42,8 @@ export function parseEnv(env: NodeJS.ProcessEnv = process.env): IndexerConfig {
   // Port 0 is legitimate: Node binds an OS-assigned port (handy in tests).
   const httpPort = parsePositiveInt(env.INDEXER_HTTP_PORT, DEFAULT_HTTP_PORT, 'INDEXER_HTTP_PORT');
 
+  const twitterTag = parseBytes32(env.INDEXER_TWITTER_TAG, 'INDEXER_TWITTER_TAG');
+
   return {
     chainId,
     sourceDbUrl,
@@ -49,7 +53,18 @@ export function parseEnv(env: NodeJS.ProcessEnv = process.env): IndexerConfig {
     batchSize,
     httpBind,
     httpPort,
+    twitterTag,
   };
+}
+
+function parseBytes32(raw: string | undefined, name: string): Bytes32 {
+  if (raw === undefined || raw === '') {
+    throw new EnvConfigError(`${name} is required (0x-prefixed 32-byte hex)`);
+  }
+  if (!/^0x[0-9a-fA-F]{64}$/.test(raw)) {
+    throw new EnvConfigError(`${name} is not a 32-byte 0x-hex string: ${raw}`);
+  }
+  return raw.toLowerCase() as Bytes32;
 }
 
 function parsePositiveInt(
