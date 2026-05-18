@@ -33,7 +33,14 @@ export function postReplyDdl(schema: string): string[] {
       block_number                bigint NOT NULL,
       tx_index                    bigint NOT NULL,
       message_index_within_batch  bigint NOT NULL,
-      sender_ens                  text NULL
+      sender_ens                  text NULL,
+      -- post (kind=0) ⇒ no parent; reply (kind=1) ⇒ parent is set.
+      -- Handler.project enforces this in code (handler.ts:101); the
+      -- CHECK is defense in depth for direct SQL writes / restores.
+      CONSTRAINT posts_kind_parent_consistent CHECK (
+        (kind = 0 AND parent_message_hash IS NULL)
+        OR (kind = 1 AND parent_message_hash IS NOT NULL)
+      )
     )`,
     `CREATE INDEX IF NOT EXISTS posts_by_sender
       ON ${s}.posts (sender, block_number DESC, tx_index DESC)`,
