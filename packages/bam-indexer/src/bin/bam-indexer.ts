@@ -81,6 +81,16 @@ async function runServe(): Promise<number> {
   return 0;
 }
 
+const UUID_RE = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+
+function readFlagValue(argv: string[], i: number, flag: string): string | { error: string } {
+  const v = argv[i + 1];
+  if (v === undefined || v.startsWith('--')) {
+    return { error: `[bam-indexer] reset: ${flag} requires a value\n` };
+  }
+  return v;
+}
+
 async function runReset(argv: string[]): Promise<number> {
   // Parse `--handler <name> [--version <uuid> | --current] --yes`.
   let handlerName: string | undefined;
@@ -89,10 +99,24 @@ async function runReset(argv: string[]): Promise<number> {
   let yes = false;
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--handler') {
-      handlerName = argv[i + 1];
+      const v = readFlagValue(argv, i, '--handler');
+      if (typeof v !== 'string') {
+        process.stderr.write(v.error);
+        return 4;
+      }
+      handlerName = v;
       i++;
     } else if (argv[i] === '--version') {
-      versionId = argv[i + 1];
+      const v = readFlagValue(argv, i, '--version');
+      if (typeof v !== 'string') {
+        process.stderr.write(v.error);
+        return 4;
+      }
+      if (!UUID_RE.test(v)) {
+        process.stderr.write(`[bam-indexer] reset: --version expects a UUID (got "${v}")\n`);
+        return 4;
+      }
+      versionId = v.toLowerCase();
       i++;
     } else if (argv[i] === '--current') {
       currentOnly = true;
