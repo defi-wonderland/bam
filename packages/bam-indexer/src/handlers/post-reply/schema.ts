@@ -50,10 +50,10 @@ export function postReplyDdl(schema: string): string[] {
     `CREATE INDEX IF NOT EXISTS posts_by_batch_ref
       ON ${s}.posts (batch_ref)`,
     // ERC-8180 messageHash is the pre-batch identifier that replies
-    // bind to (parent_message_hash). Indexed across versions so the
+    // bind to (parent_message_hash). Cross-version index — the
     // Composer's optimistic "did my reply land?" lookup hits any
-    // generation that has the row.
+    // generation that has the row without a version filter.
     `CREATE INDEX IF NOT EXISTS posts_by_message_hash
-      ON ${s}.posts (version_id, message_hash)`,
+      ON ${s}.posts (message_hash)`,
   ];
 }
