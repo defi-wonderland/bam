@@ -20,27 +20,20 @@
         <p class="meta">Post #1 — by the BAM team</p>
 
         <p>
-          Most messaging on Ethereum today is framed as transactions.
-          That's expensive (gas paid per sender, per message), it
-          tightly couples authorship to a contract account, and it
-          makes large multi-sender event streams (timelines, comment
-          threads, feeds) impractical.
+          Most messaging on Ethereum rides as transactions. Gas per
+          sender, per message — fine for one-off writes, hopeless for
+          large multi-sender streams like timelines, comments, and
+          feeds.
         </p>
         <p>
-          BAM — Blob Authenticated Messaging — sidesteps the
-          transaction frame. A single sender signs an EIP-712-typed
-          claim over a per-sender monotonic nonce; an aggregator
-          batches many senders into a blob and posts one transaction.
-          The on-chain contract verifies the batch, indexes a
-          per-tag content stream, and emits the data so any reader
-          can reconstruct the messages.
+          BAM packs many messages into one blob and posts a single
+          transaction. Each sender signs their own message, so the
+          chain becomes a notarised log of who said what. The
+          aggregator picks which messages to include but can't forge
+          them.
         </p>
         <p>
-          The trust model is small enough to write down on an index
-          card: each individual signature must be valid; the
-          aggregator can pick which messages to include but can't
-          forge them. The remainder is "blockchain as a notarised log
-          of who said what".
+          That's the whole trust story. The rest is plumbing.
         </p>
       </article>
 
