@@ -72,11 +72,16 @@
 [data-bam-comments] .bam-header {
   display: flex;
   align-items: center;
-  /* Single-child header (wallet status only); right-anchor it so
-     it doesn't compete visually with the host's section title. */
+  /* Connected state: address + Disconnect on the right so we don't
+     compete with the host's section title. The disconnected variant
+     overrides this to spread prompt + button across the row. */
   justify-content: flex-end;
   margin-bottom: 12px;
   gap: 8px;
+}
+
+[data-bam-comments] .bam-header-disconnected {
+  justify-content: space-between;
 }
 
 [data-bam-comments] .bam-account {
@@ -84,6 +89,25 @@
   font-size: 12px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
     "Liberation Mono", "Courier New", monospace;
+}
+
+[data-bam-comments] .bam-connect-prompt {
+  color: var(--bam-color-muted);
+  font-size: 13px;
+}
+
+[data-bam-comments] .bam-disconnect {
+  background: transparent;
+  border: none;
+  color: var(--bam-color-muted);
+  font: inherit;
+  font-size: 12px;
+  padding: 0;
+  cursor: pointer;
+}
+[data-bam-comments] .bam-disconnect:hover {
+  text-decoration: underline;
+  color: var(--bam-color-fg);
 }
 
 [data-bam-comments] .bam-button {

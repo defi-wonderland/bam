@@ -125,6 +125,16 @@ export function mountInstance(target: HTMLElement): () => void {
     if (destroyed) return;
     renderInto(target, state, {
       onConnect,
+      onDisconnect: () => {
+        // UI-only disconnect: clears the widget's in-memory account so
+        // the host page can "forget me" without revoking permissions
+        // in the wallet itself. EIP-1193 has no `disconnect` RPC, so
+        // a true revoke still has to happen in the wallet extension.
+        state.account = null;
+        state.composing = null;
+        state.error = null;
+        render();
+      },
       onStartCompose: (parent) => {
         state.composing = { parent, draft: state.composing?.draft ?? '' };
         state.error = null;
@@ -287,6 +297,7 @@ export function mountInstance(target: HTMLElement): () => void {
 
 interface RenderHooks {
   onConnect: () => void;
+  onDisconnect: () => void;
   onStartCompose: (parent?: `0x${string}`) => void;
   onCancelCompose: () => void;
   onDraftChange: (draft: string) => void;
@@ -309,9 +320,10 @@ function renderInto(
         }
       : null;
 
+  const composer = composerEl(state, hooks);
   target.replaceChildren(
     headerEl(state, hooks),
-    composerEl(state, hooks),
+    ...(composer === null ? [] : [composer]),
     threadEl(state, hooks)
   );
 
@@ -346,21 +358,35 @@ function headerEl(state: MountState, hooks: RenderHooks): HTMLElement {
     acc.textContent = shortAddress(state.account);
     acc.title = state.account;
     head.appendChild(acc);
+
+    const dc = document.createElement('button');
+    dc.type = 'button';
+    dc.className = 'bam-disconnect';
+    dc.textContent = 'Disconnect';
+    dc.addEventListener('click', hooks.onDisconnect);
+    head.appendChild(dc);
   } else {
-    const btn = button('Connect wallet', false, hooks.onConnect);
+    // Single-line pre-connect: prompt on the left, button on the
+    // right, so we don't burn a second row on the "connect a wallet
+    // to leave a comment" affordance the standalone composer row
+    // used to render.
+    head.classList.add('bam-header-disconnected');
+    const prompt = document.createElement('span');
+    prompt.className = 'bam-connect-prompt';
+    prompt.textContent = 'Connect a wallet to leave a comment.';
+    head.appendChild(prompt);
+
+    const btn = button('Connect', false, hooks.onConnect);
     head.appendChild(btn);
   }
 
   return head;
 }
 
-function composerEl(state: MountState, hooks: RenderHooks): HTMLElement {
-  if (state.account === null) {
-    const note = document.createElement('div');
-    note.className = 'bam-empty';
-    note.textContent = 'Connect a wallet to leave a comment.';
-    return note;
-  }
+function composerEl(state: MountState, hooks: RenderHooks): HTMLElement | null {
+  // Pre-connect prompt now lives in the header; no separate composer
+  // row when there's no account.
+  if (state.account === null) return null;
 
   if (state.composing === null && state.error !== null) {
     const wrap = document.createElement('div');
