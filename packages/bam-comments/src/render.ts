@@ -100,6 +100,16 @@ export function mountInstance(target: HTMLElement): () => void {
   let pollTimer: ReturnType<typeof setInterval> | null = null;
   let cleanupAccountsChanged: (() => void) | null = null;
   let destroyed = false;
+  // Bumped by onDisconnect; in-flight onSubmit captures this before
+  // its first await and bails before any state mutation when it sees
+  // a newer value, so a late completion can't wipe a fresh draft
+  // started after disconnect/reconnect.
+  let opEpoch = 0;
+  // Set true by the in-UI Disconnect button and cleared only by
+  // explicit Connect. Honored by the accountsChanged listener and
+  // the initial readExistingAccount bootstrap so neither can
+  // silently restore the account behind the user's back.
+  let manuallyDisconnected = false;
 
   const refresh = async () => {
     if (destroyed) return;
@@ -130,9 +140,18 @@ export function mountInstance(target: HTMLElement): () => void {
         // the host page can "forget me" without revoking permissions
         // in the wallet itself. EIP-1193 has no `disconnect` RPC, so
         // a true revoke still has to happen in the wallet extension.
+        //
+        // Bumping opEpoch invalidates any in-flight onSubmit so a
+        // late completion can't wipe a new draft after reconnect.
+        // The manuallyDisconnected flag blocks accountsChanged and
+        // the initial bootstrap promise from silently restoring the
+        // account — only an explicit Connect clears it.
+        opEpoch++;
+        manuallyDisconnected = true;
         state.account = null;
         state.composing = null;
         state.error = null;
+        state.submitting = false;
         render();
       },
       onStartCompose: (parent) => {
@@ -160,6 +179,11 @@ export function mountInstance(target: HTMLElement): () => void {
   function wireAccountsChanged(provider: Eip1193Provider): void {
     if (cleanupAccountsChanged !== null) return;
     cleanupAccountsChanged = onAccountsChanged(provider, (next) => {
+      // Honor a manual UI disconnect: ignore wallet-side restorations
+      // (e.g. account switches at the wallet level) until the user
+      // explicitly reconnects. A wallet-side disconnect (next=null)
+      // is still useful information and falls through.
+      if (manuallyDisconnected && next !== null) return;
       state.account = next;
       // Drop any in-flight composer; signing as a different account
       // mid-draft is never what the user wanted.
@@ -169,6 +193,9 @@ export function mountInstance(target: HTMLElement): () => void {
   }
 
   async function onConnect() {
+    // Explicit reconnect clears the manual-disconnect veto so the
+    // background paths (accountsChanged, bootstrap) can sync again.
+    manuallyDisconnected = false;
     state.error = null;
     try {
       const provider = requireProvider();
@@ -186,6 +213,7 @@ export function mountInstance(target: HTMLElement): () => void {
   async function onSubmit() {
     if (state.composing === null || state.submitting) return;
     const draft = state.composing.draft.trim();
+    const parent = state.composing.parent;
     if (draft.length === 0) return;
     // Code-point count, not UTF-16 code units — `"😀".length === 2`
     // would otherwise let a 280-character emoji string fail the cap
@@ -198,15 +226,22 @@ export function mountInstance(target: HTMLElement): () => void {
     state.submitting = true;
     state.error = null;
     render();
+    // Snapshotted before the first await so a Disconnect mid-flight
+    // can invalidate this run without it later clobbering a fresh
+    // draft the user composed after reconnect.
+    const myEpoch = opEpoch;
     try {
       const provider = requireProvider();
       let account = state.account;
       if (account === null) {
         account = await requestAccount(provider);
+        if (myEpoch !== opEpoch) return;
         state.account = account;
       }
       await ensureSepolia(provider);
-      await submitOnce(account, draft, state.composing.parent);
+      if (myEpoch !== opEpoch) return;
+      await submitOnce(account, draft, parent);
+      if (myEpoch !== opEpoch) return;
       // Optimistic clear; the next poll picks up the pending row.
       // We deliberately don't POST /flush here — BAM's whole point
       // is amortising blob costs across many authors per batch, so
@@ -218,6 +253,7 @@ export function mountInstance(target: HTMLElement): () => void {
       render();
       void refresh();
     } catch (err) {
+      if (myEpoch !== opEpoch) return;
       state.submitting = false;
       state.error = describeError(err);
       render();
@@ -275,6 +311,9 @@ export function mountInstance(target: HTMLElement): () => void {
   if (provider !== null) {
     wireAccountsChanged(provider);
     void readExistingAccount(provider).then((existing) => {
+      // Skip the silent restore if the user clicked Disconnect
+      // between mount and this promise resolving.
+      if (manuallyDisconnected) return;
       if (existing !== null && state.account === null) {
         state.account = existing;
         render();
