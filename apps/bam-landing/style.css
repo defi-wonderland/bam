@@ -305,8 +305,6 @@ h1 {
   }
   .msg { opacity: 0.7; }
   .chain .b { opacity: 0.6; left: 50%; }
-  a.cell { transition: none; }
-  a.cell:hover { transform: none; }
 }
 
 /* sections */
@@ -413,6 +411,11 @@ a.cell:hover {
 
 a.cell:hover .cell-name {
   color: var(--accent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  a.cell { transition: none; }
+  a.cell:hover { transform: none; }
 }
 
 .cell-name {
