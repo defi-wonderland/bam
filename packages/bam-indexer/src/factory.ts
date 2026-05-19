@@ -138,9 +138,7 @@ export async function createIndexer(
     },
     async resetHandlerCurrent(name: string) {
       const handler = registry.get(name);
-      if (handler === undefined) {
-        throw new UnknownHandlerError(name, registry.names());
-      }
+
       await resetHandlerCurrent(writePool, handler);
     },
     async resetHandlerVersion(name: string, versionId: string) {
