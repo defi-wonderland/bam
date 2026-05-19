@@ -2,8 +2,9 @@
 
 Node service that consumes confirmed BAM messages from `bam-store`,
 materializes app-shaped entities per `contentTag` via in-tree
-handlers, augments with on-chain reads (ENS today; stake + identity
-later), and serves a multi-consumer REST API.
+handlers, and serves a multi-consumer REST API. Handle resolution
+(ENS, stake-weighted display names) is the consumer's responsibility
+— the indexer ships chain-anchored entities, not derived identity.
 
 Sits **above** `bam-reader` (which is the protocol-level indexer
 for ERC-8180 events → decoded messages) and **below** per-FE BFFs
@@ -26,7 +27,7 @@ bam-reader ── upserts ──► bam-store (Postgres)
                        bam-indexer
                           ├─ cursor per handler (indexer.cursor)
                           ├─ handler registry  (in-tree)
-                          ├─ enricher pool     (ENS)
+                          ├─ enricher pool     (placeholders only)
                           └─ projection writes ──► handler schemas
                                                      │
                                                      ▼
@@ -72,7 +73,6 @@ bam-indexer reset --handler twitter --yes    # truncate twitter.*, drop cursor
 | `INDEXER_DB_URL` | — | Required. Read-only DSN for `bam-store` (`messages` + `batches`). |
 | `INDEXER_TWITTER_TAG` | — | Required. 0x-prefixed 32-byte hex — the `contentTag` the post-reply handler registers for. `keccak256(utf8("bam-twitter.v1"))` on production. |
 | `INDEXER_WRITE_DB_URL` | falls back to `INDEXER_DB_URL` | DSN for the indexer's own schemas (`indexer.*`, `twitter.*`). In production, give the indexer a writer role on these schemas only and a reader role on `bam-store`'s tables. |
-| `INDEXER_RPC_URL` | — | viem JSON-RPC endpoint for enrichers (ENS today). When unset, ENS resolves as `null`. |
 | `INDEXER_POLL_MS` | `5000` | Tick cadence. |
 | `INDEXER_BATCH_SIZE` | `200` | Rows pulled per handler per tick. |
 | `INDEXER_HTTP_BIND` | `127.0.0.1` | Bind address. Mirrors Reader's red-team C-1 posture; operator fronts it. |
@@ -117,9 +117,9 @@ no migration library — this is intentional and mirrors the
 Indexers are not trusted. Anyone running the same handler set
 against the same `bam-reader` Postgres MUST converge on the same
 entities for the same `(contentTag, chainId)`. The framework is
-deterministic given the source rows; enricher results (ENS, stake)
-are documented divergence points and consumers should treat them
-as advisory.
+deterministic given the source rows; the only non-deterministic
+slot is the enricher pool (stake / ECDSA registry / allowlist) and
+consumers should treat enricher results as advisory.
 
 ## Reorgs
 
@@ -136,8 +136,8 @@ matches Reader's cascade.
 ### Reusing the `post-reply` primitive
 
 If your app fits the flat post + one-level reply shape (utf-8 content,
-optional `parentMessageHash`, ENS-resolved sender), call the factory
-directly and add it to `HANDLERS` in `src/bin/bam-indexer.ts`:
+optional `parentMessageHash`), call the factory directly and add it
+to `HANDLERS` in `src/bin/bam-indexer.ts`:
 
 ```ts
 import { createPostReplyHandler } from 'bam-indexer';
@@ -153,7 +153,7 @@ const myAppHandler = createPostReplyHandler({
 
 The factory wires the schema (`<schema>.posts`), the four routes
 (`/${name}/posts`, `/${name}/posts/:messageId`, `/${name}/replies`,
-`/${name}/profile/:sender`), the ENS enricher, and the reorg cascade.
+`/${name}/profile/:sender`), and the reorg cascade.
 
 ### Authoring a new handler shape
 
@@ -171,7 +171,7 @@ export const myHandler: IndexerHandler<MyPayload> = {
   schema: 'my_app',
   async migrate(c) { /* CREATE TABLE IF NOT EXISTS … */ },
   decode(bytes) { try { return decodeMyContents(bytes).app; } catch { return null; } },
-  enrichments: [{ kind: 'ens', from: 'sender' }],
+  // enrichments: optional — placeholders for stake / ECDSA registry / allowlist.
   async project(msg, decoded, enr, txn) { /* INSERT … ON CONFLICT … */ },
   async onReorg(txHash, _chainId, txn) {
     await txn.query('DELETE FROM my_app.entities WHERE batch_ref = $1', [txHash.toLowerCase()]);

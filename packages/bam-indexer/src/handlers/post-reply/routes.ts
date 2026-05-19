@@ -34,7 +34,6 @@ interface PostRow {
   block_number: string;
   tx_index: string;
   message_index_within_batch: string;
-  sender_ens: string | null;
 }
 
 interface PostReplyPost {
@@ -50,7 +49,6 @@ interface PostReplyPost {
   block_number: number;
   tx_index: number;
   message_index_within_batch: number;
-  sender_ens: string | null;
 }
 
 function jsonResponse(res: ServerResponse, status: number, body: unknown): void {
@@ -81,7 +79,6 @@ function mapRow(r: PostRow): PostReplyPost {
     block_number: Number(r.block_number),
     tx_index: Number(r.tx_index),
     message_index_within_batch: Number(r.message_index_within_batch),
-    sender_ens: r.sender_ens,
   };
 }
 
@@ -140,7 +137,7 @@ export function buildPostReplyRoutes(
     const sql = `
       SELECT message_id, message_hash, sender, nonce, kind, timestamp, content,
              parent_message_hash, batch_ref, block_number, tx_index,
-             message_index_within_batch, sender_ens
+             message_index_within_batch
         FROM ${s}.posts
        WHERE ${where.join(' AND ')}
        ORDER BY block_number DESC, tx_index DESC, message_index_within_batch DESC
@@ -166,7 +163,7 @@ export function buildPostReplyRoutes(
     const result = await db.query<PostRow>(
       `SELECT message_id, message_hash, sender, nonce, kind, timestamp, content,
               parent_message_hash, batch_ref, block_number, tx_index,
-              message_index_within_batch, sender_ens
+              message_index_within_batch
          FROM ${s}.posts
         WHERE message_id = $1`,
       [id.toLowerCase()],
@@ -194,7 +191,7 @@ export function buildPostReplyRoutes(
     const result = await db.query<PostRow>(
       `SELECT message_id, message_hash, sender, nonce, kind, timestamp, content,
               parent_message_hash, batch_ref, block_number, tx_index,
-              message_index_within_batch, sender_ens
+              message_index_within_batch
          FROM ${s}.posts
         WHERE kind = 1 AND parent_message_hash = $1
         ORDER BY timestamp ASC, block_number ASC, tx_index ASC, message_index_within_batch ASC
@@ -205,10 +202,10 @@ export function buildPostReplyRoutes(
   };
 
   /**
-   * GET <routePrefix>/profile/:sender — denormalized handle (ENS) + a
-   * window of the sender's most recent posts. The ENS field is null
-   * when the sender has no primary name set (or when the indexer's
-   * RPC is unreachable — see `enrichers/ens.ts`).
+   * GET <routePrefix>/profile/:sender — a window of the sender's most
+   * recent posts. Handle resolution (ENS, stake-weighted display name,
+   * etc.) is the consumer's responsibility — the indexer ships
+   * `sender` and the consumer resolves.
    */
   const profileHandler = async (
     req: IncomingMessage,
@@ -225,16 +222,14 @@ export function buildPostReplyRoutes(
     const result = await db.query<PostRow>(
       `SELECT message_id, message_hash, sender, nonce, kind, timestamp, content,
               parent_message_hash, batch_ref, block_number, tx_index,
-              message_index_within_batch, sender_ens
+              message_index_within_batch
          FROM ${s}.posts
         WHERE sender = $1
         ORDER BY block_number DESC, tx_index DESC, message_index_within_batch DESC
         LIMIT $2`,
       [lower, limit],
     );
-    const posts = result.rows.map(mapRow);
-    const ens = posts.find((p) => p.sender_ens !== null)?.sender_ens ?? null;
-    jsonResponse(res, 200, { ens, posts });
+    jsonResponse(res, 200, { posts: result.rows.map(mapRow) });
   };
 
   return [

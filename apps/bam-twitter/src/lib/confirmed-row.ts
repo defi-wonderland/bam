@@ -5,7 +5,7 @@
  *
  *   - **Indexer path** — `bam-indexer`'s `/twitter/posts`. The payload
  *     is already decoded, so `timestamp` + `content` + `kind` +
- *     `parent_message_hash` + `sender_ens` are populated;
+ *     `parent_message_hash` are populated;
  *     `contents`/`signature` are not shipped.
  *   - **Reader fallback** — `bam-reader`'s `/messages`. The raw
  *     `contents` and `signature` hex are shipped and the consumer
@@ -27,10 +27,9 @@ export interface ConfirmedRow {
   tx_hash: string;
   block_number: number | null;
   status: 'posted';
-  // Indexer-path enrichment — present whenever the indexer answered.
+  // Indexer-path decoded fields — present whenever the indexer answered.
   timestamp?: number;
   content?: string;
   parent_message_hash?: string | null;
   kind?: 'post' | 'reply';
-  sender_ens?: string | null;
 }

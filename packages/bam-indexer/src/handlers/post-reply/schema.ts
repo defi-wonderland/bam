@@ -33,7 +33,6 @@ export function postReplyDdl(schema: string): string[] {
       block_number                bigint NOT NULL,
       tx_index                    bigint NOT NULL,
       message_index_within_batch  bigint NOT NULL,
-      sender_ens                  text NULL,
       -- post (kind=0) ⇒ no parent; reply (kind=1) ⇒ parent is set.
       CONSTRAINT posts_kind_parent_consistent CHECK (
         (kind = 0 AND parent_message_hash IS NULL)

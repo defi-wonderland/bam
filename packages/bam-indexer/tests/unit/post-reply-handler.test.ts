@@ -174,7 +174,7 @@ describe('post-reply handler.migrate', () => {
 });
 
 describe('post-reply handler.project', () => {
-  it('inserts a post row with lowercased hex and resolved ENS', async () => {
+  it('inserts a post row with lowercased hex', async () => {
     const bytes = encodePostReplyContents(TWITTER_TAG, {
       kind: 'post',
       timestamp: 9001,
@@ -185,7 +185,7 @@ describe('post-reply handler.project', () => {
     await handler.project(
       row,
       { kind: 'post', timestamp: 9001, content: 'gm' },
-      { ens: 'ace.eth' },
+      {},
       c as never,
     );
     expect(c.queries).toHaveLength(1);
@@ -205,7 +205,6 @@ describe('post-reply handler.project', () => {
       100,
       2,
       0,
-      'ace.eth',
     ]);
   });
 
@@ -226,12 +225,11 @@ describe('post-reply handler.project', () => {
         parentMessageHash: PARENT_HASH,
         content: 're',
       },
-      { ens: null },
+      {},
       c as never,
     );
     expect(c.queries[0].params[4]).toBe(1); // kind = reply
     expect(c.queries[0].params[7]).toBe(PARENT_HASH.toLowerCase());
-    expect(c.queries[0].params[12]).toBeNull(); // ens null
   });
 
   it('throws when messageId is null (Reader-side bug guard)', async () => {

@@ -18,15 +18,10 @@ import {
 import type { Bytes32 } from 'bam-sdk';
 import type { PoolClient } from 'pg';
 
-import type {
-  EnrichmentRequest,
-  IndexerHandler,
-} from '../../framework/handler.js';
+import type { IndexerHandler } from '../../framework/handler.js';
 import { quoteIdent } from '../../framework/sql.js';
 import { postReplyDdl } from './schema.js';
 import { buildPostReplyRoutes } from './routes.js';
-
-const ENRICHMENTS: EnrichmentRequest[] = [{ kind: 'ens', from: 'sender' }];
 
 export interface PostReplyHandlerOptions {
   /** `handler.name` — must be unique across the registry. */
@@ -47,7 +42,7 @@ export function createPostReplyHandler(
   const { name, contentTag, schema } = opts;
   const s = quoteIdent(schema);
   const routePrefix = opts.routePrefix ?? `/${name}`;
-  const version = opts.version ?? 1;
+  const version = opts.version ?? 2;
   const ddl = postReplyDdl(schema);
   const routes = buildPostReplyRoutes({ schema, routePrefix });
 
@@ -71,9 +66,7 @@ export function createPostReplyHandler(
       }
     },
 
-    enrichments: ENRICHMENTS,
-
-    async project(msg, decoded, enr, txn): Promise<void> {
+    async project(msg, decoded, _enr, txn): Promise<void> {
       if (msg.messageId === null) {
         // Reader writes confirmed rows with `message_id` populated.
         // A null here would be a Reader bug — skip rather than insert
@@ -101,8 +94,8 @@ export function createPostReplyHandler(
         `INSERT INTO ${s}.posts
            (message_id, message_hash, sender, nonce, kind, timestamp, content,
             parent_message_hash, batch_ref, block_number, tx_index,
-            message_index_within_batch, sender_ens)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+            message_index_within_batch)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
          ON CONFLICT (message_id) DO UPDATE SET
            message_hash               = EXCLUDED.message_hash,
            kind                       = EXCLUDED.kind,
@@ -112,8 +105,7 @@ export function createPostReplyHandler(
            batch_ref                  = EXCLUDED.batch_ref,
            block_number               = EXCLUDED.block_number,
            tx_index                   = EXCLUDED.tx_index,
-           message_index_within_batch = EXCLUDED.message_index_within_batch,
-           sender_ens                 = EXCLUDED.sender_ens`,
+           message_index_within_batch = EXCLUDED.message_index_within_batch`,
         [
           msg.messageId.toLowerCase(),
           msg.messageHash.toLowerCase(),
@@ -127,7 +119,6 @@ export function createPostReplyHandler(
           msg.blockNumber,
           msg.txIndex,
           msg.messageIndexWithinBatch,
-          enr.ens ?? null,
         ],
       );
     },

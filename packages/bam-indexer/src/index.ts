@@ -58,7 +58,6 @@ export {
 export type { ChainCoord, ReorgEntry } from './source/bam-store-source.js';
 
 // Enrichers.
-export { EnsEnricher } from './enrichers/ens.js';
 export { BatchEnricherPool } from './enrichers/batch.js';
 export type { EnricherPool, EnrichmentKind } from './enrichers/types.js';
 

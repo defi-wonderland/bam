@@ -142,9 +142,8 @@ class FakeSource implements Pick<BamStoreSource, 'listConfirmedAfter' | 'listReo
 }
 
 class FakeEnricherPool implements EnricherPool {
-  constructor(public readonly ens: string | null = null) {}
-  async resolve(): Promise<{ ens: string | null }> {
-    return { ens: this.ens };
+  async resolve(): Promise<Record<string, never>> {
+    return {};
   }
 }
 
@@ -184,7 +183,7 @@ function makeTickOpts(opts: {
     registry: new HandlerRegistry(opts.handlers ?? [twitterHandler]),
     source: opts.source,
     writePool: opts.pool as never,
-    enrichers: opts.enrichers ?? new FakeEnricherPool('ace.eth'),
+    enrichers: opts.enrichers ?? new FakeEnricherPool(),
     logger: (e) => opts.events?.push({ event: e.event, handler: e.handler }),
     batchSize: 100,
   };
@@ -280,7 +279,7 @@ describe('tick — reorg pass', () => {
     // Pre-seed cursor past the reorg.
     client.cursorRow = {
       handler_name: 'twitter',
-      handler_version: 1,
+      handler_version: 2,
       last_block_number: String(100),
       last_tx_index: String(0),
       last_msg_index: String(0),

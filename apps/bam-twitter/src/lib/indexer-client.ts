@@ -113,7 +113,6 @@ export interface TwitterPostRow {
   block_number: number;
   tx_index: number;
   message_index_within_batch: number;
-  sender_ens: string | null;
 }
 
 export interface ListTwitterPostsArgs {

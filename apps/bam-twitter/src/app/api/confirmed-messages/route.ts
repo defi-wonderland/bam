@@ -62,7 +62,6 @@ function fromIndexer(row: TwitterPostRow): ConfirmedRow {
     content: row.content,
     parent_message_hash: row.parent_message_hash,
     kind: row.kind,
-    sender_ens: row.sender_ens,
   };
 }
 

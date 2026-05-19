@@ -15,13 +15,12 @@ import type { Bytes32 } from 'bam-sdk';
 import type { MessageRow } from 'bam-store';
 
 export interface EnrichmentRequest {
-  kind: 'ens' | 'stake' | 'ecdsa-registry' | 'allowlist';
+  kind: 'stake' | 'ecdsa-registry' | 'allowlist';
   /** Whose address to enrich. `sender` = per-message signer; `submitter` = batch poster. */
   from: 'sender' | 'submitter';
 }
 
 export interface EnrichmentResult {
-  ens?: string | null;
   stake?: bigint | null;
   ecdsaRegistered?: boolean | null;
   allowlisted?: boolean | null;

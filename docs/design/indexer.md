@@ -63,15 +63,15 @@ It does NOT:
 - Decode the app-specific payload inside `contents` (each app has
   its own codec — Twitter's `version ‖ kind ‖ payload`, Comments'
   `(siteId, postId)` envelope, blobble's plain timestamped text).
-- Join `sender` against on-chain registries (ENS, ECDSARegistry,
-  StakeManager).
+- Join `sender` against on-chain registries (ECDSARegistry,
+  StakeManager — future enrichers).
 - Materialize derived views (thread trees, profile timelines).
 - Surface anything richer than a paginated `GET /messages`.
 
 Some layer has to do those things. Putting them in the FE means
-every app re-implements the same thread tree, the same ENS lookup,
-the same stake join — and forces decode into the browser bundle.
-The indexer is the single place that work lives, with handlers as
+every app re-implements the same thread tree, the same stake join,
+and forces decode into the browser bundle. The indexer is the
+single place that work lives, with handlers as
 the per-app extension points.
 
 ## Package shape
@@ -93,8 +93,7 @@ packages/bam-indexer/
 │   │   └── bam-store-source.ts  # raw SELECTs over bam-store (no drizzle dep)
 │   ├── enrichers/
 │   │   ├── types.ts      # EnricherPool surface
-│   │   ├── batch.ts      # fan-out by EnrichmentRequest.kind
-│   │   └── ens.ts        # reverse(sender), TTL cache + negative cache
+│   │   └── batch.ts      # fan-out by EnrichmentRequest.kind (placeholders only)
 │   ├── http/
 │   │   ├── server.ts     # framework + handler routes; :param matching
 │   │   └── routes.ts     # GET /health
@@ -222,27 +221,24 @@ a write txn so the eviction + cursor bump are atomic.
 
 ## Enricher pool
 
-Cross-cutting on-chain reads live in `src/enrichers/`. v1 wires
-ENS only; the other enrichment kinds are declared in the handler
-interface so handlers can stake out their needs ahead of
-`StakeManager` / `ECDSARegistry` integration without re-shaping the
-call surface later.
+Cross-cutting on-chain reads live in `src/enrichers/`. No
+enrichers are wired today — the kinds in `EnrichmentRequest`
+(`stake`, `ecdsa-registry`, `allowlist`) are placeholders for
+`StakeManager` / `ECDSARegistry` integration and resolve to `null`.
+Display-time identity (ENS, profile pictures) is the consumer's
+responsibility; the indexer ships the address.
 
 ```ts
 enrichments: [
-  { kind: 'ens',             from: 'sender' },     // wired, viem RPC
   { kind: 'stake',           from: 'sender' },     // declared, returns null today
   { kind: 'ecdsa-registry',  from: 'sender' },     // declared, returns null today
   { kind: 'allowlist',       from: 'submitter' },  // declared, returns null today
 ]
 ```
 
-`BatchEnricherPool` fans out by `kind`. ENS resolves at
-indexer-head (not at message block) with TTL cache: 1h on hits,
-5min on misses, LRU at 10k entries. When stake is wired it MUST
-resolve at the message's inclusion block to stay reproducible
-across indexers — that's a documented requirement, not a current
-behaviour.
+When stake is wired it MUST resolve at the message's inclusion
+block to stay reproducible across indexers — that's a documented
+requirement, not a current behaviour.
 
 ## HTTP
 
@@ -261,11 +257,11 @@ Twitter routes (server-shaped, not FE-shaped):
 | `GET /twitter/posts?sender=&since=&limit=` | top-level posts, newest-first |
 | `GET /twitter/posts/:messageId` | single post |
 | `GET /twitter/replies?parentMessageHash=&limit=` | replies under a parent |
-| `GET /twitter/profile/:sender?limit=` | denormalized ENS + post window |
+| `GET /twitter/profile/:sender?limit=` | most-recent post window for a sender |
 
 Wire shape uses snake_case columns (`message_id`, `message_hash`,
-`sender`, `block_number`, `sender_ens`, …). No feed assembly, no
-ranking — those belong above the indexer line.
+`sender`, `block_number`, …). No feed assembly, no ranking — those
+belong above the indexer line.
 
 ## Why hand-rolled REST over PostgREST or GraphQL (today)
 
@@ -304,9 +300,11 @@ deterministic given:
 - a fixed handler set + version,
 - and the same enrichment configuration.
 
-Enricher outputs (ENS now; stake later) are advisory — consumers
-should treat them as such. Two indexers with different RPCs may
-diverge on `sender_ens`, never on whether a message was confirmed.
+Enricher outputs (stake / ECDSA registry / allowlist — none wired
+yet) are advisory: consumers should treat them as such. Two
+indexers with different RPCs may diverge on a `stake` column, never
+on whether a message was confirmed. Identity-shaped enrichment
+(ENS) lives client-side and isn't part of the indexer's contract.
 
 This is the property that decided the layer's shape. If "feed
 ranking" or "Twitter-specific response wrapping" leaked into the
@@ -328,26 +326,6 @@ shape) lives in `packages/bam-indexer/README.md`. This file is the
 - `INDEXER_HTTP_BIND = 127.0.0.1` — matches `bam-reader`'s
   red-team C-1; operator fronts it with a reverse proxy if
   exposed.
-
-## Open questions
-
-- **Late ENS attribution.** A sender posts at block N with no ENS,
-  then registers / sets a primary name at block N+k. The post was
-  already projected, so `twitter.posts.sender_ens` is frozen at
-  `null`. The enricher cache will pick up the new name eventually
-  (5min miss TTL), but that only affects *future* projections —
-  existing rows are never revisited. Two responsibilities are
-  conflated today: "ENS at message inclusion block" (stake-style,
-  reproducible) and "ENS as displayed in the UI" (live, follows
-  the sender). The current code does neither cleanly — it captures
-  ENS at indexer-head at first-projection time, which is a function
-  of indexer lag rather than the sender's intent. Candidate
-  resolutions: (a) drop `sender_ens` from `twitter.posts` and JOIN
-  against a `senders` table keyed on address that a background
-  job refreshes; (b) keep the column but add a periodic
-  reproject-ens sweep; (c) make ENS strictly query-time and let the
-  BFF resolve. Decision deferred until comments / blobble handlers
-  land and we see whether the same shape applies to them.
 
 ## Out of scope (deferred)
 

@@ -16,8 +16,6 @@ export interface IndexerConfig {
   sourceDbUrl: string;
   /** Read/write DSN for indexer's own schemas + per-handler schemas. */
   writeDbUrl: string;
-  /** viem JSON-RPC endpoint used by enrichers (ENS today, stake later). */
-  rpcUrl?: string;
   /** Tick cadence in ms (default 5000). */
   pollMs: number;
   /** Max rows pulled per handler per tick (default 200). */

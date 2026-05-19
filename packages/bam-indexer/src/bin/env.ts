@@ -33,7 +33,6 @@ export function parseEnv(env: NodeJS.ProcessEnv = process.env): IndexerConfig {
   // README. The default falls back to sourceDbUrl so a single-DSN
   // local stack works out of the box.
 
-  const rpcUrl = nonEmpty(env.INDEXER_RPC_URL);
   // poll cadence and batch size must be > 0: a zero poll spins the
   // serve loop tightly, a zero batch wedges forward progress.
   const pollMs = parsePositiveInt(env.INDEXER_POLL_MS, DEFAULT_POLL_MS, 'INDEXER_POLL_MS', 1);
@@ -48,7 +47,6 @@ export function parseEnv(env: NodeJS.ProcessEnv = process.env): IndexerConfig {
     chainId,
     sourceDbUrl,
     writeDbUrl,
-    rpcUrl,
     pollMs,
     batchSize,
     httpBind,
@@ -85,11 +83,6 @@ function parsePositiveInt(
     throw new EnvConfigError(`${name} must be >= ${min}: ${raw}`);
   }
   return n;
-}
-
-function nonEmpty(raw: string | undefined): string | undefined {
-  if (raw === undefined || raw === '') return undefined;
-  return raw;
 }
 
 export { EnvConfigError } from '../errors.js';
