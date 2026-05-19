@@ -49,7 +49,7 @@ handlers.
 
 | Instance | `contentTag` | Schema | Routes |
 |---|---|---|---|
-| `twitter` (post-reply) | `keccak256(utf8("bam-twitter.v1"))` | `twitter` | `GET /twitter/posts`, `GET /twitter/posts/:messageId`, `GET /twitter/replies`, `GET /twitter/profile/:sender` |
+| `twitter` (post-reply) | `keccak256(utf8("bam-twitter.v1"))` | `twitter` | `GET /twitter/posts`, `GET /twitter/posts/:messageId`, `GET /twitter/replies`, `GET /twitter/profile/:sender`, `GET /twitter/versions`. All read routes accept `?version=<uuid>`; default is the current generation. |
 
 A second app sharing this Poster appends another `createPostReplyHandler({...})`
 to the `HANDLERS` array — that's the whole change on the indexer side.
@@ -59,11 +59,14 @@ The framework's built-in route is `GET /health`.
 ## Subcommands
 
 ```bash
-bam-indexer serve                            # long-running daemon
-bam-indexer reset --handler twitter --yes    # truncate twitter.*, drop cursor
+bam-indexer serve                                        # long-running daemon
+bam-indexer reset --handler twitter --yes                # drop every generation (rows + cursors)
+bam-indexer reset --handler twitter --current --yes      # drop just the current generation; next start bootstraps a fresh version_id
+bam-indexer reset --handler twitter --version <uuid> --yes  # drop one specific frozen generation
 ```
 
-`reset` is destructive — `--yes` is required.
+`reset` is destructive — `--yes` is required. `--version` and
+`--current` are mutually exclusive.
 
 ## Environment
 
@@ -95,22 +98,32 @@ Defense in depth: a bug in a handler's `project` can never touch
 Reader-owned tables. In dev the same DSN works for both — the env
 falls back accordingly.
 
-## Schema versioning
+## Schema versioning (generations)
 
-Each handler declares a `version` (integer). On startup the
-framework compares it to the `indexer.cursor.handler_version` row.
-On mismatch:
+Every handler row carries a `version_id` (UUID). On startup the
+framework compares the in-code `handler.version` integer against
+the current `indexer.cursor.handler_version`:
 
-1. `DROP SCHEMA <handler.schema> CASCADE` — destructive.
-2. Delete the cursor row for that handler.
-3. `handler.migrate()` recreates the schema and tables.
-4. The next tick re-projects from genesis (the source-DB rows are
-   untouched; this is purely an indexer-side rebuild).
+1. **No row yet** → INSERT a current cursor at genesis under a
+   fresh `version_id`. `handler.migrate()` runs (idempotent DDL).
+2. **Match** → reuse the existing `version_id` and keep ticking.
+3. **Mismatch** → in one txn, flip the existing row's
+   `is_current=false` + `superseded_at=now`, INSERT a new current
+   row at genesis under a fresh `version_id`. Old rows in the
+   handler's tables keep their `version_id` and stay queryable.
+   The next tick re-projects from genesis under the new id.
 
-Bumping a handler's version is the only mechanism today. There's
-no migration library — this is intentional and mirrors the
-`bam-store` posture in
-`packages/bam-store/src/schema/index.ts`.
+Old generations are **frozen at supersession**: they stop adding
+new rows. Reorgs still cascade through them via
+`handler.onReorg`'s `DELETE … WHERE batch_ref = $1`, so chain
+truth stays consistent across every retained generation.
+
+Consumers select a generation via `?version=<uuid>` on the
+post-reply routes (default: current). `GET /<name>/versions` lists
+every generation for the handler. The DDL change (PK becomes
+`(version_id, message_id)`, indexes lead with `version_id`) means
+upgrading from an older single-version schema requires
+`bam-indexer reset --handler <name> --yes` once.
 
 ## Trust model (ERC-8179 / ERC-8180)
 

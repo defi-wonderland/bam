@@ -1,16 +1,16 @@
 /**
- * Framework-owned HTTP routes. The Twitter routes (and any future
- * handler routes) live with the handler module — they're mounted
- * here only as a list. Built-in:
+ * Framework-owned HTTP routes. The post-reply handler routes live
+ * with the handler module — they're mounted here only as a list.
+ * Built-in:
  *
- *   GET /health → cursor lag per handler, registered handler set
+ *   GET /health → cursor + generation state per handler
  */
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Pool, PoolClient } from 'pg';
 
 import type { HandlerRegistry } from '../framework/registry.js';
-import { getCursor } from '../framework/cursor.js';
+import { getCurrentCursor, listCursors } from '../framework/cursor.js';
 
 export interface BuiltinRouteContext {
   chainId: number;
@@ -38,23 +38,39 @@ export interface BuiltinRoute {
 const healthHandler = async (
   _req: IncomingMessage,
   res: ServerResponse,
-  ctx: BuiltinRouteContext
+  ctx: BuiltinRouteContext,
 ): Promise<void> => {
   const client: PoolClient = await ctx.writePool.connect();
   try {
     const cursors = [];
+    const versions = [];
     for (const h of ctx.registry.all()) {
-      const c = await getCursor(client, h.name);
+      const current = await getCurrentCursor(client, h.name);
       cursors.push({
         handler: h.name,
         version: h.version,
+        versionId: current?.versionId ?? null,
         contentTag: h.contentTag,
-        lastBlockNumber: c?.lastBlockNumber ?? null,
-        lastTxIndex: c?.lastTxIndex ?? null,
-        lastMsgIndex: c?.lastMsgIndex ?? null,
-        lastReorgInvalidatedAt: c?.lastReorgInvalidatedAt ?? null,
-        updatedAt: c?.updatedAt ?? null,
+        lastBlockNumber: current?.lastBlockNumber ?? null,
+        lastTxIndex: current?.lastTxIndex ?? null,
+        lastMsgIndex: current?.lastMsgIndex ?? null,
+        lastReorgInvalidatedAt: current?.lastReorgInvalidatedAt ?? null,
+        updatedAt: current?.updatedAt ?? null,
       });
+      for (const c of await listCursors(client, h.name)) {
+        versions.push({
+          handler: h.name,
+          versionId: c.versionId,
+          handlerVersion: c.handlerVersion,
+          isCurrent: c.isCurrent,
+          supersededAt: c.supersededAt,
+          lastBlockNumber: c.lastBlockNumber,
+          lastTxIndex: c.lastTxIndex,
+          lastMsgIndex: c.lastMsgIndex,
+          lastReorgInvalidatedAt: c.lastReorgInvalidatedAt,
+          updatedAt: c.updatedAt,
+        });
+      }
     }
     jsonResponse(res, 200, {
       chainId: ctx.chainId,
@@ -66,6 +82,7 @@ const healthHandler = async (
         schema: h.schema,
       })),
       cursors,
+      versions,
     });
   } finally {
     client.release();

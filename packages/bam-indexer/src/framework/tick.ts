@@ -1,17 +1,20 @@
 /**
- * Per-handler tick. Two ordered phases:
+ * Per-handler tick. Two ordered phases, both operating on the
+ * handler's **current** generation cursor:
  *
  *   1. Forward pass — read confirmed `MessageRow`s with chain
- *      coordinate strictly greater than the handler's cursor;
- *      decode → resolve enrichments → call `project` and bump the
- *      forward cursor in the same write txn. Idempotent: a crash
- *      between rows re-projects the in-flight row safely.
+ *      coordinate strictly greater than the current cursor; decode
+ *      → resolve enrichments → call `project(..., versionId)` and
+ *      bump the forward cursor in the same write txn. Frozen
+ *      generations don't tick — they only see reorg-driven
+ *      evictions via the cascade-by-batch_ref DELETE.
  *
  *   2. Reorg pass — read `batches` rows where `status='reorged'`
- *      AND `invalidated_at` > the handler's reorg cursor, filtered
- *      to the configured chain; call `handler.onReorg(txHash,
- *      chainId, txn)` for each and bump the reorg cursor in the
- *      same txn.
+ *      AND `invalidated_at` > the current cursor's reorg coord;
+ *      call `handler.onReorg(txHash, chainId, txn)` once per batch.
+ *      The handler's DELETE is scoped to `batch_ref` (not
+ *      `version_id`), so a single statement evicts the batch from
+ *      every generation that projected it.
  *
  * `markReorged` in bam-store atomically transitions batch + messages
  * status, so cursoring on `batches.invalidated_at` cannot miss a
@@ -27,8 +30,7 @@ import type { MessageRow } from 'bam-store';
 import type { IndexerHandler } from './handler.js';
 import type { HandlerRegistry } from './registry.js';
 import {
-  CURSOR_GENESIS,
-  getCursor,
+  getCurrentCursor,
   upsertCursor,
   type HandlerCursor,
 } from './cursor.js';
@@ -61,17 +63,25 @@ export async function tick(opts: TickOptions): Promise<TickResult> {
 
 async function tickHandler<E>(
   handler: IndexerHandler<E>,
-  opts: TickOptions
+  opts: TickOptions,
 ): Promise<HandlerCounters> {
   const counters = emptyHandlerCounters();
-  const cursor = await readOrSeedCursor(opts.writePool, handler);
+  const cursor = await readCurrentCursor(opts.writePool, handler);
+  if (cursor === null) {
+    // Should never happen — `migrate` bootstraps a current cursor
+    // before the first tick. Surface and skip rather than throw so
+    // one mis-migrated handler doesn't wedge the whole loop.
+    opts.logger({
+      event: 'source_error',
+      handler: handler.name,
+      contentTag: handler.contentTag,
+      detail: { reason: 'no current cursor; did migrate run?' },
+      ts: Date.now(),
+    });
+    return counters;
+  }
 
-  // ── Forward pass ────────────────────────────────────────────────
   let forward = cursor;
-  // Pull until we exhaust the available rows for this tick — but
-  // never more than one batch worth. The outer `serve` loop calls
-  // `tick` again on its next interval, so leftover rows are picked
-  // up there.
   const rows = await opts.source.listConfirmedAfter({
     chainId: opts.chainId,
     contentTag: handler.contentTag,
@@ -87,20 +97,16 @@ async function tickHandler<E>(
     const next = await projectOne(handler, row, forward, opts, counters);
     if (next === null) {
       // `null` means `handler.project` threw — `projectOne` rolled
-      // back the txn so the cursor was NOT persisted. We must stop
-      // the loop here: if we kept going and a later row succeeded,
-      // its successful `upsertCursor` would persist a coordinate
-      // strictly past this failed row and we'd never retry it. Next
-      // tick re-pulls from the unchanged persisted cursor.
-      // (Decode failure is a different path — `projectOne` returns
-      //  the advanced cursor in that case so a poison payload doesn't
-      //  wedge the loop.)
+      // back the txn so the cursor was NOT persisted. Stop here: if
+      // a later row succeeded, its `upsertCursor` would jump the
+      // persisted cursor past this failed row and lose the retry.
+      // (Decode failure returns the advanced cursor, not null, so a
+      //  poison payload doesn't wedge the loop.)
       break;
     }
     forward = next;
   }
 
-  // ── Reorg pass ─────────────────────────────────────────────────
   const reorged = await opts.source.listReorgedAfter({
     chainId: opts.chainId,
     contentTag: handler.contentTag,
@@ -110,39 +116,20 @@ async function tickHandler<E>(
 
   for (const r of reorged) {
     const next = await reorgOne(handler, r, forward, opts, counters);
-    if (next === null) {
-      // Same invariant as the forward loop: `onReorg` threw, the txn
-      // rolled back, the reorg cursor was NOT persisted. Stop here
-      // so a later success can't jump the persisted cursor past this
-      // failure and silently lose the reorg cascade.
-      break;
-    }
+    if (next === null) break;
     forward = next;
   }
 
   return counters;
 }
 
-async function readOrSeedCursor<E>(
+async function readCurrentCursor<E>(
   pool: Pool,
-  handler: IndexerHandler<E>
-): Promise<HandlerCursor> {
+  handler: IndexerHandler<E>,
+): Promise<HandlerCursor | null> {
   const c = await pool.connect();
   try {
-    const existing = await getCursor(c, handler.name);
-    if (existing !== null && existing.handlerVersion === handler.version) {
-      return existing;
-    }
-    // `migrate` should have already cleared a stale-version row.
-    // Anything reaching here is "no row yet."
-    const seeded: HandlerCursor = {
-      handlerName: handler.name,
-      handlerVersion: handler.version,
-      ...CURSOR_GENESIS,
-      updatedAt: Date.now(),
-    };
-    await upsertCursor(c, seeded);
-    return seeded;
+    return await getCurrentCursor(c, handler.name);
   } finally {
     c.release();
   }
@@ -153,7 +140,7 @@ async function projectOne<E>(
   row: MessageRow,
   forward: HandlerCursor,
   opts: TickOptions,
-  counters: HandlerCounters
+  counters: HandlerCounters,
 ): Promise<HandlerCursor | null> {
   let decoded: E | null;
   try {
@@ -189,7 +176,7 @@ async function projectOne<E>(
 
   try {
     await runInTxn(opts.writePool, async (txn) => {
-      await handler.project(row, decoded as E, enriched, txn);
+      await handler.project(row, decoded as E, enriched, txn, forward.versionId);
       await upsertCursor(txn, advanced);
     });
     counters.projected += 1;
@@ -217,9 +204,7 @@ async function projectOne<E>(
     // Don't advance the cursor — the next tick will retry. If the
     // failure is poison-row, the operator will see repeated
     // `handler_skipped_conflict` events with the same nonce and can
-    // intervene. We avoid silent skip here because a project
-    // failure usually means the schema or the handler is wrong, not
-    // the message.
+    // intervene.
     return null;
   }
 }
@@ -229,13 +214,13 @@ async function reorgOne<E>(
   entry: ReorgEntry,
   forward: HandlerCursor,
   opts: TickOptions,
-  counters: HandlerCounters
+  counters: HandlerCounters,
 ): Promise<HandlerCursor | null> {
   const advanced: HandlerCursor = {
     ...forward,
     lastReorgInvalidatedAt: Math.max(
       forward.lastReorgInvalidatedAt,
-      entry.invalidatedAt
+      entry.invalidatedAt,
     ),
     updatedAt: Date.now(),
   };
@@ -270,7 +255,7 @@ async function reorgOne<E>(
 
 async function runInTxn<T>(
   pool: Pool,
-  fn: (client: PoolClient) => Promise<T>
+  fn: (client: PoolClient) => Promise<T>,
 ): Promise<T> {
   const client = await pool.connect();
   try {

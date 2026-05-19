@@ -42,9 +42,9 @@ export function createPostReplyHandler(
   const { name, contentTag, schema } = opts;
   const s = quoteIdent(schema);
   const routePrefix = opts.routePrefix ?? `/${name}`;
-  const version = opts.version ?? 2;
+  const version = opts.version ?? 1;
   const ddl = postReplyDdl(schema);
-  const routes = buildPostReplyRoutes({ schema, routePrefix });
+  const routes = buildPostReplyRoutes({ schema, routePrefix, handlerName: name });
 
   return {
     contentTag,
@@ -66,7 +66,7 @@ export function createPostReplyHandler(
       }
     },
 
-    async project(msg, decoded, _enr, txn): Promise<void> {
+    async project(msg, decoded, _enr, txn, versionId): Promise<void> {
       if (msg.messageId === null) {
         // Reader writes confirmed rows with `message_id` populated.
         // A null here would be a Reader bug — skip rather than insert
@@ -92,11 +92,11 @@ export function createPostReplyHandler(
 
       await txn.query(
         `INSERT INTO ${s}.posts
-           (message_id, message_hash, sender, nonce, kind, timestamp, content,
+           (version_id, message_id, message_hash, sender, nonce, kind, timestamp, content,
             parent_message_hash, batch_ref, block_number, tx_index,
             message_index_within_batch)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-         ON CONFLICT (message_id) DO UPDATE SET
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+         ON CONFLICT (version_id, message_id) DO UPDATE SET
            message_hash               = EXCLUDED.message_hash,
            kind                       = EXCLUDED.kind,
            timestamp                  = EXCLUDED.timestamp,
@@ -107,6 +107,7 @@ export function createPostReplyHandler(
            tx_index                   = EXCLUDED.tx_index,
            message_index_within_batch = EXCLUDED.message_index_within_batch`,
         [
+          versionId,
           msg.messageId.toLowerCase(),
           msg.messageHash.toLowerCase(),
           msg.sender.toLowerCase(),
@@ -124,12 +125,20 @@ export function createPostReplyHandler(
     },
 
     async onReorg(reorgedTxHash, _chainId, txn): Promise<void> {
-      // Reader's `markReorged` flips `messages.status = 'reorged'` for
-      // every row whose `batch_ref = reorgedTxHash`. Our row keys off
-      // the same `batch_ref`, so a single DELETE evicts the cascade.
+      // Reader's `markReorged` flips `messages.status = 'reorged'`
+      // for every row whose `batch_ref = reorgedTxHash`. Deleting by
+      // `batch_ref` alone cascades across every generation that
+      // projected the reorged batch.
       await txn.query(
         `DELETE FROM ${s}.posts WHERE batch_ref = $1`,
         [reorgedTxHash.toLowerCase()],
+      );
+    },
+
+    async deleteVersion(versionId, txn): Promise<void> {
+      await txn.query(
+        `DELETE FROM ${s}.posts WHERE version_id = $1`,
+        [versionId],
       );
     },
 

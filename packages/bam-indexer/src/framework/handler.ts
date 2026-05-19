@@ -75,27 +75,39 @@ export interface IndexerHandler<E> {
 
   /**
    * Project a decoded message into the handler's tables. Must be
-   * idempotent w.r.t. `message_id` (or `(sender, nonce)` if
-   * `message_id` is null) — the framework may re-call this after
-   * a crash mid-tick.
+   * idempotent w.r.t. `(versionId, message_id)` — the framework may
+   * re-call this after a crash mid-tick. The handler writes rows
+   * keyed by the supplied `versionId` so old generations stay
+   * queryable after a version bump.
    */
   project(
     msg: MessageRow,
     decoded: E,
     enriched: EnrichmentResult,
-    txn: PoolClient
+    txn: PoolClient,
+    versionId: string,
   ): Promise<void>;
 
   /**
    * Called once per reorged batch tx-hash on this chain. Handler
    * decides how to evict — typically `DELETE FROM <schema>.<table>
    * WHERE batch_ref = $1`. Idempotent; framework re-calls on retry.
+   * Cascades across every generation that projected the reorged
+   * batch (no version filter).
    */
   onReorg(
     reorgedTxHash: Bytes32,
     chainId: number,
     txn: PoolClient
   ): Promise<void>;
+
+  /**
+   * Drop every row this handler projected for a given generation.
+   * Called by `bam-indexer reset --handler <name> --version <uuid>`
+   * after the cursor row is removed; the framework wraps both in a
+   * single txn so partial cleanup can't leak.
+   */
+  deleteVersion(versionId: string, txn: PoolClient): Promise<void>;
 
   routes: BoundHandlerRoute[];
 }

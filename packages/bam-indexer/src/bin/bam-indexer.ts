@@ -82,13 +82,20 @@ async function runServe(): Promise<number> {
 }
 
 async function runReset(argv: string[]): Promise<number> {
-  // Parse `--handler <name> --yes`
+  // Parse `--handler <name> [--version <uuid> | --current] --yes`.
   let handlerName: string | undefined;
+  let versionId: string | undefined;
+  let currentOnly = false;
   let yes = false;
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--handler') {
       handlerName = argv[i + 1];
       i++;
+    } else if (argv[i] === '--version') {
+      versionId = argv[i + 1];
+      i++;
+    } else if (argv[i] === '--current') {
+      currentOnly = true;
     } else if (argv[i] === '--yes') {
       yes = true;
     }
@@ -97,9 +104,13 @@ async function runReset(argv: string[]): Promise<number> {
     process.stderr.write('[bam-indexer] reset: --handler <name> is required\n');
     return 4;
   }
+  if (versionId !== undefined && currentOnly) {
+    process.stderr.write('[bam-indexer] reset: --version and --current are mutually exclusive\n');
+    return 4;
+  }
   if (!yes) {
     process.stderr.write(
-      `[bam-indexer] reset --handler ${handlerName}: refusing without --yes (destructive)\n`
+      `[bam-indexer] reset --handler ${handlerName}: refusing without --yes (destructive)\n`,
     );
     return 4;
   }
@@ -116,8 +127,16 @@ async function runReset(argv: string[]): Promise<number> {
   }
   const indexer = await createIndexer(cfg, { handlers: buildHandlers(cfg) });
   try {
-    await indexer.resetHandler(handlerName);
-    process.stderr.write(`[bam-indexer] reset handler ${handlerName} OK\n`);
+    if (versionId !== undefined) {
+      await indexer.resetHandlerVersion(handlerName, versionId);
+      process.stderr.write(`[bam-indexer] reset handler ${handlerName} version ${versionId} OK\n`);
+    } else if (currentOnly) {
+      await indexer.resetHandlerCurrent(handlerName);
+      process.stderr.write(`[bam-indexer] reset handler ${handlerName} (current generation) OK\n`);
+    } else {
+      await indexer.resetHandler(handlerName);
+      process.stderr.write(`[bam-indexer] reset handler ${handlerName} (all generations) OK\n`);
+    }
     return 0;
   } catch (err) {
     if (err instanceof UnknownHandlerError) {

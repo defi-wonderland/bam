@@ -45,8 +45,12 @@ export {
   INDEXER_SCHEMA,
   CURSOR_TABLE,
   CREATE_INDEXER_SCHEMA_SQL,
-  getCursor,
+  getCurrentCursor,
+  getCursorByVersionId,
+  listCursors,
   upsertCursor,
+  supersedeCurrent,
+  deleteAllCursors,
   deleteCursor,
 } from './framework/cursor.js';
 export type { HandlerCursor } from './framework/cursor.js';

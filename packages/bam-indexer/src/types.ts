@@ -39,7 +39,7 @@ export type IndexerEventName =
   | 'handler_skipped_decode'
   | 'handler_skipped_conflict'
   | 'handler_reorged'
-  | 're_backfill_triggered'
+  | 'version_superseded'
   | 'enricher_error'
   | 'source_error'
   | 'http_started';

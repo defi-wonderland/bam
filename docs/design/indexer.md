@@ -87,7 +87,7 @@ packages/bam-indexer/
 │   │   ├── handler.ts    # IndexerHandler<E> interface — the extension point
 │   │   ├── registry.ts   # uniqueness checks (tag / name / schema)
 │   │   ├── cursor.ts     # indexer.cursor CRUD + chain-coord WHERE helpers
-│   │   ├── migrate.ts    # version-bump truncate, idempotent DDL runner
+│   │   ├── migrate.ts    # version-bump supersession (additive), idempotent DDL runner
 │   │   └── tick.ts       # forward pass + reorg pass per handler
 │   ├── source/
 │   │   └── bam-store-source.ts  # raw SELECTs over bam-store (no drizzle dep)
@@ -155,18 +155,24 @@ in `src/factory.ts`).
 
 ## Cursor coordinate
 
-`indexer.cursor` row per handler:
+`indexer.cursor` is keyed per generation, not per handler:
 
 ```sql
 CREATE TABLE indexer.cursor (
-  handler_name              text PRIMARY KEY,
+  handler_name              text    NOT NULL,
   handler_version           integer NOT NULL,
+  version_id                uuid    NOT NULL,
+  is_current                boolean NOT NULL,
+  superseded_at             bigint  NULL,
   last_block_number         bigint  NOT NULL,
   last_tx_index             bigint  NOT NULL,
   last_msg_index            bigint  NOT NULL,    -- finer than Reader's (block, tx)
   last_reorg_invalidated_at bigint  NOT NULL,
-  updated_at                bigint  NOT NULL
+  updated_at                bigint  NOT NULL,
+  PRIMARY KEY (handler_name, version_id)
 );
+CREATE UNIQUE INDEX cursor_one_current_per_handler
+  ON indexer.cursor (handler_name) WHERE is_current;
 ```
 
 **Forward cursor** keys at `messageIndexWithinBatch` granularity —
@@ -179,31 +185,46 @@ monotone "something was reorged" signal in `bam-store` today
 + messages atomically, so cursoring on the batch-level timestamp
 never misses a cascade.
 
+**Generation cursor**. Each `(handler_name, version_id)` pair has
+its own forward and reorg coords. Only the current generation
+(`is_current=true`) advances on the forward pass; frozen
+generations stay at whatever cursor they had at supersession.
+Reorgs cascade across every generation via `handler.onReorg`'s
+`DELETE … WHERE batch_ref = $1`, so chain truth stays consistent
+even on frozen rows.
+
 **Crash safety.** Per-row project + cursor bump happen in the same
 write txn. A crash mid-tick re-projects the in-flight row on next
-start — `handler.project` MUST be idempotent. The Twitter handler
-uses `INSERT … ON CONFLICT (message_id) DO UPDATE` so this holds.
+start — `handler.project` MUST be idempotent w.r.t.
+`(version_id, message_id)`. The post-reply handler uses
+`INSERT … ON CONFLICT (version_id, message_id) DO UPDATE` so this
+holds.
 
 ## Schema versioning
 
 No migration library. Each handler declares a `version` integer.
-On startup `migrate.ts` compares `handler.version` to the row in
-`indexer.cursor`. Mismatch:
+On startup `migrate.ts` compares `handler.version` to the current
+row in `indexer.cursor`:
 
-1. `DROP SCHEMA <handler.schema> CASCADE`.
-2. Delete the cursor row for that handler.
-3. `handler.migrate()` recreates the schema and tables.
-4. The next tick re-projects from genesis.
+- **No row** → INSERT current cursor at genesis under a fresh
+  `version_id` (UUID).
+- **Match** → keep using the existing `version_id`.
+- **Mismatch** → in one txn, flip the old row's `is_current=false`
+  + `superseded_at=now`, INSERT a new current row at genesis under
+  a fresh `version_id`. Old rows in the handler's tables keep
+  their `version_id` and stay queryable; the next tick re-projects
+  from genesis under the new id.
 
-Trade-off: a busy deployment loses its projection on a version bump
-and rebuilds from genesis. The alternative (parallel versions, dual
-writes) is over-engineering for v1 with one handler. Source-DB rows
-are never touched — only the handler's own tables.
+This is additive: a busy deployment keeps the previous projection
+queryable after a version bump while the new generation rebuilds.
+The alternative (parallel-ticking every retained generation) costs
+N× indexer load and was rejected.
 
-This mirrors `bam-store`'s posture in
-`packages/bam-store/src/schema/index.ts` — bumping `SCHEMA_VERSION`
-there refuses to boot against an older DB; here it forces a rebuild
-of one handler's projection.
+Consumers select a generation via `?version=<uuid>` on the
+post-reply routes; default is the current generation.
+`GET /<name>/versions` lists every generation with its cursor
+state, and `bam-indexer reset --handler <name> --version <uuid> --yes`
+drops a specific frozen generation when it's no longer needed.
 
 ## Reorg semantics
 

@@ -52,6 +52,7 @@ const PARENT_HASH = ('0x' + 'bb'.repeat(32)) as Bytes32;
 const TX_HASH = ('0x' + 'cc'.repeat(32)) as Bytes32;
 const MESSAGE_ID = ('0x' + 'dd'.repeat(32)) as Bytes32;
 const MESSAGE_HASH = ('0x' + 'ee'.repeat(32)) as Bytes32;
+const VERSION_ID = '00000000-0000-4000-8000-000000000001';
 
 function confirmedRow(overrides: Partial<MessageRow> & { contents: Uint8Array }): MessageRow {
   return {
@@ -174,7 +175,7 @@ describe('post-reply handler.migrate', () => {
 });
 
 describe('post-reply handler.project', () => {
-  it('inserts a post row with lowercased hex', async () => {
+  it('inserts a post row with version_id + lowercased hex', async () => {
     const bytes = encodePostReplyContents(TWITTER_TAG, {
       kind: 'post',
       timestamp: 9001,
@@ -187,12 +188,14 @@ describe('post-reply handler.project', () => {
       { kind: 'post', timestamp: 9001, content: 'gm' },
       {},
       c as never,
+      VERSION_ID,
     );
     expect(c.queries).toHaveLength(1);
     const q = c.queries[0];
     expect(q.sql).toContain('INSERT INTO');
     expect(q.sql).toContain('"twitter".posts');
     expect(q.params).toEqual([
+      VERSION_ID,
       MESSAGE_ID.toLowerCase(),
       MESSAGE_HASH.toLowerCase(),
       SENDER.toLowerCase(),
@@ -227,9 +230,11 @@ describe('post-reply handler.project', () => {
       },
       {},
       c as never,
+      VERSION_ID,
     );
-    expect(c.queries[0].params[4]).toBe(1); // kind = reply
-    expect(c.queries[0].params[7]).toBe(PARENT_HASH.toLowerCase());
+    expect(c.queries[0].params[0]).toBe(VERSION_ID);
+    expect(c.queries[0].params[5]).toBe(1); // kind = reply (shifted by version_id)
+    expect(c.queries[0].params[8]).toBe(PARENT_HASH.toLowerCase());
   });
 
   it('throws when messageId is null (Reader-side bug guard)', async () => {
@@ -246,6 +251,7 @@ describe('post-reply handler.project', () => {
         { kind: 'post', timestamp: 1, content: 'x' },
         {},
         c as never,
+        VERSION_ID,
       ),
     ).rejects.toThrow(/missing message_id/);
   });
@@ -264,17 +270,28 @@ describe('post-reply handler.project', () => {
         { kind: 'post', timestamp: 1, content: 'x' },
         {},
         c as never,
+        VERSION_ID,
       ),
     ).rejects.toThrow(/chain coord/);
   });
 });
 
 describe('post-reply handler.onReorg', () => {
-  it('deletes by lowercased batch_ref', async () => {
+  it('deletes by lowercased batch_ref (cascades across versions)', async () => {
     const c = new FakeClient();
     await handler.onReorg(TX_HASH, 11155111, c as never);
     expect(c.queries).toHaveLength(1);
     expect(c.queries[0].sql).toMatch(/DELETE FROM "twitter"\.posts WHERE batch_ref = \$1/);
     expect(c.queries[0].params).toEqual([TX_HASH.toLowerCase()]);
+  });
+});
+
+describe('post-reply handler.deleteVersion', () => {
+  it('deletes by version_id only', async () => {
+    const c = new FakeClient();
+    await handler.deleteVersion(VERSION_ID, c as never);
+    expect(c.queries).toHaveLength(1);
+    expect(c.queries[0].sql).toMatch(/DELETE FROM "twitter"\.posts WHERE version_id = \$1/);
+    expect(c.queries[0].params).toEqual([VERSION_ID]);
   });
 });

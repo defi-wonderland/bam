@@ -11,7 +11,12 @@ import pg from 'pg';
 
 import type { IndexerHandler } from './framework/handler.js';
 import { HandlerRegistry } from './framework/registry.js';
-import { migrate, resetHandler } from './framework/migrate.js';
+import {
+  migrate,
+  resetHandler,
+  resetHandlerCurrent,
+  resetHandlerVersion,
+} from './framework/migrate.js';
 import { tick } from './framework/tick.js';
 import { BamStoreSource } from './source/bam-store-source.js';
 import { BatchEnricherPool } from './enrichers/batch.js';
@@ -31,6 +36,8 @@ export interface Indexer {
   tickOnce(): Promise<IndexerCounters>;
   health(): Promise<{ port: number; host: string }>;
   resetHandler(name: string): Promise<void>;
+  resetHandlerCurrent(name: string): Promise<void>;
+  resetHandlerVersion(name: string, versionId: string): Promise<void>;
   close(): Promise<void>;
   /** Test helper: HTTP port assigned by the OS when `httpPort=0`. */
   port(): number;
@@ -128,6 +135,20 @@ export async function createIndexer(
         throw new UnknownHandlerError(name, registry.names());
       }
       await resetHandler(writePool, handler);
+    },
+    async resetHandlerCurrent(name: string) {
+      const handler = registry.get(name);
+      if (handler === undefined) {
+        throw new UnknownHandlerError(name, registry.names());
+      }
+      await resetHandlerCurrent(writePool, handler);
+    },
+    async resetHandlerVersion(name: string, versionId: string) {
+      const handler = registry.get(name);
+      if (handler === undefined) {
+        throw new UnknownHandlerError(name, registry.names());
+      }
+      await resetHandlerVersion(writePool, handler, versionId);
     },
     async close() {
       stopped = true;

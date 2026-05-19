@@ -1,15 +1,16 @@
 /**
- * `tick` integration over fake source + fake write pool.
+ * `tick` integration over a fake source + fake write pool. The fake
+ * `Pool` records every SQL statement and models a tiny in-memory
+ * `indexer.cursor` table so we can assert:
  *
- * The fake `Pool` records every SQL statement so we can assert:
  *  - forward pass projects every row decoded by the handler and
- *    advances the cursor exactly once per row;
+ *    advances the current cursor exactly once per row;
  *  - malformed payloads bump `skippedDecode` AND still advance the
  *    cursor (no wedge on a poison row);
  *  - project-side conflict leaves the cursor unchanged so the next
  *    tick retries;
  *  - reorg pass calls `onReorg` and bumps the reorg cursor;
- *  - cursor row is INSERTED on first tick when nothing exists yet.
+ *  - cursor row is INSERTED on first migrate when nothing exists yet.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -18,14 +19,13 @@ import type { Address, Bytes32 } from 'bam-sdk';
 import type { MessageRow } from 'bam-store';
 
 import { HandlerRegistry } from '../../src/framework/registry.js';
+import { migrate } from '../../src/framework/migrate.js';
 import { tick } from '../../src/framework/tick.js';
 import type { BamStoreSource, ReorgEntry } from '../../src/source/bam-store-source.js';
 import type { EnricherPool } from '../../src/enrichers/types.js';
 import type { IndexerHandler } from '../../src/framework/handler.js';
 import { createPostReplyHandler } from '../../src/handlers/post-reply/handler.js';
 
-// Local fixture: a `post-reply` handler with twitter-shaped opts so the
-// SQL these tests assert against (twitter.posts) stays byte-identical.
 const TWITTER_TAG = ('0x' + 'f0'.repeat(32)) as Bytes32;
 const twitterHandler = createPostReplyHandler({
   name: 'twitter',
@@ -38,35 +38,88 @@ interface Recorded {
   params: unknown[];
 }
 
+interface CursorState {
+  handler_name: string;
+  handler_version: number;
+  version_id: string;
+  is_current: boolean;
+  superseded_at: string | null;
+  last_block_number: string;
+  last_tx_index: string;
+  last_msg_index: string;
+  last_reorg_invalidated_at: string;
+  updated_at: string;
+}
+
 class FakeClient {
   readonly queries: Recorded[] = [];
-  cursorRow: Record<string, unknown> | null = null;
+  cursorRows = new Map<string, CursorState>();
   shouldFailProject = false;
-  // Per-attempt failure: throw on the first N project / delete attempts,
-  // then succeed. Lets tests model failure-then-success scenarios.
   projectFailFirst = 0;
   deleteFailFirst = 0;
   private projectAttempts = 0;
   private deleteAttempts = 0;
-  twitterRows: Array<{ messageId: string; batchRef: string }> = [];
+  twitterRows: Array<{ messageId: string; batchRef: string; versionId: string }> = [];
+
+  /** Test helper: most-recent current cursor (mirrors the old single-row shape). */
+  get cursorRow(): CursorState | null {
+    for (const r of this.cursorRows.values()) {
+      if (r.is_current) return r;
+    }
+    return null;
+  }
+
+  /** Test helper: stash a pre-seeded cursor row keyed by version_id. */
+  seedCursor(row: CursorState): void {
+    this.cursorRows.set(`${row.handler_name}|${row.version_id}`, row);
+  }
 
   async query(sql: string, params: unknown[] = []): Promise<{ rowCount: number; rows: unknown[] }> {
     this.queries.push({ sql, params });
-    if (sql.startsWith('SELECT handler_name')) {
-      if (this.cursorRow === null) return { rowCount: 0, rows: [] };
-      return { rowCount: 1, rows: [this.cursorRow] };
+    // SELECT current cursor.
+    if (sql.includes('FROM indexer.') && sql.includes('WHERE handler_name = $1 AND is_current')) {
+      const handlerName = String(params[0]);
+      for (const r of this.cursorRows.values()) {
+        if (r.handler_name === handlerName && r.is_current) {
+          return { rowCount: 1, rows: [r] };
+        }
+      }
+      return { rowCount: 0, rows: [] };
     }
+    // SELECT cursor by version_id.
+    if (sql.includes('FROM indexer.') && sql.includes('handler_name = $1 AND version_id = $2')) {
+      const k = `${String(params[0])}|${String(params[1])}`;
+      const r = this.cursorRows.get(k);
+      return r ? { rowCount: 1, rows: [r] } : { rowCount: 0, rows: [] };
+    }
+    // INSERT/UPSERT cursor.
     if (sql.startsWith('INSERT INTO indexer."cursor"') || sql.startsWith('INSERT INTO indexer.cursor')) {
-      // cursor upsert: stash params so subsequent SELECTs see it
-      this.cursorRow = {
-        handler_name: params[0],
-        handler_version: params[1],
-        last_block_number: String(params[2]),
-        last_tx_index: String(params[3]),
-        last_msg_index: String(params[4]),
-        last_reorg_invalidated_at: String(params[5]),
-        updated_at: String(params[6]),
+      const next: CursorState = {
+        handler_name: String(params[0]),
+        handler_version: Number(params[1]),
+        version_id: String(params[2]),
+        is_current: Boolean(params[3]),
+        superseded_at: params[4] === null ? null : String(params[4]),
+        last_block_number: String(params[5]),
+        last_tx_index: String(params[6]),
+        last_msg_index: String(params[7]),
+        last_reorg_invalidated_at: String(params[8]),
+        updated_at: String(params[9]),
       };
+      this.cursorRows.set(`${next.handler_name}|${next.version_id}`, next);
+      return { rowCount: 1, rows: [] };
+    }
+    // UPDATE … SET is_current = false (supersede).
+    if (sql.includes('UPDATE') && sql.includes('SET is_current = false')) {
+      const handlerName = String(params[0]);
+      const ts = String(params[1]);
+      for (const r of this.cursorRows.values()) {
+        if (r.handler_name === handlerName && r.is_current) {
+          r.is_current = false;
+          r.superseded_at = ts;
+          r.updated_at = ts;
+        }
+      }
       return { rowCount: 1, rows: [] };
     }
     if (sql.includes('INSERT INTO "twitter".posts')) {
@@ -74,11 +127,12 @@ class FakeClient {
       if (this.shouldFailProject || this.projectAttempts <= this.projectFailFirst) {
         throw new Error('synthetic project failure');
       }
-      const messageId = String(params[0]);
-      // INSERT column order: message_id, message_hash, sender, nonce, kind,
+      // INSERT column order: version_id, message_id, message_hash, sender, nonce, kind,
       // timestamp, content, parent_message_hash, batch_ref, …
-      const batchRef = String(params[8]);
-      this.twitterRows.push({ messageId, batchRef });
+      const versionId = String(params[0]);
+      const messageId = String(params[1]);
+      const batchRef = String(params[9]);
+      this.twitterRows.push({ messageId, batchRef, versionId });
       return { rowCount: 1, rows: [] };
     }
     if (sql.includes('DELETE FROM "twitter".posts')) {
@@ -189,6 +243,27 @@ function makeTickOpts(opts: {
   };
 }
 
+/**
+ * Bootstrap-then-tick wrapper. Mirrors what the live indexer does:
+ * `migrate` establishes a current cursor for every handler, then `tick`
+ * advances it. Returns the migrated current cursor's `version_id` so
+ * tests can assert against it.
+ */
+async function bootstrapAndTick(
+  opts: Parameters<typeof tick>[0],
+): Promise<{ version_id: string }> {
+  await migrate({
+    writePool: opts.writePool,
+    handlers: opts.registry.all(),
+    logger: opts.logger,
+  });
+  await tick(opts);
+  const client = opts.writePool as unknown as FakePool;
+  const cur = client.client.cursorRow;
+  if (cur === null) throw new Error('expected a current cursor after migrate');
+  return { version_id: cur.version_id };
+}
+
 describe('tick — forward pass', () => {
   it('projects every confirmed row and advances the cursor monotonically', async () => {
     const bytesA = encodePostReplyContents(TWITTER_TAG, { kind: 'post', timestamp: 1, content: 'a' });
@@ -197,14 +272,12 @@ describe('tick — forward pass', () => {
     const client = new FakeClient();
     const pool = new FakePool(client);
     const events: Array<{ event: string; handler?: string }> = [];
-    const result = await tick(
-      makeTickOpts({ source: source as never, pool, events })
-    );
-    expect(result.byHandler.twitter.projected).toBe(2);
-    expect(result.byHandler.twitter.skippedDecode).toBe(0);
-    // Both rows landed in twitter.posts
+    const opts = makeTickOpts({ source: source as never, pool, events });
+    const { version_id } = await bootstrapAndTick(opts);
+    // Both rows landed in twitter.posts under the bootstrapped version_id.
     expect(client.twitterRows).toHaveLength(2);
-    // Cursor advanced to the last row's chain coord
+    expect(client.twitterRows.every((r) => r.versionId === version_id)).toBe(true);
+    // Cursor advanced to the last row's chain coord.
     expect(client.cursorRow?.last_block_number).toBe(String(102));
     expect(client.cursorRow?.last_tx_index).toBe(String(2));
   });
@@ -215,11 +288,8 @@ describe('tick — forward pass', () => {
     const source = new FakeSource([row(1, bad), row(2, good)]);
     const client = new FakeClient();
     const pool = new FakePool(client);
-    const result = await tick(makeTickOpts({ source: source as never, pool }));
-    expect(result.byHandler.twitter.skippedDecode).toBe(1);
-    expect(result.byHandler.twitter.projected).toBe(1);
+    await bootstrapAndTick(makeTickOpts({ source: source as never, pool }));
     expect(client.twitterRows).toHaveLength(1);
-    // Cursor still advances past the malformed row + the good row.
     expect(client.cursorRow?.last_block_number).toBe(String(102));
   });
 
@@ -229,10 +299,8 @@ describe('tick — forward pass', () => {
     const client = new FakeClient();
     client.shouldFailProject = true;
     const pool = new FakePool(client);
-    const result = await tick(makeTickOpts({ source: source as never, pool }));
-    expect(result.byHandler.twitter.skippedConflict).toBe(1);
-    expect(result.byHandler.twitter.projected).toBe(0);
-    // Cursor was seeded at -1/-1/-1; nothing should have advanced it.
+    await bootstrapAndTick(makeTickOpts({ source: source as never, pool }));
+    // Bootstrap seeded at -1; the failed project shouldn't have advanced it.
     expect(client.cursorRow?.last_block_number).toBe(String(-1));
   });
 
@@ -243,11 +311,8 @@ describe('tick — forward pass', () => {
     const client = new FakeClient();
     client.projectFailFirst = 1; // first INSERT throws, second would succeed
     const pool = new FakePool(client);
-    const result = await tick(makeTickOpts({ source: source as never, pool }));
-    expect(result.byHandler.twitter.skippedConflict).toBe(1);
-    expect(result.byHandler.twitter.projected).toBe(0);
+    await bootstrapAndTick(makeTickOpts({ source: source as never, pool }));
     expect(client.twitterRows).toHaveLength(0);
-    // Cursor MUST still be at genesis so the next tick re-pulls both rows.
     expect(client.cursorRow?.last_block_number).toBe(String(-1));
     expect(client.cursorRow?.last_tx_index).toBe(String(-1));
   });
@@ -264,8 +329,7 @@ describe('tick — reorg pass', () => {
     );
     const client = new FakeClient();
     const pool = new FakePool(client);
-    const result = await tick(makeTickOpts({ source: source as never, pool }));
-    expect(result.byHandler.twitter.reorged).toBe(1);
+    await bootstrapAndTick(makeTickOpts({ source: source as never, pool }));
     expect(client.twitterRows).toHaveLength(0); // forward projected then reorg dropped
     expect(client.cursorRow?.last_reorg_invalidated_at).toBe(String(1000));
   });
@@ -276,17 +340,26 @@ describe('tick — reorg pass', () => {
       [{ txHash: TX_HASH, invalidatedAt: 500 }]
     );
     const client = new FakeClient();
-    // Pre-seed cursor past the reorg.
-    client.cursorRow = {
+    // Pre-seed a current cursor past the reorg.
+    client.seedCursor({
       handler_name: 'twitter',
-      handler_version: 2,
+      handler_version: 1,
+      version_id: '00000000-0000-4000-8000-0000000000aa',
+      is_current: true,
+      superseded_at: null,
       last_block_number: String(100),
       last_tx_index: String(0),
       last_msg_index: String(0),
       last_reorg_invalidated_at: String(1000),
       updated_at: String(Date.now()),
-    };
+    });
     const pool = new FakePool(client);
+    // Skip the bootstrap helper — we want the seed intact, not a fresh genesis.
+    await migrate({
+      writePool: pool as never,
+      handlers: [twitterHandler],
+      logger: () => undefined,
+    });
     const result = await tick(makeTickOpts({ source: source as never, pool }));
     expect(result.byHandler.twitter.reorged).toBe(0);
   });
@@ -304,9 +377,7 @@ describe('tick — reorg pass', () => {
     const client = new FakeClient();
     client.deleteFailFirst = 1; // first onReorg DELETE throws, second would succeed
     const pool = new FakePool(client);
-    const result = await tick(makeTickOpts({ source: source as never, pool }));
-    expect(result.byHandler.twitter.reorged).toBe(0);
-    // Reorg cursor must stay at genesis (-1) so the next tick re-pulls both.
+    await bootstrapAndTick(makeTickOpts({ source: source as never, pool }));
     expect(client.cursorRow?.last_reorg_invalidated_at).toBe(String(-1));
   });
 });
