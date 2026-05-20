@@ -19,10 +19,10 @@ const TEXT_DECODER = new TextDecoder();
  *       }
  *     }
  *
- * After the tag-binding rework, `contents` is opaque app body bytes
- * (no 32-byte tag prefix). `contentTag` is bound into the
- * `messageHash` formula directly; pipeline's `checkContentTag` stage
- * enforces the allowlist and the signature check enforces tag binding.
+ * `contents` is opaque app body bytes (no tag prefix); `contentTag`
+ * is bound into the `messageHash` formula directly, so the signature
+ * check enforces tag attribution. The pipeline gates the envelope tag
+ * on the operator allowlist before any crypto runs.
  */
 export interface MessageEnvelope {
   contentTag: Bytes32;

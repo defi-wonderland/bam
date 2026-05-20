@@ -36,12 +36,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       { status: 400 }
     );
   }
-  const parsed =
-    body && typeof body === 'object' && !Array.isArray(body)
-      ? (body as Record<string, unknown>)
-      : null;
-  const message = parsed && 'message' in parsed ? parsed.message : body;
-  const envelope = { contentTag: TWITTER_TAG, message };
+  if (!body || typeof body !== 'object' || Array.isArray(body) || !('message' in body)) {
+    return NextResponse.json(
+      { accepted: false, reason: 'malformed' },
+      { status: 400 }
+    );
+  }
+  const envelope = { contentTag: TWITTER_TAG, message: (body as { message: unknown }).message };
   try {
     const poster = await submitMessage({
       rawEnvelope: new TextEncoder().encode(JSON.stringify(envelope)),

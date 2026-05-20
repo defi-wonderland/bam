@@ -198,16 +198,6 @@ describe('IngestPipeline — ordering (CPU-grief) + atomicity', () => {
     expect(h.verifyCalls.count).toBe(0);
   });
 
-  it('hint mismatch (transport header vs envelope) rejects before the validator runs', async () => {
-    const h = await mkHarness({ allowlist: [TAG, ('0x' + 'bb'.repeat(32)) as Bytes32] });
-    const raw = signedEnvelope({ tag: TAG });
-    const otherTag = ('0x' + 'bb'.repeat(32)) as Bytes32;
-    const res = await h.pipeline.ingest(raw, { contentTag: otherTag });
-    expect(res.accepted).toBe(false);
-    if (!res.accepted) expect(res.reason).toBe('content_tag_mismatch');
-    expect(h.verifyCalls.count).toBe(0);
-  });
-
   it('concurrent ingest of the same (sender, nonce) admits exactly one', async () => {
     const h = await mkHarness();
     const raw = signedEnvelope({});

@@ -8,7 +8,6 @@ import type { PosterRejection } from '../errors.js';
 export function rejectionToStatus(reason: PosterRejection): number {
   switch (reason) {
     case 'unknown_tag':
-    case 'content_tag_mismatch':
     case 'malformed':
     case 'bad_signature':
     case 'stale_nonce':

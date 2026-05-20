@@ -98,7 +98,6 @@ export function Composer({ replyTo, onSent, placeholder, autoFocus }: ComposerPr
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            contentTag: TWITTER_TAG,
             message: {
               sender: address,
               nonce: nonce.toString(),

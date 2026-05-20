@@ -53,15 +53,6 @@ export interface SubmittedBatchesQuery {
 // Submit API
 // ═══════════════════════════════════════════════════════════════════════
 
-/**
- * Optional transport-supplied hint. The hint is advisory only — the
- * envelope-level `contentTag` is the authoritative source, and any
- * mismatch with the hint is rejected before signature verification.
- */
-export interface SubmitHint {
-  contentTag?: Bytes32;
-}
-
 export type SubmitResult =
   | { accepted: true; messageHash: Bytes32 }
   | { accepted: false; reason: PosterRejection };
@@ -352,7 +343,7 @@ export interface PosterConfig {
 // ═══════════════════════════════════════════════════════════════════════
 
 export interface Poster {
-  submit(message: Uint8Array, hint?: SubmitHint): Promise<SubmitResult>;
+  submit(message: Uint8Array): Promise<SubmitResult>;
   listPending(query?: PendingQuery): Promise<Pending[]>;
   listSubmittedBatches(query?: SubmittedBatchesQuery): Promise<SubmittedBatch[]>;
   /**

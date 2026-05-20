@@ -8,7 +8,6 @@
  */
 export type PosterRejection =
   | 'unknown_tag'
-  | 'content_tag_mismatch'
   | 'message_too_large'
   | 'malformed'
   | 'bad_signature'
@@ -24,7 +23,6 @@ export type PosterRejection =
  */
 export const POSTER_REJECTIONS: readonly PosterRejection[] = [
   'unknown_tag',
-  'content_tag_mismatch',
   'message_too_large',
   'malformed',
   'bad_signature',

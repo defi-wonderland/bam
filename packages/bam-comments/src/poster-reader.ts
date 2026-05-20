@@ -95,15 +95,15 @@ export interface SubmitSuccess {
 }
 
 /**
- * `POST /submit?contentTag=<tag>` with the binary envelope. Mirrors
- * what `bam-twitter`'s proxy + Poster client does, but inlined here
- * — the widget can't depend on a Next.js server. We construct the
- * envelope here (sender ‖ nonce ‖ contents ‖ signature) so the
- * caller deals only with the high-level fields.
+ * `POST /submit` with the binary envelope. Mirrors what `bam-twitter`'s
+ * proxy + Poster client does, but inlined here — the widget can't
+ * depend on a Next.js server. We construct the envelope here
+ * (`{ contentTag, message: { sender, nonce, contents, signature } }`)
+ * so the caller deals only with the high-level fields.
  */
 export async function submitMessage(args: SubmitArgs): Promise<SubmitSuccess | SubmitFailure> {
   const envelope = encodeEnvelope(args);
-  const url = `${POSTER_URL}/submit?contentTag=${encodeURIComponent(args.contentTag)}`;
+  const url = `${POSTER_URL}/submit`;
   let res: Response;
   try {
     res = await fetch(url, {

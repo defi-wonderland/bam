@@ -2,10 +2,9 @@ import { describe, it, expect } from 'vitest';
 import { POSTER_REJECTIONS, type PosterRejection } from '../src/errors.js';
 
 describe('PosterRejection', () => {
-  it('lists exactly the ten reasons from plan.md §Public API', () => {
+  it('lists exactly the nine reasons from plan.md §Public API', () => {
     expect(POSTER_REJECTIONS).toEqual([
       'unknown_tag',
-      'content_tag_mismatch',
       'message_too_large',
       'malformed',
       'bad_signature',
@@ -15,8 +14,8 @@ describe('PosterRejection', () => {
       'unhealthy',
       'internal_error',
     ]);
-    expect(POSTER_REJECTIONS).toHaveLength(10);
-    expect(new Set(POSTER_REJECTIONS).size).toBe(10);
+    expect(POSTER_REJECTIONS).toHaveLength(9);
+    expect(new Set(POSTER_REJECTIONS).size).toBe(9);
   });
 
   it('exhausts the PosterRejection union (never-arm check)', () => {
@@ -28,8 +27,6 @@ describe('PosterRejection', () => {
       switch (reason) {
         case 'unknown_tag':
           return 'unknown_tag';
-        case 'content_tag_mismatch':
-          return 'content_tag_mismatch';
         case 'message_too_large':
           return 'message_too_large';
         case 'malformed':

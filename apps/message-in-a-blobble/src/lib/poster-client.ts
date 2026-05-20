@@ -123,13 +123,11 @@ async function rawFetch(
 
 export interface SubmitArgs {
   rawEnvelope: Uint8Array;
-  hintContentTag?: string;
   envUrl?: string;
 }
 
 export async function submitMessage(args: SubmitArgs): Promise<PosterResponse> {
-  const query = args.hintContentTag ? `?contentTag=${encodeURIComponent(args.hintContentTag)}` : '';
-  return rawFetch('POST', `/submit${query}`, {
+  return rawFetch('POST', '/submit', {
     body: new Uint8Array(args.rawEnvelope),
     envUrl: args.envUrl,
   });

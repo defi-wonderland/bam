@@ -5,13 +5,11 @@ import type {
   DecodedMessage,
   MessageValidator,
   BamStore,
-  SubmitHint,
   SubmitResult,
 } from '../types.js';
 import { checkMonotonicity } from './monotonicity.js';
 import { parseEnvelope } from './envelope.js';
 import { RateLimiter } from './rate-limit.js';
-import { checkContentTag } from './signed-tag.js';
 import { checkSizeBound } from './size-bound.js';
 
 export interface IngestPipelineOptions {
@@ -37,24 +35,23 @@ const RECOVER_FAILED_KEY = '0x0000000000000000000000000000000000000000' as Addre
 /**
  * Enforces the exact ingest order:
  *
- *     size → content-tag → recover → rate-limit → monotonicity → validator → insert
+ *     size → allowlist → recover → rate-limit → monotonicity → validator → insert
  *
  * The full sequence runs under a single `BamStore.withTxn` so
  * concurrent ingests of the same `(sender, nonce)` race cleanly:
  * exactly one wins. Rate-limit state is separate — it doesn't need to
  * roll back on a later-stage reject.
  *
- * `contentTag` authority is enforced up-front: the envelope-level
- * `contentTag` is checked against the operator's allowlist (see
- * `checkContentTag`) before any crypto runs. The pre-batch identifier
- * is the ERC-8180 `messageHash` (a pure function of
- * `(sender, contentTag, nonce, contents)`), surfaced on the accepted
- * response and used as the monotonicity dedup token.
+ * The envelope-level `contentTag` is the single source of truth on
+ * ingest — the signature binds it (via the ERC-8180 `messageHash`
+ * formula `keccak256(sender ‖ contentTag ‖ nonce ‖ contents)`), so a
+ * mismatched tag would fail the validator anyway. The allowlist check
+ * runs up-front so an unknown tag never reaches `ecrecover`.
  */
 export class IngestPipeline {
   constructor(private readonly opts: IngestPipelineOptions) {}
 
-  async ingest(raw: Uint8Array, hint?: SubmitHint): Promise<SubmitResult> {
+  async ingest(raw: Uint8Array): Promise<SubmitResult> {
     // 1. Size bound — cheapest guard, runs before any allocation.
     const size = checkSizeBound(raw, this.opts.maxMessageSizeBytes);
     if (!size.ok) return { accepted: false, reason: size.reason };
@@ -69,18 +66,15 @@ export class IngestPipeline {
       return { accepted: false, reason: 'message_too_large' };
     }
 
-    // Optional transport-level hint (e.g. an HTTP header). Must match
-    // the envelope's `contentTag` — which is itself checked against
-    // the signed prefix below.
-    if (hint?.contentTag !== undefined && hint.contentTag.toLowerCase() !== contentTag.toLowerCase()) {
-      return { accepted: false, reason: 'content_tag_mismatch' };
+    // 2. Allowlist gate. Runs before any crypto so an unknown tag
+    //    never forces an ecrecover.
+    if (
+      !this.opts.allowlistedTags.some(
+        (t) => t.toLowerCase() === contentTag.toLowerCase()
+      )
+    ) {
+      return { accepted: false, reason: 'unknown_tag' };
     }
-
-    // 2. Content-tag authority: contentTag must be on the operator's
-    //    allowlist. Runs before any crypto so a rogue hint never
-    //    forces an ecrecover.
-    const tag = checkContentTag(contentTag, this.opts.allowlistedTags);
-    if (!tag.ok) return { accepted: false, reason: tag.reason };
 
     // Compute the ERC-8180 messageHash. Determined purely by
     // (sender, contentTag, nonce, contents); stable pre-batch identifier.
