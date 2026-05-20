@@ -4,7 +4,6 @@ import {
   bytesToHex,
   deriveAddress,
   encodeBatchBPE,
-  encodeContents,
   generateECDSAPrivateKey,
   hexToBytes,
   loadBPEDictionaryFromChain,
@@ -31,9 +30,9 @@ for (const text of ['gm wagmi', 'the quick brown fox']) {
   const msg = {
     sender,
     nonce: BigInt(messages.length),
-    contents: encodeContents(TAG, new TextEncoder().encode(text)),
+    contents: new TextEncoder().encode(text),
   };
-  const sig = hexToBytes(signECDSAWithKey(sk, msg, 11155111));
+  const sig = hexToBytes(signECDSAWithKey(sk, msg, TAG, 11155111));
   messages.push(msg);
   sigs.push(sig);
 }
@@ -56,7 +55,8 @@ console.log(`   ok: decoded ${outMessages.length} messages, sigData=${(outSig.le
 for (let i = 0; i < outMessages.length; i++) {
   const [sender, nonce, contents] = outMessages[i];
   const textBytes = hexToBytes(contents);
-  // First 32 bytes = content tag, rest = utf-8
-  const body = new TextDecoder().decode(textBytes.slice(32));
+  // After the tag-binding rework, `contents` is the app body bytes
+  // directly; no per-message tag prefix.
+  const body = new TextDecoder().decode(textBytes);
   console.log(`   [${i}] sender=${sender} nonce=${nonce} text=${JSON.stringify(body)}`);
 }

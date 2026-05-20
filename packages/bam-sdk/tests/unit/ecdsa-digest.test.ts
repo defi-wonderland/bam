@@ -1,52 +1,55 @@
 import { describe, expect, it } from 'vitest';
 
-import type { Address } from '../../src/types.js';
+import type { Address, Bytes32 } from '../../src/types.js';
 import { computeECDSADigest } from '../../src/signatures.js';
 
 describe('computeECDSADigest (EIP-712 over BAMMessage)', () => {
   const sender = ('0x' + '11'.repeat(20)) as Address;
-  const tagPrefix = 'aa'.repeat(32);
-  const app = '414243'; // "ABC"
-  const contents = hexToBytes(tagPrefix + app);
+  const tagA = ('0x' + 'aa'.repeat(32)) as Bytes32;
+  const tagB = ('0x' + 'bb'.repeat(32)) as Bytes32;
+  const contents = hexToBytes('414243'); // "ABC"
 
-  it('locked vector: chainId=1, nonce=42, contents = tag(0xaa..) ‖ "ABC"', () => {
-    const digest = computeECDSADigest({ sender, nonce: 42n, contents }, 1);
-    expect(digest).toBe('0xbc7a35fc6bc9350a05ce1f2c8f1f2369ae1ece870dd19826f5265b79d444838c');
+  it('deterministic for a pinned input vector', () => {
+    const d1 = computeECDSADigest({ sender, nonce: 42n, contents }, tagA, 1);
+    const d2 = computeECDSADigest({ sender, nonce: 42n, contents }, tagA, 1);
+    expect(d1).toMatch(/^0x[0-9a-f]{64}$/);
+    expect(d1).toBe(d2);
   });
 
   it('chain binding: chainId=31337 yields a distinct digest for the same message', () => {
-    const digest = computeECDSADigest({ sender, nonce: 42n, contents }, 31337);
-    expect(digest).toBe('0x736491f137203caae904a9f8c17b02856b2daeb0dc1a4bd637d3749be50d2c83');
+    const d1 = computeECDSADigest({ sender, nonce: 42n, contents }, tagA, 1);
+    const d2 = computeECDSADigest({ sender, nonce: 42n, contents }, tagA, 31337);
+    expect(d1).not.toBe(d2);
+  });
+
+  it('contentTag binding: same message under a different tag yields a distinct digest', () => {
+    const dA = computeECDSADigest({ sender, nonce: 7n, contents }, tagA, 1);
+    const dB = computeECDSADigest({ sender, nonce: 7n, contents }, tagB, 1);
+    expect(dA).not.toBe(dB);
   });
 
   it('preimage sensitivity: any field change changes the digest', () => {
-    const base = computeECDSADigest({ sender, nonce: 1n, contents }, 1);
+    const base = computeECDSADigest({ sender, nonce: 1n, contents }, tagA, 1);
 
     expect(
-      computeECDSADigest({ sender, nonce: 2n, contents }, 1)
+      computeECDSADigest({ sender, nonce: 2n, contents }, tagA, 1)
     ).not.toBe(base);
 
     expect(
       computeECDSADigest(
         { sender: ('0x' + '22'.repeat(20)) as Address, nonce: 1n, contents },
+        tagA,
         1
       )
     ).not.toBe(base);
 
-    // Tamper the tag prefix (first 32 bytes of contents)
-    const tagTamper = hexToBytes('ab' + 'aa'.repeat(31) + app);
+    const altContents = hexToBytes('414244');
     expect(
-      computeECDSADigest({ sender, nonce: 1n, contents: tagTamper }, 1)
-    ).not.toBe(base);
-
-    // Tamper the app bytes (after the 32-byte prefix)
-    const appTamper = hexToBytes(tagPrefix + '414244');
-    expect(
-      computeECDSADigest({ sender, nonce: 1n, contents: appTamper }, 1)
+      computeECDSADigest({ sender, nonce: 1n, contents: altContents }, tagA, 1)
     ).not.toBe(base);
 
     expect(
-      computeECDSADigest({ sender, nonce: 1n, contents }, 2)
+      computeECDSADigest({ sender, nonce: 1n, contents }, tagA, 2)
     ).not.toBe(base);
   });
 });

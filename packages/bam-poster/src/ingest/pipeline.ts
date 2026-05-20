@@ -44,12 +44,12 @@ const RECOVER_FAILED_KEY = '0x0000000000000000000000000000000000000000' as Addre
  * exactly one wins. Rate-limit state is separate — it doesn't need to
  * roll back on a later-stage reject.
  *
- * `contentTag` authority is enforced up-front: `contents[0..32]` is
- * checked against the envelope-level tag hint and against the operator's
- * allowlist (see `checkContentTag`) before any crypto runs. The pre-batch
- * identifier is the ERC-8180 `messageHash` (a pure function of
- * `(sender, nonce, contents)`), surfaced on the accepted response and
- * used as the monotonicity dedup token.
+ * `contentTag` authority is enforced up-front: the envelope-level
+ * `contentTag` is checked against the operator's allowlist (see
+ * `checkContentTag`) before any crypto runs. The pre-batch identifier
+ * is the ERC-8180 `messageHash` (a pure function of
+ * `(sender, contentTag, nonce, contents)`), surfaced on the accepted
+ * response and used as the monotonicity dedup token.
  */
 export class IngestPipeline {
   constructor(private readonly opts: IngestPipelineOptions) {}
@@ -76,17 +76,22 @@ export class IngestPipeline {
       return { accepted: false, reason: 'content_tag_mismatch' };
     }
 
-    // 2. Content-tag authority: contentTag must equal contents[0..32]
-    //    AND must be on the operator's allowlist. Runs before any
-    //    crypto so a rogue hint never forces an ecrecover.
-    const tag = checkContentTag(contentTag, message.contents, this.opts.allowlistedTags);
+    // 2. Content-tag authority: contentTag must be on the operator's
+    //    allowlist. Runs before any crypto so a rogue hint never
+    //    forces an ecrecover.
+    const tag = checkContentTag(contentTag, this.opts.allowlistedTags);
     if (!tag.ok) return { accepted: false, reason: tag.reason };
 
     // Compute the ERC-8180 messageHash. Determined purely by
-    // (sender, nonce, contents); stable pre-batch identifier.
+    // (sender, contentTag, nonce, contents); stable pre-batch identifier.
     let messageHash: Bytes32;
     try {
-      messageHash = computeMessageHash(message.sender, message.nonce, message.contents);
+      messageHash = computeMessageHash(
+        message.sender,
+        contentTag,
+        message.nonce,
+        message.contents
+      );
     } catch {
       return { accepted: false, reason: 'malformed' };
     }

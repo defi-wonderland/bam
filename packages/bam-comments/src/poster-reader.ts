@@ -132,7 +132,12 @@ export async function submitMessage(args: SubmitArgs): Promise<SubmitSuccess | S
   }
   // Poster returns the same messageHash we can compute locally; we
   // recompute to avoid trusting an unauthenticated body field.
-  const messageHash = computeMessageHash(args.sender, args.nonce, args.contents);
+  const messageHash = computeMessageHash(
+    args.sender,
+    args.contentTag,
+    args.nonce,
+    args.contents
+  );
   return { ok: true, messageHash: messageHash as `0x${string}` };
 }
 
@@ -206,13 +211,17 @@ export async function listMessages(
   }
   const decoded: DecodedMessage[] = [];
   for (const r of rows as ReaderRow[]) {
-    const m = decodeRow(r, args.status === 'pending');
+    const m = decodeRow(r, args.contentTag, args.status === 'pending');
     if (m !== null) decoded.push(m);
   }
   return decoded;
 }
 
-function decodeRow(row: ReaderRow, pending: boolean): DecodedMessage | null {
+function decodeRow(
+  row: ReaderRow,
+  contentTag: `0x${string}`,
+  pending: boolean
+): DecodedMessage | null {
   // The Reader marks a row "confirmed" the moment its tx is included
   // but populates `batchRef` after a second pass; treat such rows as
   // not-yet-renderable so we don't briefly de-duplicate them against
@@ -220,11 +229,16 @@ function decodeRow(row: ReaderRow, pending: boolean): DecodedMessage | null {
   if (!pending && row.batchRef === null) return null;
   try {
     const contents = hexToBytes(row.contents);
-    const { envelope } = decodeCommentContents(contents);
+    const envelope = decodeCommentContents(contents);
     if (typeof row.sender !== 'string') return null;
     const sender = row.sender as `0x${string}`;
     const nonce = BigInt(row.nonce);
-    const messageHash = (computeMessageHash(sender, nonce, contents)) as `0x${string}`;
+    const messageHash = computeMessageHash(
+      sender,
+      contentTag,
+      nonce,
+      contents
+    ) as `0x${string}`;
     const parentMessageHash =
       envelope.kind === 'reply' ? envelope.parentMessageHash : undefined;
     return {

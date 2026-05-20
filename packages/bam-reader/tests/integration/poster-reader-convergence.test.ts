@@ -24,7 +24,6 @@ import {
   computeMessageHashForMessage,
   computeMessageId,
   deriveAddress,
-  encodeContents,
   generateECDSAPrivateKey,
   hexToBytes,
   signECDSAWithKey,
@@ -52,13 +51,13 @@ interface SignedMessage {
 function makeSignedMessage(nonce: bigint, payload: Uint8Array): SignedMessage {
   const priv = generateECDSAPrivateKey();
   const sender = deriveAddress(priv);
-  const contents = encodeContents(TAG, payload);
+  const contents = payload;
   const message: BAMMessage = { sender, nonce, contents };
-  const sigHex = signECDSAWithKey(priv, message, CHAIN_ID);
+  const sigHex = signECDSAWithKey(priv, message, TAG, CHAIN_ID);
   return {
     message,
     signature: hexToBytes(sigHex),
-    messageHash: computeMessageHashForMessage(message),
+    messageHash: computeMessageHashForMessage(message, TAG),
   };
 }
 
@@ -78,14 +77,14 @@ describe('Poster + Reader convergence', () => {
         {
           sender: m1.message.sender,
           nonce: 1n,
-          messageId: computeMessageId(m1.message.sender, 1n, batchContentHash),
+          messageId: computeMessageId(m1.message.sender, TAG, 1n, batchContentHash),
           messageHash: m1.messageHash,
           messageIndexWithinBatch: 0,
         },
         {
           sender: m2.message.sender,
           nonce: 2n,
-          messageId: computeMessageId(m2.message.sender, 2n, batchContentHash),
+          messageId: computeMessageId(m2.message.sender, TAG, 2n, batchContentHash),
           messageHash: m2.messageHash,
           messageIndexWithinBatch: 1,
         },
@@ -110,7 +109,7 @@ describe('Poster + Reader convergence', () => {
         });
         for (const [i, sm] of [m1, m2].entries()) {
           await txn.upsertObserved({
-            messageId: computeMessageId(sm.message.sender, sm.message.nonce, batchContentHash),
+            messageId: computeMessageId(sm.message.sender, TAG, sm.message.nonce, batchContentHash),
             sender: sm.message.sender,
             nonce: sm.message.nonce,
             contentTag: TAG,
@@ -237,7 +236,7 @@ describe('Poster + Reader convergence', () => {
         {
           sender: m1.message.sender,
           nonce: 1n,
-          messageId: computeMessageId(m1.message.sender, 1n, batchContentHash),
+          messageId: computeMessageId(m1.message.sender, TAG, 1n, batchContentHash),
           messageHash: m1.messageHash,
           messageIndexWithinBatch: 0,
         },

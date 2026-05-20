@@ -287,7 +287,7 @@ export interface PosterConfig {
   batchPolicy?: BatchPolicy;
   /** Max per-message wire-envelope size in bytes. */
   maxMessageSizeBytes?: number;
-  /** Max `contents` (tag prefix + app bytes) size in bytes. */
+  /** Max `contents` (app body bytes) size in bytes. */
   maxContentsSizeBytes?: number;
   blobCapacityBytes?: number;
   reorgWindowBlocks?: number;

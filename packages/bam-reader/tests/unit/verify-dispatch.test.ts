@@ -4,7 +4,7 @@ import {
   hexToBytes,
   signECDSAWithKey,
 } from 'bam-sdk';
-import type { Address, BAMMessage } from 'bam-sdk';
+import type { Address, BAMMessage, Bytes32 } from 'bam-sdk';
 import { describe, expect, it } from 'vitest';
 
 import { verifyMessage } from '../../src/verify/dispatch.js';
@@ -16,16 +16,14 @@ import type {
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000' as Address;
 const NON_ZERO_REGISTRY = '0x000000000000000000000000000000000000beef' as Address;
 const CHAIN_ID = 11155111;
+const TAG = ('0x' + 'aa'.repeat(32)) as Bytes32;
 
 function buildSignedMessage(): { message: BAMMessage; signature: Uint8Array; sender: Address } {
   const priv = generateECDSAPrivateKey();
   const sender = deriveAddress(priv);
-  // contents must include the 32-byte contentTag prefix, but verifyECDSA
-  // doesn't actually require it; just use 32 zero bytes followed by data.
-  const contents = new Uint8Array(64);
-  contents.set([0xab, 0xcd], 32);
+  const contents = new Uint8Array([0xab, 0xcd]);
   const message: BAMMessage = { sender, nonce: 7n, contents };
-  const sigHex = signECDSAWithKey(priv, message, CHAIN_ID);
+  const sigHex = signECDSAWithKey(priv, message, TAG, CHAIN_ID);
   return { message, signature: hexToBytes(sigHex), sender };
 }
 
@@ -41,6 +39,7 @@ describe('verifyMessage — zero-address (SDK)', () => {
     const ok = await verifyMessage({
       registryAddress: ZERO_ADDRESS,
       message,
+      contentTag: TAG,
       signatureBytes: signature,
       chainId: CHAIN_ID,
       gasCap: 50_000_000n,
@@ -56,7 +55,23 @@ describe('verifyMessage — zero-address (SDK)', () => {
     const ok = await verifyMessage({
       registryAddress: ZERO_ADDRESS,
       message,
+      contentTag: TAG,
       signatureBytes: tampered,
+      chainId: CHAIN_ID,
+      gasCap: 50_000_000n,
+      timeoutMs: 5_000,
+    });
+    expect(ok).toBe(false);
+  });
+
+  it('returns false when the contentTag differs from what was signed', async () => {
+    const { message, signature } = buildSignedMessage();
+    const otherTag = ('0x' + 'bb'.repeat(32)) as Bytes32;
+    const ok = await verifyMessage({
+      registryAddress: ZERO_ADDRESS,
+      message,
+      contentTag: otherTag,
+      signatureBytes: signature,
       chainId: CHAIN_ID,
       gasCap: 50_000_000n,
       timeoutMs: 5_000,
@@ -72,6 +87,7 @@ describe('verifyMessage — non-zero (on-chain)', () => {
     const ok = await verifyMessage({
       registryAddress: NON_ZERO_REGISTRY,
       message,
+      contentTag: TAG,
       signatureBytes: signature,
       chainId: CHAIN_ID,
       publicClient: client,
@@ -87,6 +103,7 @@ describe('verifyMessage — non-zero (on-chain)', () => {
     const ok = await verifyMessage({
       registryAddress: NON_ZERO_REGISTRY,
       message,
+      contentTag: TAG,
       signatureBytes: signature,
       chainId: CHAIN_ID,
       publicClient: client,
@@ -105,6 +122,7 @@ describe('verifyMessage — non-zero (on-chain)', () => {
     const ok = await verifyMessage({
       registryAddress: NON_ZERO_REGISTRY,
       message,
+      contentTag: TAG,
       signatureBytes: signature,
       chainId: CHAIN_ID,
       publicClient: client,
@@ -124,6 +142,7 @@ describe('verifyMessage — non-zero (on-chain)', () => {
     const ok = await verifyMessage({
       registryAddress: NON_ZERO_REGISTRY,
       message,
+      contentTag: TAG,
       signatureBytes: signature,
       chainId: CHAIN_ID,
       publicClient: client,
@@ -144,6 +163,7 @@ describe('verifyMessage — non-zero (on-chain)', () => {
     const ok = await verifyMessage({
       registryAddress: NON_ZERO_REGISTRY,
       message,
+      contentTag: TAG,
       signatureBytes: signature,
       chainId: CHAIN_ID,
       publicClient: client,
@@ -161,6 +181,7 @@ describe('verifyMessage — non-zero (on-chain)', () => {
     const ok = await verifyMessage({
       registryAddress: NON_ZERO_REGISTRY,
       message,
+      contentTag: TAG,
       signatureBytes: signature,
       chainId: CHAIN_ID,
       gasCap: 50_000_000n,

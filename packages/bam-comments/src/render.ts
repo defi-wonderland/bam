@@ -232,10 +232,11 @@ export function mountInstance(target: HTMLElement): () => void {
               content: draft,
             }
           : { kind: 'comment', postIdHash, timestamp, content: draft };
-      const contents = encodeCommentContents(BAM_COMMENTS_TAG, envelope);
+      const contents = encodeCommentContents(envelope);
       const provider = requireProvider();
       const td = buildTypedData({
         sender: account,
+        contentTag: BAM_COMMENTS_TAG,
         nonce,
         contents,
         chainId: SEPOLIA_CHAIN_ID,

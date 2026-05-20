@@ -296,10 +296,11 @@ export async function processBatch(
   for (let i = 0; i < messages.length; i++) {
     const m = messages[i];
     const sig = signatures[i];
-    const messageHash = computeMessageHashForMessage(m);
+    const messageHash = computeMessageHashForMessage(m, opts.event.contentTag);
     const ok = await verify({
       registryAddress: opts.event.signatureRegistry,
       message: m,
+      contentTag: opts.event.contentTag,
       signatureBytes: sig,
       chainId: opts.chainId,
       publicClient: isZeroAddress(opts.event.signatureRegistry)
@@ -340,7 +341,12 @@ export async function processBatch(
   const snapshot: BatchMessageSnapshotEntry[] = verified.map((v) => ({
     sender: v.message.sender,
     nonce: v.message.nonce,
-    messageId: computeMessageId(v.message.sender, v.message.nonce, batchContentHash),
+    messageId: computeMessageId(
+      v.message.sender,
+      opts.event.contentTag,
+      v.message.nonce,
+      batchContentHash
+    ),
     messageHash: v.messageHash,
     messageIndexWithinBatch: v.indexWithinBatch,
   }));
@@ -359,6 +365,7 @@ export async function processBatch(
     for (const v of verified) {
       const messageId = computeMessageId(
         v.message.sender,
+        opts.event.contentTag,
         v.message.nonce,
         batchContentHash
       );

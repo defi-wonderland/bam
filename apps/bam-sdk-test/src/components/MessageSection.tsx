@@ -5,8 +5,6 @@ import {
   bytesToHex,
   computeMessageHash,
   computeMessageId,
-  encodeContents,
-  splitContents,
   type Address,
   type Bytes32,
 } from 'bam-sdk/browser';
@@ -23,60 +21,53 @@ export function MessageSection() {
   const [appText, setAppText] = useState(DEMO_MESSAGE_TEXT);
   const [batchHash, setBatchHash] = useState<string>(DEMO_BATCH_HASH);
 
-  const encode = useAction<Uint8Array>();
-  const split = useAction<{ contentTag: Bytes32; appBytes: Uint8Array }>();
+  const body = useAction<Uint8Array>();
   const hash = useAction<Bytes32>();
   const id = useAction<Bytes32>();
 
   function buildContents() {
-    return encodeContents(tag as Bytes32, new TextEncoder().encode(appText));
+    return new TextEncoder().encode(appText);
   }
 
   return (
     <Section
       id="message"
       title="Message Primitives"
-      description="encodeContents / splitContents / computeMessageHash / computeMessageId (ERC-8180)."
+      description="computeMessageHash / computeMessageId (ERC-8180). `contents` is an opaque app body; `contentTag` is supplied separately and bound into the hash."
     >
       <Field label="sender (20-byte address)">
         <TextInput value={sender} onChange={(e) => setSender(e.target.value)} />
       </Field>
-      <Field label="nonce (uint64)">
-        <TextInput value={nonce} onChange={(e) => setNonce(e.target.value)} />
-      </Field>
       <Field label="contentTag (32-byte hex)">
         <TextInput value={tag} onChange={(e) => setTag(e.target.value)} />
       </Field>
-      <Field label="app bytes (utf-8)">
+      <Field label="nonce (uint64)">
+        <TextInput value={nonce} onChange={(e) => setNonce(e.target.value)} />
+      </Field>
+      <Field label="contents (utf-8 body)">
         <TextInput value={appText} onChange={(e) => setAppText(e.target.value)} />
       </Field>
 
       <div className="flex flex-wrap gap-2">
         <Button
           onClick={() =>
-            encode.run(
+            body.run(
               () => buildContents(),
               (b) => `${bytesToHex(b)}  (${b.length} bytes)`
             )
           }
         >
-          encodeContents
-        </Button>
-        <Button
-          onClick={() =>
-            split.run(
-              () => splitContents(buildContents()),
-              ({ contentTag, appBytes }) =>
-                `contentTag: ${contentTag}\nappBytes:   ${bytesToHex(appBytes)}\nappText:    ${new TextDecoder().decode(appBytes)}`
-            )
-          }
-        >
-          splitContents
+          contents (utf-8 bytes)
         </Button>
         <Button
           onClick={() =>
             hash.run(() =>
-              computeMessageHash(sender as Address, BigInt(nonce), buildContents())
+              computeMessageHash(
+                sender as Address,
+                tag as Bytes32,
+                BigInt(nonce),
+                buildContents()
+              )
             )
           }
         >
@@ -84,10 +75,8 @@ export function MessageSection() {
         </Button>
       </div>
 
-      <Output value={encode.output} label="encodeContents (hex)" />
-      <ErrorBox value={encode.error} />
-      <Output value={split.output} label="splitContents" />
-      <ErrorBox value={split.error} />
+      <Output value={body.output} label="contents (hex)" />
+      <ErrorBox value={body.error} />
       <Output value={hash.output} label="messageHash" />
       <ErrorBox value={hash.error} />
 
@@ -98,7 +87,12 @@ export function MessageSection() {
       <Button
         onClick={() =>
           id.run(() =>
-            computeMessageId(sender as Address, BigInt(nonce), batchHash as Bytes32)
+            computeMessageId(
+              sender as Address,
+              tag as Bytes32,
+              BigInt(nonce),
+              batchHash as Bytes32
+            )
           )
         }
       >

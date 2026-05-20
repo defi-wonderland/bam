@@ -5,7 +5,6 @@ import {
   decodeCommentContents,
   type CommentEnvelope,
 } from '../src/codec.js';
-import { BAM_COMMENTS_TAG } from '../src/content-tag.js';
 
 const POST_ID_HASH = ('0x' + 'ab'.repeat(32)) as `0x${string}`;
 const PARENT_HASH = ('0x' + 'cd'.repeat(32)) as `0x${string}`;
@@ -18,9 +17,8 @@ describe('codec round-trip', () => {
       timestamp: 1_730_000_000,
       content: 'hello — world 🌎',
     };
-    const bytes = encodeCommentContents(BAM_COMMENTS_TAG, msg);
-    const { contentTag, envelope } = decodeCommentContents(bytes);
-    expect(contentTag).toBe(BAM_COMMENTS_TAG);
+    const bytes = encodeCommentContents(msg);
+    const envelope = decodeCommentContents(bytes);
     expect(envelope).toEqual(msg);
   });
 
@@ -32,38 +30,31 @@ describe('codec round-trip', () => {
       parentMessageHash: PARENT_HASH,
       content: 're: hello',
     };
-    const bytes = encodeCommentContents(BAM_COMMENTS_TAG, msg);
-    const { envelope } = decodeCommentContents(bytes);
+    const bytes = encodeCommentContents(msg);
+    const envelope = decodeCommentContents(bytes);
     expect(envelope).toEqual(msg);
   });
 });
 
 describe('codec rejects malformed input', () => {
-  function tag(): Uint8Array {
-    const out = new Uint8Array(32);
-    const hex = BAM_COMMENTS_TAG.slice(2);
-    for (let i = 0; i < 32; i++) out[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
-    return out;
-  }
+  // After the tag-binding rework, body bytes no longer carry a 32-byte
+  // tag prefix; offsets are computed from byte 0 of the body.
 
   it('throws on short buffer (no envelope header)', () => {
-    const buf = new Uint8Array(33);
-    buf.set(tag(), 0);
+    const buf = new Uint8Array(1);
     expect(() => decodeCommentContents(buf)).toThrow();
   });
 
   it('throws on unknown version byte', () => {
     const buf = new Uint8Array(46);
-    buf.set(tag(), 0);
-    buf[32] = 0xff; // unknown version
+    buf[0] = 0xff; // unknown version
     expect(() => decodeCommentContents(buf)).toThrow(/version/);
   });
 
   it('throws on unknown kind', () => {
     const buf = new Uint8Array(46);
-    buf.set(tag(), 0);
-    buf[32] = 0x01;
-    buf[33] = 0x42; // unknown kind
+    buf[0] = 0x01;
+    buf[1] = 0x42; // unknown kind
     expect(() => decodeCommentContents(buf)).toThrow(/kind/);
   });
 
@@ -74,9 +65,9 @@ describe('codec rejects malformed input', () => {
       timestamp: 1_730_000_000,
       content: 'hi',
     };
-    const bytes = encodeCommentContents(BAM_COMMENTS_TAG, msg);
-    // Find contentLen field (last 4 bytes before 'hi') and inflate.
-    const lenOff = 32 + 42; // tag + comment K=42
+    const bytes = encodeCommentContents(msg);
+    // contentLen lives at offset 42 (comment K=42); inflate it.
+    const lenOff = 42;
     bytes[lenOff] = 0x00;
     bytes[lenOff + 1] = 0x00;
     bytes[lenOff + 2] = 0x10;
@@ -91,7 +82,7 @@ describe('codec rejects malformed input', () => {
       timestamp: 1_730_000_000,
       content: 'x',
     };
-    const bytes = encodeCommentContents(BAM_COMMENTS_TAG, msg);
+    const bytes = encodeCommentContents(msg);
     // Overwrite the single content byte with a lone continuation
     // byte (0x80) that's invalid as the start of a code point.
     bytes[bytes.length - 1] = 0x80;
@@ -100,7 +91,7 @@ describe('codec rejects malformed input', () => {
 
   it('rejects non-32-byte postIdHash on encode', () => {
     expect(() =>
-      encodeCommentContents(BAM_COMMENTS_TAG, {
+      encodeCommentContents({
         kind: 'comment',
         postIdHash: '0xdead' as `0x${string}`,
         timestamp: 0,
@@ -111,7 +102,7 @@ describe('codec rejects malformed input', () => {
 
   it('rejects non-32-byte parentMessageHash on encode', () => {
     expect(() =>
-      encodeCommentContents(BAM_COMMENTS_TAG, {
+      encodeCommentContents({
         kind: 'reply',
         postIdHash: POST_ID_HASH,
         parentMessageHash: '0xbeef' as `0x${string}`,
@@ -123,10 +114,9 @@ describe('codec rejects malformed input', () => {
 
   it('throws when reply payload is too short to read parent hash', () => {
     // Build a reply prefix without enough room for parent hash.
-    const buf = new Uint8Array(32 + 42 + 5); // tag + (version,kind,postIdHash,ts) + 5 bytes
-    buf.set(tag(), 0);
-    buf[32] = 0x01; // version
-    buf[33] = 0x01; // reply
+    const buf = new Uint8Array(42 + 5); // (version,kind,postIdHash,ts) + 5 bytes
+    buf[0] = 0x01; // version
+    buf[1] = 0x01; // reply
     expect(() => decodeCommentContents(buf)).toThrow(/reply payload too short/);
   });
 });

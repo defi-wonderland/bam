@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { zeroAddress } from 'viem';
 import {
-  encodeContents,
   signECDSAWithKey,
   type Address,
   type BAMMessage,
@@ -51,9 +50,9 @@ function bytesToHex(b: Uint8Array): `0x${string}` {
 }
 
 function signedEnvelope(nonce: bigint): Uint8Array {
-  const contents = encodeContents(TAG, new TextEncoder().encode('reorg-test'));
+  const contents = new TextEncoder().encode('reorg-test');
   const msg: BAMMessage = { sender: SENDER, nonce, contents };
-  const signature = signECDSAWithKey(PRIV, msg, CHAIN_ID);
+  const signature = signECDSAWithKey(PRIV, msg, TAG, CHAIN_ID);
   return new TextEncoder().encode(
     JSON.stringify({
       contentTag: TAG,

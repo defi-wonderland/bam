@@ -229,7 +229,7 @@ export interface MessageRow {
   contentTag: Bytes32;
   contents: Uint8Array;
   signature: Uint8Array;
-  /** ERC-8180 messageHash — keccak256(sender || nonce || contents). Stable pre-batch identifier. */
+  /** ERC-8180 messageHash — keccak256(sender || contentTag || nonce || contents). Stable pre-batch identifier. */
   messageHash: Bytes32;
   status: MessageStatus;
   /** FK to `batches.tx_hash`. Null until the message is submitted or observed. */

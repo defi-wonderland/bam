@@ -17,7 +17,9 @@
  *   sender           : 20 bytes
  *   nonce            : uint64 BE (8 bytes)
  *   contents length  : uint32 BE (4 bytes)
- *   contents         : N bytes   (first 32 bytes are contentTag)
+ *   contents         : N bytes   (opaque app body; `contentTag` is per-batch,
+ *                                  not per-message — read it from the
+ *                                  registration event)
  *   signature        : 65 bytes  (scheme 0x01; other schemes deferred)
  *
  * Compression is applied to the concatenated payload as a single ZSTD

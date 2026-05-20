@@ -31,6 +31,14 @@ export type { OnChainVerifyEvent, VerifyReadContractClient } from './on-chain-re
 export interface VerifyMessageOptions {
   registryAddress: Address;
   message: BAMMessage;
+  /**
+   * The segment's `contentTag` as read from the
+   * `BlobBatchRegistered` / `CalldataBatchRegistered` event. Bound
+   * into both the ECDSA EIP-712 digest and the BLS `messageHash`
+   * formula. Sourcing this from the trusted L1 event (not a
+   * per-message field) is what closes the cross-app re-routing path.
+   */
+  contentTag: Bytes32;
   signatureBytes: Uint8Array;
   chainId: number;
   publicClient?: VerifyReadContractClient;
@@ -54,7 +62,7 @@ export async function verifyMessage(opts: VerifyMessageOptions): Promise<boolean
   const sigHex = bytesToHex(opts.signatureBytes) as `0x${string}`;
 
   if (isZeroAddress(opts.registryAddress)) {
-    return verifyECDSA(opts.message, sigHex, opts.message.sender, opts.chainId);
+    return verifyECDSA(opts.message, opts.contentTag, sigHex, opts.message.sender, opts.chainId);
   }
 
   if (!opts.publicClient) {
@@ -68,7 +76,7 @@ export async function verifyMessage(opts: VerifyMessageOptions): Promise<boolean
     return false;
   }
 
-  const messageHash = computeECDSADigest(opts.message, opts.chainId) as Bytes32;
+  const messageHash = computeECDSADigest(opts.message, opts.contentTag, opts.chainId) as Bytes32;
   return callOnChainVerify({
     registryAddress: opts.registryAddress,
     owner: opts.message.sender,

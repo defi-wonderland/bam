@@ -52,7 +52,6 @@ pnpm add bam-sdk
 import {
   computeMessageHash,
   encodeBatch,
-  encodeContents,
   hexToBytes,
   signECDSAWithKey,
   verifyECDSA,
@@ -66,26 +65,27 @@ import {
 const privateKey = generateECDSAPrivateKey();
 const sender = deriveAddress(privateKey);
 
-// BAM messages carry a 32-byte `contentTag` prefix at the start of
-// `contents`; everything after the prefix is app-opaque.
+// `contents` is opaque app body bytes. The batch's `contentTag` is
+// passed alongside; it is bound into the hash via the messageHash
+// formula and (for ECDSA) via the EIP-712 BAMMessage struct.
 const contentTag = ('0x' + '01'.repeat(32)) as Bytes32;
-const appBytes = new TextEncoder().encode('Hello from BAM!');
+const contents = new TextEncoder().encode('Hello from BAM!');
 
 const message: BAMMessage = {
   sender,
   nonce: 0n,
-  contents: encodeContents(contentTag, appBytes),
+  contents,
 };
 
 // Pre-batch identifier — chain-agnostic; stable across the message's lifetime.
-const messageHash = computeMessageHash(message.sender, message.nonce, message.contents);
+const messageHash = computeMessageHash(message.sender, contentTag, message.nonce, message.contents);
 
 // Sign under ERC-8180 scheme 0x01 (EIP-712 typed data over BAMMessage).
 const chainId = 11_155_111; // Sepolia
-const signature = signECDSAWithKey(privateKey as `0x${string}`, message, chainId);
+const signature = signECDSAWithKey(privateKey as `0x${string}`, message, contentTag, chainId);
 
-// Verify — returns `false` on tamper, length != 65, wrong chain id, high-s, etc.
-const valid = verifyECDSA(message, signature, sender, chainId);
+// Verify — returns `false` on tamper, wrong tag, length != 65, wrong chain id, high-s, etc.
+const valid = verifyECDSA(message, contentTag, signature, sender, chainId);
 
 // Encode a batch for blob submission. Signatures are parallel to messages.
 const batch = encodeBatch([message], [hexToBytes(signature)]);
@@ -138,7 +138,7 @@ This works in Next.js client components, Vite, and other browser bundlers withou
 
 | Module | Exports |
 |--------|---------|
-| **Message** | `computeMessageHash`, `computeMessageId`, `encodeContents`, `splitContents`, `hexToBytes`, `bytesToHex` |
+| **Message** | `computeMessageHash`, `computeMessageId` (both bind `contentTag`), `hexToBytes`, `bytesToHex` |
 | **Batch** | `encodeBatch`, `decodeBatch`, `estimateBatchSize` — operate on `BAMMessage[]` + parallel signatures |
 | **Batch (Exposure)** | `encodeExposureBatch`, `decodeExposureBatch`, `buildRawMessageBytes` |
 | **BPE Codec** | `bpeEncode`, `bpeDecode`, `buildBPEDictionary`, `serializeBPEDictionary`, `deserializeBPEDictionary` |

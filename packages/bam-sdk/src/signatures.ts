@@ -77,17 +77,19 @@ export type ECDSASignature = Uint8Array;
 // ═════════════════════════════════════════════════════════════════════════
 
 /**
- * Headless ECDSA signing: sign the EIP-712 digest of `message` on
- * `chainId` with `privateKey`, returning a 65-byte hex signature with
- * canonical low-s (via @noble's default) and `v ∈ {27, 28}`.
+ * Headless ECDSA signing: sign the EIP-712 digest of `message` under
+ * `contentTag` on `chainId` with `privateKey`, returning a 65-byte hex
+ * signature with canonical low-s (via @noble's default) and
+ * `v ∈ {27, 28}`.
  */
 export function signECDSAWithKey(
   privateKey: `0x${string}`,
   message: BAMMessage,
+  contentTag: Bytes32,
   chainId: number
 ): `0x${string}` {
   try {
-    const digest = computeECDSADigest(message, chainId);
+    const digest = computeECDSADigest(message, contentTag, chainId);
     const digestBytes = hexToBytes(digest);
     const privBytes = hexToBytes(privateKey);
     const sig = secp256k1.sign(digestBytes, privBytes);
@@ -110,7 +112,8 @@ export function signECDSAWithKey(
  */
 export async function signECDSA(
   walletClient: WalletClient,
-  message: BAMMessage
+  message: BAMMessage,
+  contentTag: Bytes32
 ): Promise<`0x${string}`> {
   if (walletClient.account == null) {
     throw new SignatureError('walletClient.account is required for ECDSA signing');
@@ -131,6 +134,7 @@ export async function signECDSA(
     primaryType: 'BAMMessage',
     message: {
       sender: message.sender,
+      contentTag,
       nonce: message.nonce,
       contents: bytesToHex(message.contents) as `0x${string}`,
     },
@@ -141,12 +145,14 @@ export async function signECDSA(
 
 /**
  * Verify an EIP-712-constructed ECDSA signature against
- * `expectedSender` on `chainId`. Returns `false` on every failure path
- * (wrong sender, tampered contents, tampered tag prefix, non-canonical
- * high-s, wrong chain id, length ≠ 65, non-hex). Never throws.
+ * `expectedSender` on `chainId`, under `contentTag`. Returns `false` on
+ * every failure path (wrong sender, tampered contents, tampered tag,
+ * non-canonical high-s, wrong chain id, length ≠ 65, non-hex). Never
+ * throws.
  */
 export function verifyECDSA(
   message: BAMMessage,
+  contentTag: Bytes32,
   signature: `0x${string}`,
   expectedSender: Address,
   chainId: number
@@ -155,7 +161,7 @@ export function verifyECDSA(
     const sigBytes = hexToBytes(signature);
     if (sigBytes.length !== 65) return false;
 
-    const digest = hexToBytes(computeECDSADigest(message, chainId));
+    const digest = hexToBytes(computeECDSADigest(message, contentTag, chainId));
     const compact = sigBytes.slice(0, 64);
     const v = sigBytes[64];
     const recovery = v >= 27 ? v - 27 : v;

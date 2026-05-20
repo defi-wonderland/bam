@@ -16,7 +16,7 @@ pnpm --filter bam-sdk-test dev
 | Section     | Functions |
 |-------------|-----------|
 | Hex         | `hexToBytes`, `bytesToHex` |
-| Message     | `encodeContents`, `splitContents`, `computeMessageHash`, `computeMessageId` |
+| Message     | `computeMessageHash`, `computeMessageId` (both bind `contentTag` into the hash) |
 | ECDSA       | `generateECDSAPrivateKey`, `deriveAddress`, `computeECDSADigest`, `signECDSAWithKey`, `signECDSA` (via injected wallet), `verifyECDSA` |
 | BLS         | `generateBLSPrivateKey`, `deriveBLSPublicKey`, `signBLS`, `verifyBLS`, `aggregateBLS`, `verifyAggregateBLS` |
 | Batch       | `encodeBatch`, `decodeBatch`, `estimateBatchSize` |

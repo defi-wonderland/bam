@@ -2,7 +2,7 @@
  * Tiny hex helpers reused across the widget. Local copy (not imported
  * from `bam-sdk`) so importing `bam-sdk/browser` doesn't pull in any
  * additional surface area beyond what we strictly need
- * (`splitContents`, `encodeContents`, EIP-712 helpers).
+ * (EIP-712 helpers).
  */
 
 export function hexToBytes(hex: string): Uint8Array {

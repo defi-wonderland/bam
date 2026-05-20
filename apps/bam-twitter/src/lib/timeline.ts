@@ -57,7 +57,7 @@ function safeDecode(contentsHex: string): {
   parentMessageHash: Bytes32 | null;
 } | null {
   try {
-    const { app } = decodeTwitterContents(hexToBytes(contentsHex));
+    const app = decodeTwitterContents(hexToBytes(contentsHex));
     if (app.kind === 'reply') {
       return {
         timestamp: app.timestamp,

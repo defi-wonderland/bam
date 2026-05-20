@@ -54,8 +54,7 @@ function hexToBytes(hex: string): Uint8Array {
 
 function safeDecode(contentsHex: string): { timestamp: number; content: string } | null {
   try {
-    const { app } = decodeSocialContents(hexToBytes(contentsHex));
-    return app;
+    return decodeSocialContents(hexToBytes(contentsHex));
   } catch {
     return null;
   }

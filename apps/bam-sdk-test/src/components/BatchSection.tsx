@@ -6,7 +6,6 @@ import {
   decodeBatch,
   deriveAddress,
   encodeBatch,
-  encodeContents,
   estimateBatchSize,
   generateECDSAPrivateKey,
   hexToBytes,
@@ -41,9 +40,9 @@ export function BatchSection() {
       const msg: BAMMessage = {
         sender,
         nonce: BigInt(i),
-        contents: encodeContents(DEMO_CONTENT_TAG, new TextEncoder().encode(lines[i])),
+        contents: new TextEncoder().encode(lines[i]),
       };
-      const sigHex = signECDSAWithKey(sk as `0x${string}`, msg, Number(chainId));
+      const sigHex = signECDSAWithKey(sk as `0x${string}`, msg, DEMO_CONTENT_TAG, Number(chainId));
       messages.push(msg);
       signatures.push(hexToBytes(sigHex));
     }

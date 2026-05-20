@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
   computeMessageHash,
-  encodeContents,
   signECDSAWithKey,
   type Address,
   type BAMMessage,
@@ -15,6 +14,7 @@ const CHAIN_ID = 31337;
 const PRIV = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80' as const;
 const SENDER = '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266' as Address;
 const TAG = ('0x' + 'aa'.repeat(32)) as Bytes32;
+const OTHER_TAG = ('0x' + 'bb'.repeat(32)) as Bytes32;
 
 function hexToBytes(hex: string): Uint8Array {
   const c = hex.startsWith('0x') ? hex.slice(2) : hex;
@@ -25,33 +25,34 @@ function hexToBytes(hex: string): Uint8Array {
 
 function buildDecoded(opts: {
   nonce?: bigint;
-  tamperTag?: boolean;
-  tamperAppBytes?: boolean;
+  tamperBytes?: boolean;
+  /** Tag the validator sees on the message (different = cross-app re-routing). */
+  envelopeTag?: Bytes32;
   wrongSender?: Address;
   signatureOverride?: Uint8Array;
 }): DecodedMessage {
   const nonce = opts.nonce ?? 1n;
-  const contents = encodeContents(TAG, new TextEncoder().encode('hello'));
+  const contents = new TextEncoder().encode('hello');
   const msg: BAMMessage = { sender: SENDER, nonce, contents };
-  const sigHex = signECDSAWithKey(PRIV, msg, CHAIN_ID);
+  // Sign for TAG; the envelope may declare OTHER_TAG when simulating a
+  // cross-tag re-routing attempt.
+  const sigHex = signECDSAWithKey(PRIV, msg, TAG, CHAIN_ID);
   const signature = opts.signatureOverride ?? hexToBytes(sigHex);
 
   let outContents = contents;
-  if (opts.tamperTag) {
+  if (opts.tamperBytes) {
     outContents = new Uint8Array(contents);
     outContents[0] ^= 0xff;
-  } else if (opts.tamperAppBytes) {
-    outContents = new Uint8Array(contents);
-    outContents[32] ^= 0xff;
   }
 
+  const contentTag = opts.envelopeTag ?? TAG;
   return {
     sender: opts.wrongSender ?? SENDER,
     nonce,
     contents: outContents,
-    contentTag: TAG,
+    contentTag,
     signature,
-    messageHash: computeMessageHash(SENDER, nonce, outContents),
+    messageHash: computeMessageHash(SENDER, contentTag, nonce, outContents),
   };
 }
 
@@ -72,14 +73,15 @@ describe('defaultEcdsaValidator', () => {
     if (!result.ok) expect(result.reason).toBe('bad_signature');
   });
 
-  it('tampered contentTag prefix → bad_signature', () => {
-    const decoded = buildDecoded({ tamperTag: true });
+  it('cross-tag re-routing (envelope declares different tag than signed) → bad_signature', () => {
+    const decoded = buildDecoded({ envelopeTag: OTHER_TAG });
     const result = validator.validate(decoded);
     expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe('bad_signature');
   });
 
-  it('tampered app bytes → bad_signature', () => {
-    const decoded = buildDecoded({ tamperAppBytes: true });
+  it('tampered contents → bad_signature', () => {
+    const decoded = buildDecoded({ tamperBytes: true });
     const result = validator.validate(decoded);
     expect(result.ok).toBe(false);
   });
@@ -103,11 +105,11 @@ describe('defaultEcdsaValidator', () => {
   });
 
   it('recoverSigner returns null when the signature is invalid (rate-limit bypass guard)', () => {
-    // Tampered app bytes ⇒ the signature no longer matches `contents`;
-    // recoverSigner must reject so the ingest routes this envelope to
-    // the shared RECOVER_FAILED rate-limit bucket instead of giving
-    // the attacker a fresh per-sender budget.
-    const decoded = buildDecoded({ tamperAppBytes: true });
+    // Tampered contents ⇒ the signature no longer matches; recoverSigner
+    // must reject so the ingest routes this envelope to the shared
+    // RECOVER_FAILED rate-limit bucket instead of giving the attacker a
+    // fresh per-sender budget.
+    const decoded = buildDecoded({ tamperBytes: true });
     const recovered = validator.recoverSigner?.(decoded);
     expect(recovered).toBeNull();
   });

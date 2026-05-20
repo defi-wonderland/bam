@@ -1,24 +1,22 @@
 /**
- * message-in-a-blobble's codec for the app-opaque portion of a BAM
- * message's `contents` — the demo owns its own serialization of
- * `{ timestamp, content }` into `contents[32:]`.
+ * message-in-a-blobble's codec for the body bytes the BAM `contents`
+ * field carries. The demo owns its own serialization of
+ * `{ timestamp, content }`.
+ *
+ * After the tag-binding rework, body IS `contents` — no 32-byte tag
+ * prefix; `contentTag` is bound by the BAM core via the
+ * batch-registration event and the `messageHash` formula.
  *
  * Single source of truth: imported by `MessageComposer`, `MessageList`,
  * and `api/sync/route.ts`. Any divergence between them would render
  * messages incorrectly with no protocol-level signal, so exactly one
  * module owns the codec.
  *
- * Layout (inside `contents[32:]`):
+ * Layout:
  *   bytes  0..8  : uint64 BE timestamp (Unix epoch seconds)
  *   bytes  8..12 : uint32 BE UTF-8 content length
  *   bytes 12..   : UTF-8 content bytes
- *
- * The 32-byte contentTag prefix is added by `encodeContents` in
- * `bam-sdk`; this module produces / consumes only the app-opaque
- * portion.
  */
-
-import { encodeContents, splitContents, type Bytes32 } from 'bam-sdk/browser';
 
 export interface SocialMessage {
   timestamp: number;
@@ -29,14 +27,11 @@ const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder('utf-8', { fatal: true });
 
 /**
- * Encode a Social message as a BAM `contents` byte string with the
- * given `contentTag` prefix. Throws RangeError on out-of-bound
- * timestamp or content > 4 GiB (far above any realistic app cap).
+ * Encode a Social message as a BAM `contents` byte string. Throws
+ * RangeError on out-of-bound timestamp or content > 4 GiB (far above
+ * any realistic app cap).
  */
-export function encodeSocialContents(
-  contentTag: Bytes32,
-  app: SocialMessage
-): Uint8Array {
+export function encodeSocialContents(app: SocialMessage): Uint8Array {
   if (!Number.isInteger(app.timestamp) || app.timestamp < 0 || app.timestamp > 0xffffffffffff) {
     throw new RangeError(`timestamp out of range: ${app.timestamp}`);
   }
@@ -48,29 +43,24 @@ export function encodeSocialContents(
   writeU64BE(body, 0, BigInt(app.timestamp));
   writeU32BE(body, 8, contentBytes.length);
   body.set(contentBytes, 12);
-  return encodeContents(contentTag, body);
+  return body;
 }
 
 /**
- * Inverse of `encodeSocialContents`. Returns the `contentTag` prefix
- * and the decoded app fields. Throws on a short buffer, a declared
- * content length that overruns the payload, or invalid UTF-8.
+ * Inverse of `encodeSocialContents`. Throws on a short buffer, a
+ * declared content length that overruns the payload, or invalid UTF-8.
  */
-export function decodeSocialContents(contents: Uint8Array): {
-  contentTag: Bytes32;
-  app: SocialMessage;
-} {
-  const { contentTag, appBytes } = splitContents(contents);
-  if (appBytes.length < 12) {
+export function decodeSocialContents(body: Uint8Array): SocialMessage {
+  if (body.length < 12) {
     throw new RangeError('social contents too short');
   }
-  const timestamp = Number(readU64BE(appBytes, 0));
-  const contentLen = readU32BE(appBytes, 8);
-  if (12 + contentLen > appBytes.length) {
+  const timestamp = Number(readU64BE(body, 0));
+  const contentLen = readU32BE(body, 8);
+  if (12 + contentLen > body.length) {
     throw new RangeError('social contents: content length runs past buffer');
   }
-  const content = textDecoder.decode(appBytes.slice(12, 12 + contentLen));
-  return { contentTag, app: { timestamp, content } };
+  const content = textDecoder.decode(body.slice(12, 12 + contentLen));
+  return { timestamp, content };
 }
 
 function writeU32BE(buf: Uint8Array, offset: number, value: number): void {

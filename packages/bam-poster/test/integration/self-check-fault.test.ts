@@ -17,7 +17,6 @@ import {
   computeMessageHashForMessage,
   deriveAddress,
   encodeBatch,
-  encodeContents,
   generateECDSAPrivateKey,
   hexToBytes,
   loadTrustedSetup,
@@ -74,11 +73,11 @@ async function ingest(
     for (let i = 0; i < count; i++) {
       const priv = generateECDSAPrivateKey();
       const sender = deriveAddress(priv);
-      const contents = encodeContents(tag, new Uint8Array([i, i + 1, i + 2]));
+      const contents = new Uint8Array([i, i + 1, i + 2]);
       const msg: BAMMessage = { sender, nonce: 1n, contents };
-      const sigHex = signECDSAWithKey(priv, msg, CHAIN_ID);
+      const sigHex = signECDSAWithKey(priv, msg, tag, CHAIN_ID);
       const signature = hexToBytes(sigHex);
-      const messageHash = computeMessageHashForMessage(msg);
+      const messageHash = computeMessageHashForMessage(msg, tag);
       const ingestSeq = await txn.nextIngestSeq(tag);
       await txn.insertPending({
         contentTag: tag,

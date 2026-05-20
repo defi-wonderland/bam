@@ -20,8 +20,6 @@ import {
   // ERC-8180 primitives
   computeMessageHash,
   computeMessageId,
-  encodeContents,
-  splitContents,
   signECDSAWithKey,
   verifyECDSA,
   encodeBatch,
@@ -121,26 +119,33 @@ const msg = Cli.create('message', {
 
 msg.command('hash', {
   description:
-    'Compute ERC-8180 messageHash = keccak256(sender || nonce || contents).',
+    'Compute ERC-8180 messageHash = keccak256(sender || contentTag || nonce || contents).',
   options: z.object({
     sender: z.string().describe('Sender address (0x...)'),
+    contentTag: z.string().describe('Content tag (0x + 32 bytes)'),
     nonce: z.coerce.bigint().describe('Per-sender uint64 nonce'),
     contents: z
       .string()
-      .describe('Contents bytes (0x-prefixed hex; must be >= 32 bytes including contentTag prefix)'),
+      .describe('Contents bytes (0x-prefixed hex; opaque app body)'),
   }),
   run({ options }) {
     const contents = hexToBytes(options.contents)
-    const hash = computeMessageHash(options.sender as Address, options.nonce, contents)
+    const hash = computeMessageHash(
+      options.sender as Address,
+      options.contentTag as Bytes32,
+      options.nonce,
+      contents
+    )
     return { messageHash: hash }
   },
 })
 
 msg.command('message-id', {
   description:
-    'Compute ERC-8180 messageId = keccak256(sender || nonce || batchContentHash). Known only after a batch is assembled.',
+    'Compute ERC-8180 messageId = keccak256(sender || contentTag || nonce || batchContentHash). Known only after a batch is assembled.',
   options: z.object({
     sender: z.string().describe('Sender address (0x...)'),
+    contentTag: z.string().describe('Content tag (0x + 32 bytes)'),
     nonce: z.coerce.bigint().describe('Per-sender uint64 nonce'),
     batchContentHash: z
       .string()
@@ -149,6 +154,7 @@ msg.command('message-id', {
   run({ options }) {
     const id = computeMessageId(
       options.sender as Address,
+      options.contentTag as Bytes32,
       options.nonce,
       options.batchContentHash as Bytes32
     )
@@ -162,8 +168,9 @@ msg.command('sign', {
   options: z.object({
     privateKey: z.string().describe('ECDSA private key (0x + 32 bytes)'),
     sender: z.string().describe('Sender address (0x...); must match the private key'),
+    contentTag: z.string().describe('Content tag (0x + 32 bytes)'),
     nonce: z.coerce.bigint().describe('Per-sender uint64 nonce'),
-    contents: z.string().describe('Contents bytes (0x-prefixed hex, >= 32 bytes)'),
+    contents: z.string().describe('Contents bytes (0x-prefixed hex; opaque app body)'),
     chainId: z.coerce.number().describe('EIP-712 domain chain id'),
   }),
   run({ options }) {
@@ -176,18 +183,25 @@ msg.command('sign', {
     const signature = signECDSAWithKey(
       options.privateKey as `0x${string}`,
       message,
+      options.contentTag as Bytes32,
       options.chainId
     )
-    const messageHash = computeMessageHash(options.sender as Address, options.nonce, contents)
+    const messageHash = computeMessageHash(
+      options.sender as Address,
+      options.contentTag as Bytes32,
+      options.nonce,
+      contents
+    )
     return { signature, messageHash }
   },
 })
 
 msg.command('verify', {
   description:
-    'Verify an ECDSA signature over an EIP-712-constructed BAMMessage. Returns valid=true only on a signature produced by `expectedSender` on the given `chainId`.',
+    'Verify an ECDSA signature over an EIP-712-constructed BAMMessage. Returns valid=true only on a signature produced by `expectedSender` on the given `chainId` for `contentTag`.',
   options: z.object({
     sender: z.string().describe('Sender address (0x...)'),
+    contentTag: z.string().describe('Content tag (0x + 32 bytes)'),
     nonce: z.coerce.bigint().describe('Per-sender uint64 nonce'),
     contents: z.string().describe('Contents bytes (0x-prefixed hex)'),
     signature: z.string().describe('65-byte signature (0x + 130 hex chars)'),
@@ -201,35 +215,12 @@ msg.command('verify', {
         nonce: options.nonce,
         contents,
       },
+      options.contentTag as Bytes32,
       options.signature as `0x${string}`,
       options.sender as Address,
       options.chainId
     )
     return { valid }
-  },
-})
-
-msg.command('pack-contents', {
-  description:
-    'Build a `contents` byte string with a 32-byte contentTag prefix. Output is 0x-prefixed hex.',
-  options: z.object({
-    contentTag: z.string().describe('Content tag (0x + 32 bytes)'),
-    appBytes: z.string().describe('App-opaque portion (0x + hex)'),
-  }),
-  run({ options }) {
-    const out = encodeContents(options.contentTag as Bytes32, hexToBytes(options.appBytes))
-    return { contents: bytesToHex(out) }
-  },
-})
-
-msg.command('unpack-contents', {
-  description: 'Split `contents` into its contentTag prefix and the app-opaque tail.',
-  options: z.object({
-    contents: z.string().describe('Contents bytes (0x + hex)'),
-  }),
-  run({ options }) {
-    const { contentTag, appBytes } = splitContents(hexToBytes(options.contents))
-    return { contentTag, appBytes: bytesToHex(appBytes) }
   },
 })
 

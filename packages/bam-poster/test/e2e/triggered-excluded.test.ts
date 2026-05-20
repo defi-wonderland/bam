@@ -20,7 +20,6 @@ import {
   computeMessageHashForMessage,
   deriveAddress,
   encodeBatch,
-  encodeContents,
   generateECDSAPrivateKey,
   hexToBytes,
   loadTrustedSetup,
@@ -71,11 +70,11 @@ async function ingestSized(
       const sender = deriveAddress(priv);
       const payload = new Uint8Array(payloadBytes);
       payload.fill(0xa0 + (i & 0x0f));
-      const contents = encodeContents(tag, payload);
+      const contents = payload;
       const message: BAMMessage = { sender, nonce: 1n, contents };
-      const sigHex = signECDSAWithKey(priv, message, CHAIN_ID);
+      const sigHex = signECDSAWithKey(priv, message, tag, CHAIN_ID);
       const signature = hexToBytes(sigHex);
-      const messageHash = computeMessageHashForMessage(message);
+      const messageHash = computeMessageHashForMessage(message, tag);
       const ingestSeq = await txn.nextIngestSeq(tag);
       await txn.insertPending({
         contentTag: tag,

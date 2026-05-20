@@ -1,8 +1,10 @@
 /**
- * App-opaque codec for the bytes inside a BAM message's `contents`
- * field after the 32-byte ERC-8179 contentTag prefix.
+ * App-opaque codec for the body bytes a bam-comments message carries
+ * in its BAM `contents` field.
  *
- * Layout inside `contents[32:]`:
+ * Layout (the body IS `contents` — no per-message tag prefix; the
+ * `contentTag` is bound by the BAM core via the batch-registration
+ * event and the `messageHash` formula):
  *
  *   byte  0       : version (uint8) — 0x01
  *   byte  1       : kind    (uint8) — 0x00=comment, 0x01=reply
@@ -21,9 +23,6 @@
  * caller is the trust boundary.
  */
 
-import { encodeContents, splitContents } from 'bam-sdk/browser';
-
-import type { ContentTagHex } from './content-tag.js';
 import { bytesToHex, hexToBytes } from './hex.js';
 
 export const ENVELOPE_VERSION = 0x01;
@@ -49,14 +48,10 @@ const enc = new TextEncoder();
 const dec = new TextDecoder('utf-8', { fatal: true });
 
 /**
- * Build the full `contents` byte string the Poster ingests: the
- * 32-byte contentTag prefix (added by `bam-sdk`'s `encodeContents`)
- * followed by the kind-specific layout above.
+ * Encode a comment envelope into the body bytes the BAM `contents`
+ * field carries.
  */
-export function encodeCommentContents(
-  contentTag: ContentTagHex,
-  msg: CommentEnvelope
-): Uint8Array {
+export function encodeCommentContents(msg: CommentEnvelope): Uint8Array {
   if (
     !Number.isInteger(msg.timestamp) ||
     msg.timestamp < 0 ||
@@ -83,7 +78,7 @@ export function encodeCommentContents(
     writeU64BE(body, 34, BigInt(msg.timestamp));
     writeU32BE(body, 42, contentBytes.length);
     body.set(contentBytes, 46);
-    return encodeContents(contentTag, body);
+    return body;
   }
 
   // reply
@@ -101,7 +96,7 @@ export function encodeCommentContents(
   body.set(parent, 42);
   writeU32BE(body, 74, contentBytes.length);
   body.set(contentBytes, 78);
-  return encodeContents(contentTag, body);
+  return body;
 }
 
 /**
@@ -109,61 +104,48 @@ export function encodeCommentContents(
  * version/kind, declared content length that overruns the payload, or
  * invalid UTF-8.
  */
-export function decodeCommentContents(contents: Uint8Array): {
-  contentTag: `0x${string}`;
-  envelope: CommentEnvelope;
-} {
-  const split = splitContents(contents);
-  const contentTag = split.contentTag as `0x${string}`;
-  const appBytes = split.appBytes;
-
-  if (appBytes.length < 2) {
+export function decodeCommentContents(body: Uint8Array): CommentEnvelope {
+  if (body.length < 2) {
     throw new RangeError('comments contents too short for envelope header');
   }
-  const version = appBytes[0];
-  const kind = appBytes[1];
+  const version = body[0];
+  const kind = body[1];
   if (version !== ENVELOPE_VERSION) {
     throw new RangeError(`unsupported envelope version: ${version}`);
   }
 
   if (kind === KIND_COMMENT) {
-    if (appBytes.length < 46) {
+    if (body.length < 46) {
       throw new RangeError('comment payload too short');
     }
-    const postIdHash = bytesToHex(appBytes.slice(2, 34));
-    const timestamp = Number(readU64BE(appBytes, 34));
-    const contentLen = readU32BE(appBytes, 42);
-    if (46 + contentLen > appBytes.length) {
+    const postIdHash = bytesToHex(body.slice(2, 34));
+    const timestamp = Number(readU64BE(body, 34));
+    const contentLen = readU32BE(body, 42);
+    if (46 + contentLen > body.length) {
       throw new RangeError('comment: content length runs past buffer');
     }
-    const content = dec.decode(appBytes.slice(46, 46 + contentLen));
-    return {
-      contentTag,
-      envelope: { kind: 'comment', postIdHash, timestamp, content },
-    };
+    const content = dec.decode(body.slice(46, 46 + contentLen));
+    return { kind: 'comment', postIdHash, timestamp, content };
   }
 
   if (kind === KIND_REPLY) {
-    if (appBytes.length < 78) {
+    if (body.length < 78) {
       throw new RangeError('reply payload too short');
     }
-    const postIdHash = bytesToHex(appBytes.slice(2, 34));
-    const timestamp = Number(readU64BE(appBytes, 34));
-    const parentMessageHash = bytesToHex(appBytes.slice(42, 74));
-    const contentLen = readU32BE(appBytes, 74);
-    if (78 + contentLen > appBytes.length) {
+    const postIdHash = bytesToHex(body.slice(2, 34));
+    const timestamp = Number(readU64BE(body, 34));
+    const parentMessageHash = bytesToHex(body.slice(42, 74));
+    const contentLen = readU32BE(body, 74);
+    if (78 + contentLen > body.length) {
       throw new RangeError('reply: content length runs past buffer');
     }
-    const content = dec.decode(appBytes.slice(78, 78 + contentLen));
+    const content = dec.decode(body.slice(78, 78 + contentLen));
     return {
-      contentTag,
-      envelope: {
-        kind: 'reply',
-        postIdHash,
-        timestamp,
-        parentMessageHash,
-        content,
-      },
+      kind: 'reply',
+      postIdHash,
+      timestamp,
+      parentMessageHash,
+      content,
     };
   }
 

@@ -17,7 +17,6 @@
 import {
   computeMessageHashForMessage,
   deriveAddress,
-  encodeContents,
   generateECDSAPrivateKey,
   hexToBytes,
   signECDSAWithKey,
@@ -47,13 +46,13 @@ function makeSignedMessage(nonce: bigint, payload: Uint8Array): SignedMessage {
   const message: BAMMessage = {
     sender,
     nonce,
-    contents: encodeContents(TAG, payload),
+    contents: payload,
   };
-  const sigHex = signECDSAWithKey(priv, message, CHAIN_ID);
+  const sigHex = signECDSAWithKey(priv, message, TAG, CHAIN_ID);
   return {
     message,
     signature: hexToBytes(sigHex),
-    messageHash: computeMessageHashForMessage(message),
+    messageHash: computeMessageHashForMessage(message, TAG),
   };
 }
 
@@ -118,6 +117,41 @@ describe('malicious-registry eth_call DoS', () => {
     // skippedVerify incremented for every per-message verify (2 batches × 2 messages = 4).
     expect(counters.skippedVerify).toBe(4);
     expect(counters.decoded).toBe(0);
+  });
+
+  it('verifier uses contentTag from the event (not from any per-message field) so an aggregator cannot re-route', async () => {
+    // Land the message under the real BlobBatchRegistered.contentTag.
+    // We pin that the contentTag verifyMessage observes IS the one from
+    // the event — sourcing it from anywhere else would let an
+    // aggregator declare segment=B while smuggling a TAG-A-signed
+    // message inside.
+    const store = await createMemoryStore();
+    const counters = emptyCounters();
+    const m = makeSignedMessage(1n, new Uint8Array([1]));
+    const evt = makeEvent({
+      txHash: ('0x' + '33'.repeat(32)) as Bytes32,
+      signatureRegistry: ZERO_ADDRESS,
+      block: 100,
+    });
+    const seenTags: Bytes32[] = [];
+    await processBatch({
+      event: evt,
+      parentBeaconBlockRoot: null,
+      l1IncludedAtUnixSec: null,
+      store,
+      sources: {},
+      chainId: CHAIN_ID,
+      ethCallGasCap: 50_000_000n,
+      ethCallTimeoutMs: 5_000,
+      counters,
+      fetchBlob: async () => FAKE_BLOB,
+      decode: async () => ({ messages: [m.message], signatures: [m.signature] }),
+      verifyMessage: async (opts) => {
+        seenTags.push(opts.contentTag);
+        return true;
+      },
+    });
+    expect(seenTags).toEqual([evt.contentTag]);
   });
 
   it('treats a "gas exceeds allowance" revert as per-message skip + continues', async () => {
