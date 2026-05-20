@@ -113,9 +113,14 @@ contract BLSExposer is ReentrancyGuard, IERC_BAM_Exposer {
         uint64 nonce = _parseNonce(params.messageBytes);
         bytes calldata contents = params.messageBytes[26:];
 
-        // 5. Compute standardized hashes per ERC-BAM
-        bytes32 messageHash = keccak256(abi.encodePacked(sender, nonce, contents));
-        messageId = keccak256(abi.encodePacked(sender, nonce, params.versionedHash));
+        // 5. Compute standardized hashes per ERC-8180, with contentTag bound in.
+        //    A mismatched contentTag yields a different messageHash and the BLS
+        //    signature check below will reject it.
+        bytes32 messageHash =
+            keccak256(abi.encodePacked(sender, params.contentTag, nonce, contents));
+        messageId = keccak256(
+            abi.encodePacked(sender, params.contentTag, nonce, params.versionedHash)
+        );
         bytes32 signedHash = keccak256(abi.encodePacked(_DOMAIN, messageHash));
 
         // 6. Check not already exposed
@@ -180,9 +185,13 @@ contract BLSExposer is ReentrancyGuard, IERC_BAM_Exposer {
         uint64 nonce = _parseNonce(params.messageBytes);
         bytes calldata contents = params.messageBytes[26:];
 
-        // 5. Compute standardized hashes per ERC-BAM
-        bytes32 messageHash = keccak256(abi.encodePacked(sender, nonce, contents));
-        messageId = keccak256(abi.encodePacked(sender, nonce, contentHash));
+        // 5. Compute standardized hashes per ERC-8180, with contentTag bound in.
+        //    A mismatched contentTag yields a different messageHash and the BLS
+        //    signature check below will reject it.
+        bytes32 messageHash =
+            keccak256(abi.encodePacked(sender, params.contentTag, nonce, contents));
+        messageId =
+            keccak256(abi.encodePacked(sender, params.contentTag, nonce, contentHash));
         bytes32 signedHash = keccak256(abi.encodePacked(_DOMAIN, messageHash));
 
         // 6. Check not already exposed

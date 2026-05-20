@@ -147,7 +147,7 @@ forge fmt
 | BLSRegistry | `0x15866bf5a8724f2aa9fe75e262d8f00ba2818e25` |
 | ECDSARegistry | `0xF4Ce909305a112C2CBEC6b339a42f34bA8bf3381` |
 | SignatureRegistryDispatcher | `0x3431A94c9132b8a1b0c4aE8a80E7Ef0F0EC630Cf` |
-| BLSExposer | `0x443029b4b96fbf2d8feba77d828a394d19615a48` |
+| BLSExposer | _redeploy pending_ (interface changed to bind `contentTag`) |
 | SimpleBoolVerifier | `0xdec5faa3e32d6296e53bae7e359e059b58a482f4` |
 
 ## Future Work
