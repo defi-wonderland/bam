@@ -78,7 +78,10 @@ export interface DecodedMessage {
   contentTag: Bytes32;
   /** Raw signature bytes (65-byte ECDSA for scheme 0x01). */
   signature: Uint8Array;
-  /** ERC-8180 messageHash: keccak256(sender || contentTag || nonce || contents). Stable client-facing pre-batch identifier. */
+  /**
+   * ERC-8180 messageHash: `keccak256(sender || contentTag || nonce || contents)`.
+   * Stable client-facing pre-batch identifier.
+   */
   messageHash: Bytes32;
   /** Poster-side ingest time, ms since epoch; populated once the message has been inserted. */
   ingestedAt?: number;
