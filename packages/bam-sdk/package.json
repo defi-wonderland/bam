@@ -15,6 +15,10 @@
     "./browser": {
       "import": "./dist/esm/browser.js",
       "types": "./dist/types/browser.d.ts"
+    },
+    "./post-reply": {
+      "import": "./dist/esm/post-reply/index.js",
+      "types": "./dist/types/post-reply/index.d.ts"
     }
   },
   "files": [

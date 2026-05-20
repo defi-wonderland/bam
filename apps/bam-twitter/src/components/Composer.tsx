@@ -13,7 +13,7 @@ import {
 import type { Address } from 'viem';
 
 import { MAX_POST_CHARS, SEPOLIA_CHAIN_ID, TWITTER_TAG } from '@/lib/constants';
-import { encodeTwitterContents, type TwitterMessage } from '@/lib/contents-codec';
+import { encodePostReplyContents, type PostReplyMessage } from 'bam-sdk/post-reply';
 import { TWEETS_QUERY_KEY } from '@/lib/timeline';
 
 /**
@@ -62,7 +62,7 @@ export function Composer({ replyTo, onSent, placeholder, autoFocus }: ComposerPr
 
       const trySend = async (nonce: bigint): Promise<Response> => {
         const timestamp = Math.floor(Date.now() / 1000);
-        const app: TwitterMessage =
+        const app: PostReplyMessage =
           replyTo !== undefined
             ? {
                 kind: 'reply',
@@ -71,7 +71,7 @@ export function Composer({ replyTo, onSent, placeholder, autoFocus }: ComposerPr
                 content: content.trim(),
               }
             : { kind: 'post', timestamp, content: content.trim() };
-        const contents = encodeTwitterContents(app);
+        const contents = encodePostReplyContents(app);
 
         const signature = await signTypedDataAsync({
           domain: {

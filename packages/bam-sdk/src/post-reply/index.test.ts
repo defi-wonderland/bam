@@ -1,44 +1,44 @@
 import { describe, expect, it } from 'vitest';
-import type { Bytes32 } from 'bam-sdk';
+import type { Bytes32 } from '../browser.js';
 
 import {
-  decodeTwitterContents,
-  encodeTwitterContents,
-  type TwitterMessage,
-} from '../../src/lib/contents-codec';
+  decodePostReplyContents,
+  encodePostReplyContents,
+  type PostReplyMessage,
+} from './index.js';
 
 const PARENT = ('0x' + 'bb'.repeat(32)) as Bytes32;
 
-describe('encodeTwitterContents / decodeTwitterContents — post', () => {
+describe('encodePostReplyContents / decodePostReplyContents — post', () => {
   it('round-trips a plain ASCII post', () => {
-    const msg: TwitterMessage = {
+    const msg: PostReplyMessage = {
       kind: 'post',
       timestamp: 1_700_000_000,
       content: 'hello world',
     };
-    const encoded = encodeTwitterContents(msg);
-    const decoded = decodeTwitterContents(encoded);
+    const encoded = encodePostReplyContents(msg);
+    const decoded = decodePostReplyContents(encoded);
     expect(decoded).toEqual(msg);
   });
 
   it('round-trips unicode (emoji + CJK)', () => {
-    const msg: TwitterMessage = {
+    const msg: PostReplyMessage = {
       kind: 'post',
       timestamp: 1_800_000_000,
       content: '🐳 こんにちは',
     };
-    const encoded = encodeTwitterContents(msg);
-    expect(decodeTwitterContents(encoded)).toEqual(msg);
+    const encoded = encodePostReplyContents(msg);
+    expect(decodePostReplyContents(encoded)).toEqual(msg);
   });
 
   it('round-trips empty content', () => {
-    const msg: TwitterMessage = { kind: 'post', timestamp: 0, content: '' };
-    const encoded = encodeTwitterContents(msg);
-    expect(decodeTwitterContents(encoded)).toEqual(msg);
+    const msg: PostReplyMessage = { kind: 'post', timestamp: 0, content: '' };
+    const encoded = encodePostReplyContents(msg);
+    expect(decodePostReplyContents(encoded)).toEqual(msg);
   });
 
   it('byte 0 is the envelope version (0x01)', () => {
-    const encoded = encodeTwitterContents({
+    const encoded = encodePostReplyContents({
       kind: 'post',
       timestamp: 1,
       content: 'x',
@@ -47,7 +47,7 @@ describe('encodeTwitterContents / decodeTwitterContents — post', () => {
   });
 
   it('byte 1 is the kind byte (0x00 for post)', () => {
-    const encoded = encodeTwitterContents({
+    const encoded = encodePostReplyContents({
       kind: 'post',
       timestamp: 1,
       content: 'x',
@@ -56,32 +56,32 @@ describe('encodeTwitterContents / decodeTwitterContents — post', () => {
   });
 });
 
-describe('encodeTwitterContents / decodeTwitterContents — reply', () => {
+describe('encodePostReplyContents / decodePostReplyContents — reply', () => {
   it('round-trips a reply with parentMessageHash', () => {
-    const msg: TwitterMessage = {
+    const msg: PostReplyMessage = {
       kind: 'reply',
       timestamp: 1_700_000_000,
       parentMessageHash: PARENT,
       content: 'thoughtful reply',
     };
-    const encoded = encodeTwitterContents(msg);
-    const decoded = decodeTwitterContents(encoded);
+    const encoded = encodePostReplyContents(msg);
+    const decoded = decodePostReplyContents(encoded);
     expect(decoded).toEqual(msg);
   });
 
   it('round-trips a reply with empty content (image-only style)', () => {
-    const msg: TwitterMessage = {
+    const msg: PostReplyMessage = {
       kind: 'reply',
       timestamp: 0,
       parentMessageHash: PARENT,
       content: '',
     };
-    const encoded = encodeTwitterContents(msg);
-    expect(decodeTwitterContents(encoded)).toEqual(msg);
+    const encoded = encodePostReplyContents(msg);
+    expect(decodePostReplyContents(encoded)).toEqual(msg);
   });
 
   it('byte 1 is the kind byte (0x01 for reply)', () => {
-    const encoded = encodeTwitterContents({
+    const encoded = encodePostReplyContents({
       kind: 'reply',
       timestamp: 1,
       parentMessageHash: PARENT,
@@ -91,7 +91,7 @@ describe('encodeTwitterContents / decodeTwitterContents — reply', () => {
   });
 
   it('parentMessageHash sits at bytes [10..42]', () => {
-    const encoded = encodeTwitterContents({
+    const encoded = encodePostReplyContents({
       kind: 'reply',
       timestamp: 1,
       parentMessageHash: PARENT,
@@ -108,7 +108,7 @@ describe('encodeTwitterContents / decodeTwitterContents — reply', () => {
 
   it('rejects a non-32-byte parentMessageHash', () => {
     expect(() =>
-      encodeTwitterContents({
+      encodePostReplyContents({
         kind: 'reply',
         timestamp: 1,
         parentMessageHash: '0xdeadbeef' as Bytes32,
@@ -118,34 +118,34 @@ describe('encodeTwitterContents / decodeTwitterContents — reply', () => {
   });
 });
 
-describe('encodeTwitterContents / decodeTwitterContents — negatives', () => {
+describe('encodePostReplyContents / decodePostReplyContents — negatives', () => {
   it('rejects a buffer with no envelope header', () => {
-    expect(() => decodeTwitterContents(new Uint8Array(0))).toThrow();
-    expect(() => decodeTwitterContents(new Uint8Array(1))).toThrow();
+    expect(() => decodePostReplyContents(new Uint8Array(0))).toThrow();
+    expect(() => decodePostReplyContents(new Uint8Array(1))).toThrow();
   });
 
   it('rejects an unknown envelope version', () => {
-    const encoded = encodeTwitterContents({
+    const encoded = encodePostReplyContents({
       kind: 'post',
       timestamp: 1,
       content: 'x',
     });
     encoded[0] = 0x02;
-    expect(() => decodeTwitterContents(encoded)).toThrow(/version/);
+    expect(() => decodePostReplyContents(encoded)).toThrow(/version/);
   });
 
   it('rejects an unknown kind byte', () => {
-    const encoded = encodeTwitterContents({
+    const encoded = encodePostReplyContents({
       kind: 'post',
       timestamp: 1,
       content: 'x',
     });
     encoded[1] = 0x7f;
-    expect(() => decodeTwitterContents(encoded)).toThrow(/kind/);
+    expect(() => decodePostReplyContents(encoded)).toThrow(/kind/);
   });
 
   it('rejects a post body declaring a content length past the buffer', () => {
-    const encoded = encodeTwitterContents({
+    const encoded = encodePostReplyContents({
       kind: 'post',
       timestamp: 1,
       content: 'abc',
@@ -155,11 +155,11 @@ describe('encodeTwitterContents / decodeTwitterContents — negatives', () => {
     encoded[11] = 0xff;
     encoded[12] = 0xff;
     encoded[13] = 0xff;
-    expect(() => decodeTwitterContents(encoded)).toThrow();
+    expect(() => decodePostReplyContents(encoded)).toThrow();
   });
 
   it('rejects a reply body declaring a content length past the buffer', () => {
-    const encoded = encodeTwitterContents({
+    const encoded = encodePostReplyContents({
       kind: 'reply',
       timestamp: 1,
       parentMessageHash: PARENT,
@@ -170,16 +170,16 @@ describe('encodeTwitterContents / decodeTwitterContents — negatives', () => {
     encoded[43] = 0xff;
     encoded[44] = 0xff;
     encoded[45] = 0xff;
-    expect(() => decodeTwitterContents(encoded)).toThrow();
+    expect(() => decodePostReplyContents(encoded)).toThrow();
   });
 
   it('rejects a buffer with truncated post body', () => {
-    const encoded = encodeTwitterContents({
+    const encoded = encodePostReplyContents({
       kind: 'post',
       timestamp: 1,
       content: 'abc',
     });
-    expect(() => decodeTwitterContents(encoded.slice(0, encoded.length - 1))).toThrow();
+    expect(() => decodePostReplyContents(encoded.slice(0, encoded.length - 1))).toThrow();
   });
 
   it('rejects a reply body with invalid UTF-8 content', () => {
@@ -199,6 +199,6 @@ describe('encodeTwitterContents / decodeTwitterContents — negatives', () => {
     // content: invalid UTF-8 (lone continuation bytes)
     body[46] = 0x80;
     body[47] = 0x80;
-    expect(() => decodeTwitterContents(body)).toThrow();
+    expect(() => decodePostReplyContents(body)).toThrow();
   });
 });

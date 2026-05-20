@@ -1,13 +1,17 @@
 /**
- * bam-twitter's app-opaque codec for the body bytes the BAM `contents`
- * field carries. Multiple message kinds (post, reply) share the same
- * contentTag and one feed; the kind byte discriminates.
+ * Generic post/reply codec for the body bytes that the BAM `contents`
+ * field carries. Two message kinds (`post`, `reply`) share one
+ * `contentTag` and one feed; the kind byte discriminates. Used by
+ * bam-twitter today; any app that wants flat post + one-level reply
+ * threading can pick a unique `contentTag` and reuse this codec.
  *
  * After the tag-binding rework, the body IS `contents` — no 32-byte
  * tag prefix. `contentTag` is bound by the BAM core via the
- * batch-registration event and the `messageHash` formula.
+ * batch-registration event and the `messageHash` formula
+ * (`keccak256(sender ‖ contentTag ‖ nonce ‖ contents)`), so the codec
+ * does not see or carry the tag at all.
  *
- * Layout:
+ * Layout (inside `contents`):
  *   byte  0       : version (uint8) — currently 0x01
  *   byte  1       : kind    (uint8) — 0=post, 1=reply
  *   bytes 2..     : kind-specific payload
@@ -23,16 +27,17 @@
  *     bytes 40..44 : uint32 BE UTF-8 content length
  *     bytes 44..   : UTF-8 content
  *
- * Single source of truth for both Composer and Timeline.
+ * Single source of truth for Composers (FE) and indexer `post-reply`
+ * handlers.
  */
 
-import type { Bytes32 } from 'bam-sdk/browser';
+import type { Bytes32 } from '../browser.js';
 
 const ENVELOPE_VERSION = 0x01;
 const KIND_POST = 0x00;
 const KIND_REPLY = 0x01;
 
-export type TwitterMessage =
+export type PostReplyMessage =
   | { kind: 'post'; timestamp: number; content: string }
   | {
       kind: 'reply';
@@ -44,7 +49,7 @@ export type TwitterMessage =
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder('utf-8', { fatal: true });
 
-export function encodeTwitterContents(msg: TwitterMessage): Uint8Array {
+export function encodePostReplyContents(msg: PostReplyMessage): Uint8Array {
   if (
     !Number.isInteger(msg.timestamp) ||
     msg.timestamp < 0 ||
@@ -83,48 +88,48 @@ export function encodeTwitterContents(msg: TwitterMessage): Uint8Array {
 }
 
 /**
- * Inverse of `encodeTwitterContents`. Throws on short buffer, unknown
+ * Inverse of `encodePostReplyContents`. Throws on short buffer, unknown
  * version/kind, declared content length that overruns the payload, or
  * invalid UTF-8.
  */
-export function decodeTwitterContents(body: Uint8Array): TwitterMessage {
-  if (body.length < 2) {
-    throw new RangeError('twitter contents too short for envelope header');
+export function decodePostReplyContents(contents: Uint8Array): PostReplyMessage {
+  if (contents.length < 2) {
+    throw new RangeError('post-reply contents too short for envelope header');
   }
-  const version = body[0];
-  const kind = body[1];
+  const version = contents[0];
+  const kind = contents[1];
   if (version !== ENVELOPE_VERSION) {
     throw new RangeError(`unsupported envelope version: ${version}`);
   }
 
   if (kind === KIND_POST) {
-    if (body.length < 14) {
+    if (contents.length < 14) {
       throw new RangeError('post payload too short');
     }
-    const timestamp = Number(readU64BE(body, 2));
-    const contentLen = readU32BE(body, 10);
-    if (14 + contentLen > body.length) {
+    const timestamp = Number(readU64BE(contents, 2));
+    const contentLen = readU32BE(contents, 10);
+    if (14 + contentLen > contents.length) {
       throw new RangeError('post: content length runs past buffer');
     }
-    const content = textDecoder.decode(body.slice(14, 14 + contentLen));
+    const content = textDecoder.decode(contents.slice(14, 14 + contentLen));
     return { kind: 'post', timestamp, content };
   }
 
   if (kind === KIND_REPLY) {
-    if (body.length < 46) {
+    if (contents.length < 46) {
       throw new RangeError('reply payload too short');
     }
-    const timestamp = Number(readU64BE(body, 2));
-    const parentMessageHash = bytesToHex(body.slice(10, 42)) as Bytes32;
-    const contentLen = readU32BE(body, 42);
-    if (46 + contentLen > body.length) {
+    const timestamp = Number(readU64BE(contents, 2));
+    const parentMessageHash = bytesToHex(contents.slice(10, 42)) as Bytes32;
+    const contentLen = readU32BE(contents, 42);
+    if (46 + contentLen > contents.length) {
       throw new RangeError('reply: content length runs past buffer');
     }
-    const content = textDecoder.decode(body.slice(46, 46 + contentLen));
+    const content = textDecoder.decode(contents.slice(46, 46 + contentLen));
     return { kind: 'reply', timestamp, parentMessageHash, content };
   }
 
-  throw new RangeError(`unknown twitter kind: ${kind}`);
+  throw new RangeError(`unknown post-reply kind: ${kind}`);
 }
 
 function writeU32BE(buf: Uint8Array, offset: number, value: number): void {
