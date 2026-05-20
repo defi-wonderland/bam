@@ -24,7 +24,6 @@
  */
 
 import type { Pool, PoolClient } from 'pg';
-import type { Bytes32 } from 'bam-sdk';
 import type { MessageRow } from 'bam-store';
 
 import type { IndexerHandler } from './handler.js';
@@ -36,8 +35,7 @@ import {
 } from './cursor.js';
 import type { EnricherPool } from '../enrichers/types.js';
 import type { BamStoreSource, ReorgEntry } from '../source/bam-store-source.js';
-import type { IndexerLogger, HandlerCounters } from '../types.js';
-import { emptyHandlerCounters } from '../types.js';
+import { emptyHandlerCounters, type IndexerLogger, type HandlerCounters } from '../types.js';
 
 export interface TickOptions {
   chainId: number;
@@ -191,7 +189,7 @@ async function projectOne<E>(
   } catch (err) {
     counters.skippedConflict += 1;
     opts.logger({
-      event: 'handler_skipped_conflict',
+      event: 'run_in_txn_handler_skipped_conflict',
       handler: handler.name,
       contentTag: handler.contentTag,
       detail: {
@@ -226,7 +224,7 @@ async function reorgOne<E>(
   };
   try {
     await runInTxn(opts.writePool, async (txn) => {
-      await handler.onReorg(entry.txHash as Bytes32, opts.chainId, txn);
+      await handler.onReorg(entry.txHash, opts.chainId, txn);
       await upsertCursor(txn, advanced);
     });
     counters.reorged += 1;
@@ -240,7 +238,7 @@ async function reorgOne<E>(
     return advanced;
   } catch (err) {
     opts.logger({
-      event: 'handler_skipped_conflict',
+      event: 'reorg_one_handler_skipped_conflict',
       handler: handler.name,
       contentTag: handler.contentTag,
       detail: {

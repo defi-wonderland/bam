@@ -6,8 +6,7 @@
  * `extras` bag lets tests substitute fakes.
  */
 
-import type { Pool } from 'pg';
-import pg from 'pg';
+import pg, { type Pool } from 'pg';
 
 import type { IndexerHandler } from './framework/handler.js';
 import { HandlerRegistry } from './framework/registry.js';
@@ -126,8 +125,8 @@ export async function createIndexer(
     async tickOnce() {
       return await runTick();
     },
-    async health() {
-      return { port: http_.port(), host: http_.hostname() };
+    health() {
+      return Promise.resolve({ port: http_.port(), host: http_.hostname() });
     },
     async resetHandler(name: string) {
       const handler = registry.get(name);

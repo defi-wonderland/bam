@@ -125,28 +125,37 @@ export function buildPostReplyRoutes(
    * - `?version=<uuid>` → that specific row's version_id (validates
    *   the row exists for this handler).
    * - omitted → the current generation's version_id.
-   * Returns `null` if `?version=` was supplied but invalid or
-   * unknown — caller should `badRequest`.
+   * `{kind:'invalid'}` = caller should respond with 400; `{kind:'missing-current'}`
+   * = 404 (no current generation bootstrapped yet).
    */
+  type VersionResolution =
+    | { kind: 'ok'; versionId: string }
+    | { kind: 'invalid' }
+    | { kind: 'missing-current' };
+
   const resolveVersionId = async (
     db: PoolClient,
     raw: string | null,
-  ): Promise<string | null | 'missing-current'> => {
+  ): Promise<VersionResolution> => {
     if (raw !== null && raw !== '') {
-      if (!UUID_RE.test(raw)) return null;
+      if (!UUID_RE.test(raw)) return { kind: 'invalid' };
       const r = await db.query<{ version_id: string }>(
         `SELECT version_id FROM ${INDEXER_SCHEMA}.${CURSOR_TABLE}
           WHERE handler_name = $1 AND version_id = $2`,
         [handlerName, raw.toLowerCase()],
       );
-      return r.rowCount === 0 ? null : r.rows[0].version_id;
+      return r.rowCount === 0
+        ? { kind: 'invalid' }
+        : { kind: 'ok', versionId: r.rows[0].version_id };
     }
     const r = await db.query<{ version_id: string }>(
       `SELECT version_id FROM ${INDEXER_SCHEMA}.${CURSOR_TABLE}
         WHERE handler_name = $1 AND is_current`,
       [handlerName],
     );
-    return r.rowCount === 0 ? 'missing-current' : r.rows[0].version_id;
+    return r.rowCount === 0
+      ? { kind: 'missing-current' }
+      : { kind: 'ok', versionId: r.rows[0].version_id };
   };
 
   /**
@@ -168,9 +177,10 @@ export function buildPostReplyRoutes(
     if (sender !== null && !HEX_ADDRESS_RE.test(sender)) return badRequest(res, 'sender');
     if (since !== null && !/^\d+$/.test(since)) return badRequest(res, 'since');
 
-    const versionId = await resolveVersionId(db, url.searchParams.get('version'));
-    if (versionId === null) return badRequest(res, 'version');
-    if (versionId === 'missing-current') return notFound(res);
+    const resolved = await resolveVersionId(db, url.searchParams.get('version'));
+    if (resolved.kind === 'invalid') return badRequest(res, 'version');
+    if (resolved.kind === 'missing-current') return notFound(res);
+    const versionId = resolved.versionId;
 
     const where: string[] = ['kind = 0', 'version_id = $1'];
     const params: unknown[] = [versionId];
@@ -211,9 +221,10 @@ export function buildPostReplyRoutes(
     const id = url.pathname.slice(POST_BY_ID_PREFIX.length);
     if (!HEX_BYTES32_RE.test(id)) return badRequest(res, 'messageId');
 
-    const versionId = await resolveVersionId(db, url.searchParams.get('version'));
-    if (versionId === null) return badRequest(res, 'version');
-    if (versionId === 'missing-current') return notFound(res);
+    const resolved = await resolveVersionId(db, url.searchParams.get('version'));
+    if (resolved.kind === 'invalid') return badRequest(res, 'version');
+    if (resolved.kind === 'missing-current') return notFound(res);
+    const versionId = resolved.versionId;
 
     const result = await db.query<PostRow>(
       `SELECT message_id, message_hash, sender, nonce, kind, timestamp, content,
@@ -245,9 +256,10 @@ export function buildPostReplyRoutes(
     if (limit === null) return badRequest(res, 'limit');
     if (parent === null || !HEX_BYTES32_RE.test(parent)) return badRequest(res, 'parentMessageHash');
 
-    const versionId = await resolveVersionId(db, url.searchParams.get('version'));
-    if (versionId === null) return badRequest(res, 'version');
-    if (versionId === 'missing-current') return notFound(res);
+    const resolved = await resolveVersionId(db, url.searchParams.get('version'));
+    if (resolved.kind === 'invalid') return badRequest(res, 'version');
+    if (resolved.kind === 'missing-current') return notFound(res);
+    const versionId = resolved.versionId;
 
     const result = await db.query<PostRow>(
       `SELECT message_id, message_hash, sender, nonce, kind, timestamp, content,
@@ -280,9 +292,10 @@ export function buildPostReplyRoutes(
     const limit = parseLimit(url.searchParams.get('limit'));
     if (limit === null) return badRequest(res, 'limit');
 
-    const versionId = await resolveVersionId(db, url.searchParams.get('version'));
-    if (versionId === null) return badRequest(res, 'version');
-    if (versionId === 'missing-current') return notFound(res);
+    const resolved = await resolveVersionId(db, url.searchParams.get('version'));
+    if (resolved.kind === 'invalid') return badRequest(res, 'version');
+    if (resolved.kind === 'missing-current') return notFound(res);
+    const versionId = resolved.versionId;
 
     const lower = sender.toLowerCase();
     const result = await db.query<PostRow>(

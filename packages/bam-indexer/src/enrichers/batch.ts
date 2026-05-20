@@ -17,7 +17,7 @@ import type {
 import type { EnricherPool } from './types.js';
 
 export class BatchEnricherPool implements EnricherPool {
-  async resolve(
+  resolve(
     handler: IndexerHandler<unknown>,
     _row: MessageRow,
   ): Promise<EnrichmentResult> {
@@ -25,7 +25,7 @@ export class BatchEnricherPool implements EnricherPool {
     for (const req of handler.enrichments ?? []) {
       this.resolveOne(req, out);
     }
-    return out;
+    return Promise.resolve(out);
   }
 
   private resolveOne(req: EnrichmentRequest, out: EnrichmentResult): void {
