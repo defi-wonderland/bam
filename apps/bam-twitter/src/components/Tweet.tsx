@@ -28,7 +28,7 @@ export function Tweet({ tweet, replies = [] }: TweetProps) {
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-4 hover:bg-slate-50 transition-colors">
       <div className="flex items-center justify-between mb-1">
-        <AddressLink address={tweet.sender} className="text-sm" />
+        <AddressLink address={tweet.sender} ensName={tweet.senderEns} className="text-sm" />
         <div className="flex items-center gap-2">
           <span className="text-xs text-slate-400">{time}</span>
           <span
@@ -74,7 +74,7 @@ export function Tweet({ tweet, replies = [] }: TweetProps) {
           <Composer
             replyTo={tweet.id as Bytes32}
             onSent={() => setShowReply(false)}
-            placeholder={`Reply to ${tweet.sender.slice(0, 6)}…`}
+            placeholder={`Reply to ${tweet.senderEns ?? `${tweet.sender.slice(0, 6)}…`}`}
             autoFocus
           />
         </div>

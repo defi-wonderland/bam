@@ -6,12 +6,16 @@
  * interval regardless of how many components subscribe.
  */
 
-import { decodeTwitterContents } from './contents-codec';
+import { decodePostReplyContents } from 'bam-sdk/post-reply';
 import type { Bytes32 } from 'bam-sdk/browser';
+
+import type { ConfirmedRow } from './confirmed-row';
 
 export interface DisplayTweet {
   id: string;
   sender: string;
+  /** Primary ENS for `sender`. Resolved client-side; `null` when unresolved, `undefined` until lookup completes. */
+  senderEns?: string | null;
   nonce: string;
   timestamp: number;
   content: string;
@@ -28,15 +32,6 @@ interface PosterPendingRow {
   contents: string;
   messageHash: string;
   ingestedAt: number;
-}
-
-interface ConfirmedRow {
-  message_id: string;
-  sender: string;
-  nonce: string;
-  contents: string;
-  tx_hash: string | null;
-  block_number: number | null;
 }
 
 function hexToBytes(hex: string): Uint8Array {
@@ -57,7 +52,7 @@ function safeDecode(contentsHex: string): {
   parentMessageHash: Bytes32 | null;
 } | null {
   try {
-    const { app } = decodeTwitterContents(hexToBytes(contentsHex));
+    const { app } = decodePostReplyContents(hexToBytes(contentsHex));
     if (app.kind === 'reply') {
       return {
         timestamp: app.timestamp,
@@ -102,6 +97,24 @@ async function fetchConfirmed(): Promise<DisplayTweet[]> {
   const data = (await res.json()) as { messages?: ConfirmedRow[] };
   const out: DisplayTweet[] = [];
   for (const m of data.messages ?? []) {
+    // Indexer-decoded path: timestamp/content/kind already shipped.
+    if (m.timestamp !== undefined && m.content !== undefined) {
+      out.push({
+        id: m.message_id,
+        sender: m.sender,
+        nonce: m.nonce,
+        timestamp: m.timestamp,
+        content: m.content,
+        parentMessageHash:
+          m.parent_message_hash === undefined ? null : (m.parent_message_hash as Bytes32 | null),
+        status: 'posted',
+        tx_hash: m.tx_hash,
+        block_number: m.block_number,
+      });
+      continue;
+    }
+    // Reader-fallback path: contents arrives as hex; decode here.
+    if (m.contents === undefined) continue;
     const app = safeDecode(m.contents);
     if (app === null) continue;
     out.push({

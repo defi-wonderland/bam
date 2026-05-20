@@ -326,6 +326,34 @@ importers:
         specifier: ^1.2.0
         version: 1.6.1(@types/node@20.19.37)(happy-dom@15.11.7)(jsdom@29.0.2(@noble/hashes@1.8.0))
 
+  packages/bam-indexer:
+    dependencies:
+      bam-sdk:
+        specifier: workspace:*
+        version: link:../bam-sdk
+      bam-store:
+        specifier: workspace:*
+        version: link:../bam-store
+      dotenv:
+        specifier: ^16.4.5
+        version: 16.6.1
+      pg:
+        specifier: ^8.12.0
+        version: 8.20.0
+      viem:
+        specifier: ^2.21.0
+        version: 2.47.4(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)(zod@4.3.6)
+    devDependencies:
+      '@electric-sql/pglite':
+        specifier: ^0.2.0
+        version: 0.2.17
+      '@types/node':
+        specifier: ^20.11.0
+        version: 20.19.37
+      '@types/pg':
+        specifier: ^8.11.6
+        version: 8.11.6
+
   packages/bam-poster:
     dependencies:
       bam-sdk:
