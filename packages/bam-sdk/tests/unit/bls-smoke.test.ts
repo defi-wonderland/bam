@@ -66,4 +66,24 @@ describe('BLS sign/verify smoke', () => {
     const wrong = ('0x' + 'dd'.repeat(32)) as Bytes32;
     expect(await verifyBLS(pub, wrong, sig)).toBe(false);
   });
+
+  it('signBLS rejects a non-32-byte messageHash with a clear error', async () => {
+    // `Bytes32` is just `0x${string}` — the type checker does not
+    // enforce length. A caller could accidentally hand a 2-byte or
+    // 64-byte hex string; the SDK MUST refuse, otherwise the BLS
+    // signature would never interoperate with on-chain `bytes32`
+    // registries.
+    const tooShort = '0xabcd' as Bytes32;
+    await expect(signBLS(PRIV, tooShort)).rejects.toThrow(/32 bytes/);
+
+    const tooLong = ('0x' + 'aa'.repeat(33)) as Bytes32;
+    await expect(signBLS(PRIV, tooLong)).rejects.toThrow(/32 bytes/);
+  });
+
+  it('verifyBLS returns false on a non-32-byte messageHash (consistent with bad-signature path)', async () => {
+    const sig = await signBLS(PRIV, HASH);
+    const pub = deriveBLSPublicKey(PRIV);
+    expect(await verifyBLS(pub, '0xabcd' as Bytes32, sig)).toBe(false);
+    expect(await verifyBLS(pub, ('0x' + 'aa'.repeat(33)) as Bytes32, sig)).toBe(false);
+  });
 });

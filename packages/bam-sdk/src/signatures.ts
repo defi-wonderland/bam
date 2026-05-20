@@ -208,15 +208,33 @@ export function deriveBLSPublicKey(privateKey: BLSPrivateKey): BLSPublicKey {
   return bls.getPublicKey(privateKey);
 }
 
+/**
+ * Decode a `Bytes32` hex string to exactly 32 raw bytes, or throw.
+ * The `Bytes32` type alias is just `0x${string}` with no length
+ * enforcement, so a caller passing `'0xabcd'` would silently produce a
+ * 2-byte input — fine for @noble's `sign`/`verify`, but the resulting
+ * signature can never interoperate with on-chain `bytes32 messageHash`
+ * registries. Fail fast at the SDK boundary.
+ */
+function bytes32HexToBytes(hash: Bytes32): Uint8Array {
+  const raw = hexToBytes(hash);
+  if (raw.length !== 32) {
+    throw new SignatureError(
+      `messageHash must decode to exactly 32 bytes, got ${raw.length}`
+    );
+  }
+  return raw;
+}
+
 export async function signBLS(
   privateKey: BLSPrivateKey,
   messageHash: Bytes32
 ): Promise<BLSSignature> {
+  // @noble/bls12-381 requires raw bytes for the message — passing a
+  // 0x-prefixed hex string fails with "Invalid byte sequence".
+  const hashBytes = bytes32HexToBytes(messageHash);
   try {
-    // @noble/bls12-381 requires raw bytes for the message — passing a
-    // 0x-prefixed hex string fails with "Invalid byte sequence".
-    const signature = await bls.sign(hexToBytes(messageHash), privateKey);
-    return signature;
+    return await bls.sign(hashBytes, privateKey);
   } catch (error) {
     throw new SignatureError(
       `BLS signing failed: ${error instanceof Error ? error.message : String(error)}`
@@ -229,8 +247,16 @@ export async function verifyBLS(
   messageHash: Bytes32,
   signature: BLSSignature
 ): Promise<boolean> {
+  // Reject non-32-byte hashes the same way bls.verify rejects bad
+  // signatures — false, not a throw.
+  let hashBytes: Uint8Array;
   try {
-    return await bls.verify(signature, hexToBytes(messageHash), publicKey);
+    hashBytes = bytes32HexToBytes(messageHash);
+  } catch {
+    return false;
+  }
+  try {
+    return await bls.verify(signature, hashBytes, publicKey);
   } catch {
     return false;
   }
