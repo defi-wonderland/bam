@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>BAM — Blob Authenticated Messaging</title>
+    <meta
+      name="description"
+      content="Cheap, verifiable social data over EIP-4844 blobs."
+    />
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="hero">
+        <p class="status"><span class="dot" aria-hidden="true"></span>live on sepolia</p>
+        <p class="eyebrow">EIP-4844 · ERC-8180 · ERC-8179</p>
+        <h1>BAM</h1>
+        <p class="tagline">
+          Blob Authenticated Messaging. Cheap, verifiable social data,
+          packed into blobs.
+        </p>
+
+        <div class="stage" aria-hidden="true">
+          <svg width="0" height="0" style="position: absolute">
+            <defs>
+              <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0%" stop-color="#a78bfa" />
+                <stop offset="100%" stop-color="#6366f1" />
+              </linearGradient>
+              <symbol id="blob-shape" viewBox="0 0 100 60">
+                <path
+                  d="M22,14 C42,4 72,8 86,24 C96,40 80,54 56,55 C30,56 10,46 12,30 C13,22 16,18 22,14 Z"
+                  fill="url(#bg)"
+                />
+              </symbol>
+            </defs>
+          </svg>
+
+          <span class="source s1">twitter</span>
+          <span class="source s2">forum</span>
+          <span class="source s3">blog</span>
+
+          <span class="msg c1" style="animation-delay: -0.1s">gm fren</span>
+          <span class="msg c1" style="animation-delay: -0.9s">just shipped the new release notes for v3</span>
+          <span class="msg c1" style="animation-delay: -1.4s">wagmi</span>
+          <span class="msg c1" style="animation-delay: -2.2s">anyone else seeing this issue with 4844?</span>
+          <span class="msg c1" style="animation-delay: -2.7s">lfg new tag dropped, big if true</span>
+          <span class="msg c2" style="animation-delay: -0.4s">+1 to op's proposal, makes total sense to me</span>
+          <span class="msg c2" style="animation-delay: -1.1s">have we considered the alt approach here?</span>
+          <span class="msg c2" style="animation-delay: -1.8s">ack on it</span>
+          <span class="msg c2" style="animation-delay: -2.5s">see the long thread on EIP-7702 from last week</span>
+          <span class="msg c2" style="animation-delay: -3.1s">agreed, this is the way</span>
+          <span class="msg c3" style="animation-delay: -0.2s">first!</span>
+          <span class="msg c3" style="animation-delay: -0.7s">this is gold, saving for later</span>
+          <span class="msg c3" style="animation-delay: -1.3s">tldr?</span>
+          <span class="msg c3" style="animation-delay: -1.9s">love this, more posts like this please</span>
+          <span class="msg c3" style="animation-delay: -2.5s">where can I learn more about KZG?</span>
+
+          <span class="batch">batch</span>
+
+          <div class="chain">
+            <svg class="b" style="animation-delay: 0s"><use href="#blob-shape" /></svg>
+            <svg class="b" style="animation-delay: -1.4s"><use href="#blob-shape" /></svg>
+            <svg class="b" style="animation-delay: -2.8s"><use href="#blob-shape" /></svg>
+            <svg class="b" style="animation-delay: -4.2s"><use href="#blob-shape" /></svg>
+            <svg class="b" style="animation-delay: -5.6s"><use href="#blob-shape" /></svg>
+          </div>
+        </div>
+      </header>
+
+      <section class="stack">
+        <h2>The bamstack</h2>
+        <div class="layers">
+          <div class="layer">
+            <div class="layer-tag">apps</div>
+            <div class="layer-body">twitter · comments · blog · ...</div>
+          </div>
+
+          <div class="layer-edge">
+            <span>read</span><span class="bar">⇅</span><span>write</span>
+          </div>
+
+          <div class="layer layer-main">
+            <div class="layer-tag">bamstack<span class="layer-badge">open alpha</span></div>
+            <div class="layer-cells">
+              <a class="cell" target="_blank" rel="noopener noreferrer" href="https://github.com/defi-wonderland/bam/tree/main/packages/bam-sdk">
+                <div class="cell-name">bam-sdk</div>
+                <div class="cell-desc">encode · sign · prove</div>
+              </a>
+              <a class="cell" target="_blank" rel="noopener noreferrer" href="https://github.com/defi-wonderland/bam/tree/main/packages/bam-poster">
+                <div class="cell-name">bam-poster</div>
+                <div class="cell-desc">batch · submit</div>
+              </a>
+              <a class="cell" target="_blank" rel="noopener noreferrer" href="https://github.com/defi-wonderland/bam/tree/main/packages/bam-reader">
+                <div class="cell-name">bam-reader</div>
+                <div class="cell-desc">tail · verify · serve</div>
+              </a>
+              <div class="cell">
+                <div class="cell-name">bam-indexer <span class="cell-badge">in progress</span></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="layer-edge">
+            <span>post</span><span class="bar">⇅</span><span>tail</span>
+          </div>
+
+          <div class="layer">
+            <div class="layer-tag">L1</div>
+            <div class="layer-body">EIP-4844 blob data availability</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="ercs">
+        <h2>Specs</h2>
+        <ul>
+          <li>
+            <a target="_blank" rel="noopener noreferrer" href="https://eips.ethereum.org/EIPS/eip-8180">ERC-8180</a>
+            <span>Blob Authenticated Messaging — decoder + signature registry</span>
+          </li>
+          <li>
+            <a target="_blank" rel="noopener noreferrer" href="https://eips.ethereum.org/EIPS/eip-8179">ERC-8179</a>
+            <span>Blob Space Segments — sub-blob coordination</span>
+          </li>
+        </ul>
+      </section>
+
+      <section class="demos">
+        <h2>Built with bam</h2>
+        <ul>
+          <li>
+            <a target="_blank" rel="noopener noreferrer" href="https://bam-message-in-a-blobble.vercel.app/">message-in-a-blobble</a>
+            <span>sign a message in the browser, post it to a blob</span>
+          </li>
+          <li>
+            <a target="_blank" rel="noopener noreferrer" href="https://bam-bam-twitter.vercel.app/">bam-twitter</a>
+            <span>twitter-style feed sharing one poster + reader</span>
+          </li>
+          <li>
+            <a target="_blank" rel="noopener noreferrer" href="https://comments.bamstack.eth.limo">bam-comments</a>
+            <span>embeddable comments widget, one script tag</span>
+          </li>
+          <li>
+            <a target="_blank" rel="noopener noreferrer" href="https://github.com/defi-wonderland/bam/tree/main/apps/bam-explorer">bam-explorer</a>
+            <span>read-only dashboard for posters and readers</span>
+          </li>
+          <li>
+            <a target="_blank" rel="noopener noreferrer" href="https://github.com/defi-wonderland/bam/tree/main/apps/bam-sdk-test">bam-sdk-test</a>
+            <span>playground for every sdk surface</span>
+          </li>
+          <li>
+            <a target="_blank" rel="noopener noreferrer" href="https://github.com/defi-wonderland/bam/tree/main/apps/bam-blob-calc">bam-blob-calc</a>
+            <span>blob cost calculator</span>
+          </li>
+        </ul>
+      </section>
+
+      <footer class="foot">
+        <a class="primary" target="_blank" rel="noopener noreferrer" href="https://github.com/defi-wonderland/bam">github.com/defi-wonderland/bam →</a>
+        <span class="by">by <a target="_blank" rel="noopener noreferrer" href="https://wonderland.xyz">wonderland</a></span>
+      </footer>
+    </main>
+  </body>
+</html>

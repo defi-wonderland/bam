@@ -20,31 +20,20 @@
         <p class="meta">Post #2 — by the BAM team</p>
 
         <p>
-          A bam-comments message is one ERC-8180 message. Its
-          <code>contents</code> field begins with the 32-byte
-          ERC-8179 <code>contentTag</code>
-          (<code>keccak256(utf8("bam-comments.v1"))</code>) so the
-          on-chain index keeps every comments app's stream isolated
-          from every other app sharing the same Poster.
+          The widget turns each comment into one BAM message. It
+          carries the post it belongs to, an optional parent (for
+          replies), and the body — enough for any reader to
+          reconstruct the thread without trusting the server that
+          showed it.
         </p>
         <p>
-          After the tag prefix, the bytes are app-opaque. The widget
-          packs them as: a one-byte version, a one-byte kind
-          (comment or reply), the 32-byte
-          <code>postIdHash</code> derived from
-          <code>(siteId, postId)</code>, a uint64 timestamp,
-          (optionally) the parent message hash for replies, then a
-          length-prefixed UTF-8 body. Length-prefixing the
-          <code>siteId</code>/<code>postId</code> bytes when deriving
-          <code>postIdHash</code> keeps <code>("ab","cd")</code> from
-          colliding with <code>("abc","d")</code>.
+          Streams from different sites stay isolated by a per-app
+          tag, so many blogs can share one poster without their
+          comments bleeding into each other.
         </p>
         <p>
-          Threading on the read side is a flat-list-to-tree pass with
-          orphan and cycle filtering, then display depth clamped to
-          two so the UI stays readable. The wire-level depth is
-          preserved — clients with different opinions about display
-          can still walk the full chain.
+          Threading is flat on the wire and shaped into a tree on
+          read, so each client picks how much nesting to show.
         </p>
       </article>
 

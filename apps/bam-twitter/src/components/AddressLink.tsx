@@ -6,13 +6,16 @@ const SEPOLIA_ETHERSCAN = 'https://sepolia.etherscan.io';
 
 interface AddressLinkProps {
   address: string;
+  /** ENS primary name. When set, displayed instead of the truncated address; copy + Etherscan target stays the address. */
+  ensName?: string | null;
   className?: string;
   short?: boolean;
 }
 
-export function AddressLink({ address, className = '', short = true }: AddressLinkProps) {
+export function AddressLink({ address, ensName, className = '', short = true }: AddressLinkProps) {
   const [copied, setCopied] = useState(false);
-  const display = short ? `${address.slice(0, 6)}...${address.slice(-4)}` : address;
+  const truncated = `${address.slice(0, 6)}...${address.slice(-4)}`;
+  const display = ensName ?? (short ? truncated : address);
   const url = `${SEPOLIA_ETHERSCAN}/address/${address}`;
 
   async function handleCopy(e: React.MouseEvent) {

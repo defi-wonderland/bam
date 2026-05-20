@@ -1,0 +1,45 @@
+{
+  "name": "bam-indexer",
+  "version": "0.1.0",
+  "description": "BAM Indexer — Node service that consumes the bam-reader output, materializes app-shaped entities (per-contentTag handlers), augments with on-chain state (ENS / stake / allowlist), and serves a multi-consumer REST API. Sits above bam-reader and below per-FE BFFs.",
+  "type": "module",
+  "main": "dist/esm/index.js",
+  "module": "dist/esm/index.js",
+  "types": "dist/types/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/esm/index.js",
+      "types": "./dist/types/index.d.ts"
+    }
+  },
+  "bin": {
+    "bam-indexer": "./dist/esm/bin/bam-indexer.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.esm.json && tsc -p tsconfig.types.json",
+    "clean": "rm -rf dist",
+    "dev": "pnpm build && node dist/esm/bin/bam-indexer.js serve",
+    "test": "vitest",
+    "test:run": "vitest --run",
+    "lint": "eslint src tests"
+  },
+  "dependencies": {
+    "bam-sdk": "workspace:*",
+    "bam-store": "workspace:*",
+    "dotenv": "^16.4.5",
+    "pg": "^8.12.0",
+    "viem": "^2.21.0"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.2.0",
+    "@types/node": "^20.11.0",
+    "@types/pg": "^8.11.6"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "license": "MIT"
+}

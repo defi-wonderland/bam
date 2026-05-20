@@ -8,6 +8,7 @@ import { BlsSection } from '@/components/BlsSection';
 import { BatchSection } from '@/components/BatchSection';
 import { ExposureSection } from '@/components/ExposureSection';
 import { BpeSection } from '@/components/BpeSection';
+import { BpeBatchSection } from '@/components/BpeBatchSection';
 import { CompressionSection } from '@/components/CompressionSection';
 
 const NAV: Array<{ id: string; label: string }> = [
@@ -18,6 +19,7 @@ const NAV: Array<{ id: string; label: string }> = [
   { id: 'batch', label: 'Batch' },
   { id: 'exposure', label: 'Exposure' },
   { id: 'bpe', label: 'BPE' },
+  { id: 'bpe-batch', label: 'BPE Batch' },
   { id: 'compression', label: 'Compression' },
 ];
 
@@ -54,6 +56,7 @@ export default function Home() {
       <BatchSection />
       <ExposureSection />
       <BpeSection />
+      <BpeBatchSection />
       <CompressionSection />
 
       <footer className="mt-8 text-xs text-neutral-500 dark:text-neutral-400">
