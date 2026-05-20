@@ -145,15 +145,15 @@ describe('triggered-but-excluded steady state (T029)', () => {
     //   Forum  →  300 bytes (10 FEs)
     // Capacity 50 FEs / 1550 bytes → Social fits alone (49 FEs);
     // Forum's 10 FEs would push the aggregate to 59 > 50 → excluded.
+    //
+    // After the tag-binding rework, `contents` carries no tag prefix —
+    // we differentiate Social vs Forum by the payload size set in
+    // `ingestSized` (Social: 100 bytes, Forum: 50 bytes).
     const SOCIAL_BYTES = 1_500;
     const FORUM_BYTES = 300;
     const stubEncoder = (msgs: BAMMessage[]) => {
-      // Tag is encoded inside each message's contents prefix; pick the
-      // payload size by the first tag we see.
-      const tag = msgs[0]?.contents?.subarray(0, 32);
-      if (tag === undefined) return { data: new Uint8Array(0) };
-      const tagHex = '0x' + Array.from(tag).map((b) => b.toString(16).padStart(2, '0')).join('');
-      const len = tagHex === SOCIAL ? SOCIAL_BYTES : FORUM_BYTES;
+      const len0 = msgs[0]?.contents?.length ?? 0;
+      const len = len0 >= 100 ? SOCIAL_BYTES : FORUM_BYTES;
       return { data: new Uint8Array(len) };
     };
 

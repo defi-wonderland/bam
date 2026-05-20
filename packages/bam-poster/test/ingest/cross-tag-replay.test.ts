@@ -115,15 +115,8 @@ describe('tag-binding soundness — direct verifier check (both schemes)', () =>
 
   it('BLS: verifier reconstructing messageHash with the wrong contentTag rejects', async () => {
     // BLS path mirrors spec exactly: signedHash = keccak256(domain ‖ messageHash).
-    // We rebuild that locally instead of going through a poster, since
-    // BLS isn't wired through the ECDSA-only ingest path.
-    //
-    // Note on the call shape: `signBLS` / `verifyBLS` take the hash as
-    // raw bytes via the @noble/bls12-381 backend's signing/verification
-    // primitives — we go through them via the SDK's bytes-style helper
-    // by passing `signedHashFor(tag)` as a hex string that the SDK then
-    // forwards. The contentTag-binding property is the load-bearing
-    // assertion; the hex/bytes plumbing is incidental.
+    // Rebuilt locally rather than going through a poster, since BLS
+    // isn't wired through the ECDSA-only ingest path.
     const domainBytes = keccak256(
       concat(
         new TextEncoder().encode('ERC-BAM.v1'),
@@ -132,25 +125,17 @@ describe('tag-binding soundness — direct verifier check (both schemes)', () =>
       'bytes'
     );
 
-    function signedHashBytesFor(tag: Bytes32): Uint8Array {
+    function signedHashFor(tag: Bytes32): Bytes32 {
       const messageHash = computeMessageHash(SENDER, tag, 1n, contents);
-      return keccak256(concat(domainBytes, hexToBytes(messageHash)), 'bytes');
+      return keccak256(concat(domainBytes, hexToBytes(messageHash))) as Bytes32;
     }
 
     const priv = generateBLSPrivateKey();
     const pub = deriveBLSPublicKey(priv);
-    // signBLS / verifyBLS in bam-sdk forward to @noble/bls12-381 which
-    // requires raw byte input — pass the bytes directly via the
-    // Bytes32 cast (`bls.sign` accepts Uint8Array; the typed wrapper
-    // erases that distinction).
-    const sigA = await signBLS(priv, signedHashBytesFor(TAG_A) as unknown as Bytes32);
+    const sigA = await signBLS(priv, signedHashFor(TAG_A));
 
-    expect(
-      await verifyBLS(pub, signedHashBytesFor(TAG_A) as unknown as Bytes32, sigA)
-    ).toBe(true);
-    expect(
-      await verifyBLS(pub, signedHashBytesFor(TAG_B) as unknown as Bytes32, sigA)
-    ).toBe(false);
+    expect(await verifyBLS(pub, signedHashFor(TAG_A), sigA)).toBe(true);
+    expect(await verifyBLS(pub, signedHashFor(TAG_B), sigA)).toBe(false);
   });
 });
 

@@ -213,7 +213,9 @@ export async function signBLS(
   messageHash: Bytes32
 ): Promise<BLSSignature> {
   try {
-    const signature = await bls.sign(messageHash, privateKey);
+    // @noble/bls12-381 requires raw bytes for the message — passing a
+    // 0x-prefixed hex string fails with "Invalid byte sequence".
+    const signature = await bls.sign(hexToBytes(messageHash), privateKey);
     return signature;
   } catch (error) {
     throw new SignatureError(
@@ -228,7 +230,7 @@ export async function verifyBLS(
   signature: BLSSignature
 ): Promise<boolean> {
   try {
-    return await bls.verify(signature, messageHash, publicKey);
+    return await bls.verify(signature, hexToBytes(messageHash), publicKey);
   } catch {
     return false;
   }

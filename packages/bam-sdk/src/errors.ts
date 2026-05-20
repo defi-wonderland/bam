@@ -217,17 +217,3 @@ export class AuthorNotFoundError extends BAMError {
   }
 }
 
-/**
- * `contents` was shorter than the 32-byte `contentTag` prefix BAM requires
- * on every `BAMMessage`.
- */
-export class ContentsTooShortError extends BAMError {
-  constructor(actualBytes: number) {
-    super(
-      ErrorCode.CONTENTS_TOO_SHORT,
-      `contents must be at least 32 bytes (contentTag prefix); got ${actualBytes}`,
-      { actualBytes }
-    );
-    this.name = 'ContentsTooShortError';
-  }
-}
