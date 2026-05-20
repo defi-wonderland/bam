@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  computeMessageHash,
   signECDSAWithKey,
   type Address,
   type BAMMessage,
@@ -115,6 +116,25 @@ describe('IngestPipeline — happy path', () => {
     // After the tag-binding rework, `contents` carries the app body
     // directly — no 32-byte tag prefix.
     expect(rows[0].contents.length).toBeGreaterThan(0);
+  });
+
+  it('persisted MessageRow.messageHash equals computeMessageHash(sender, contentTag, nonce, contents)', async () => {
+    // Defense-in-depth: the aggregator reads `messageHash` from the
+    // persisted row, so a regression in the ingest-side hash formula
+    // would silently propagate to confirmed batches. Pin the
+    // persisted value against the SDK helper here, with a non-trivial
+    // nonce and non-empty body so a misalignment can't accidentally
+    // produce the same digest as the canonical zero input.
+    const h = await mkHarness();
+    const contents = new TextEncoder().encode('persisted-hash-check');
+    const raw = signedEnvelope({ nonce: 12n, contents });
+    const res = await h.pipeline.ingest(raw);
+    expect(res.accepted).toBe(true);
+    const rows = await h.store.withTxn(async (txn) => txn.listPendingByTag(TAG));
+    expect(rows.length).toBe(1);
+    const expected = computeMessageHash(SENDER, TAG, 12n, contents);
+    expect(rows[0].messageHash).toBe(expected);
+    if (res.accepted) expect(res.messageHash).toBe(expected);
   });
 });
 

@@ -8,11 +8,11 @@ import { TWITTER_TAG } from '@/lib/constants';
  * contentTag. GET forwards to `/pending`, POST forwards to `/submit`.
  *
  * The contentTag on the forwarded envelope is **always** TWITTER_TAG —
- * a client-supplied tag is ignored. The signed `contents` already carry
- * the tag in `contents[0..32]`, and the Poster enforces
- * `envelope.contentTag === contents[0..32]`, so a wrong tag would be
- * rejected upstream anyway. Pinning it here makes per-app isolation a
- * property of the route, not a property of caller behavior.
+ * a client-supplied tag is ignored. The signed digest binds the tag
+ * via the ERC-8180 `messageHash` formula, so a signature authored
+ * under a different tag would fail verification at the Poster and the
+ * message would be rejected. Pinning the tag here makes per-app
+ * isolation a property of the route, not of caller behavior.
  */
 
 export async function GET(): Promise<NextResponse> {

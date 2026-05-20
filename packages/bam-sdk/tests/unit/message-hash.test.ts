@@ -63,6 +63,36 @@ describe('computeMessageHash (ERC-8180 messageHash)', () => {
     expect(hashA).not.toBe(hashB);
   });
 
+  it('property: random distinct tags always produce distinct hashes (1000 trials)', () => {
+    // Stronger statement of the tag-binding rule. If a future change
+    // to the preimage encoding fails to bind one of the tag bits (e.g.
+    // a truncation, masking, or zero-padding bug), the random sweep
+    // will collide where the fixed vector wouldn't notice.
+    const sender = ('0x' + '11'.repeat(20)) as Address;
+    const nonce = 7n;
+    const contents = new Uint8Array([0x41, 0x42, 0x43]);
+    // Cheap, deterministic LCG so failures are reproducible.
+    let state = 0xc0ffeeee >>> 0;
+    const nextByte = (): number => {
+      state = (state * 1664525 + 1013904223) >>> 0;
+      return (state >>> 24) & 0xff;
+    };
+    const randomTag = (): Bytes32 => {
+      let hex = '0x';
+      for (let i = 0; i < 32; i++) hex += nextByte().toString(16).padStart(2, '0');
+      return hex as Bytes32;
+    };
+    for (let i = 0; i < 1000; i++) {
+      const t1 = randomTag();
+      let t2 = randomTag();
+      // Vanishingly unlikely with 256 bits, but guard anyway.
+      while (t2 === t1) t2 = randomTag();
+      const h1 = computeMessageHash(sender, t1, nonce, contents);
+      const h2 = computeMessageHash(sender, t2, nonce, contents);
+      expect(h1).not.toBe(h2);
+    }
+  });
+
   it('rejects out-of-range nonce', () => {
     const sender = ('0x' + '00'.repeat(20)) as Address;
     const contents = new Uint8Array(0);

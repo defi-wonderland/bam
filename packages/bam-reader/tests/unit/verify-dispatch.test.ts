@@ -1,4 +1,5 @@
 import {
+  computeECDSADigest,
   deriveAddress,
   generateECDSAPrivateKey,
   hexToBytes,
@@ -190,5 +191,57 @@ describe('verifyMessage — non-zero (on-chain)', () => {
     });
     expect(ok).toBe(false);
     expect(events.length).toBe(1);
+  });
+
+  it('forwards a contentTag-bound messageHash to the registry — different tags ⇒ different hashes', async () => {
+    // Confirms the on-chain dispatch path obeys the same binding rule
+    // as the zero-address path: the `messageHash` argument to
+    // `verifyWithRegisteredKey` is `computeECDSADigest(msg, contentTag,
+    // chainId)`, so a registry asked to verify under tag B sees a
+    // different hash than one asked to verify under tag A.
+    const { message, signature } = buildSignedMessage();
+    const otherTag = ('0x' + 'bb'.repeat(32)) as Bytes32;
+
+    let capturedHashForA: Bytes32 | null = null;
+    let capturedHashForB: Bytes32 | null = null;
+    const clientA: VerifyReadContractClient = {
+      async readContract(args) {
+        capturedHashForA = args.args[1];
+        return true;
+      },
+    };
+    const clientB: VerifyReadContractClient = {
+      async readContract(args) {
+        capturedHashForB = args.args[1];
+        return true;
+      },
+    };
+
+    await verifyMessage({
+      registryAddress: NON_ZERO_REGISTRY,
+      message,
+      contentTag: TAG,
+      signatureBytes: signature,
+      chainId: CHAIN_ID,
+      publicClient: clientA,
+      gasCap: 50_000_000n,
+      timeoutMs: 5_000,
+    });
+    await verifyMessage({
+      registryAddress: NON_ZERO_REGISTRY,
+      message,
+      contentTag: otherTag,
+      signatureBytes: signature,
+      chainId: CHAIN_ID,
+      publicClient: clientB,
+      gasCap: 50_000_000n,
+      timeoutMs: 5_000,
+    });
+
+    expect(capturedHashForA).not.toBeNull();
+    expect(capturedHashForB).not.toBeNull();
+    expect(capturedHashForA).not.toBe(capturedHashForB);
+    expect(capturedHashForA).toBe(computeECDSADigest(message, TAG, CHAIN_ID));
+    expect(capturedHashForB).toBe(computeECDSADigest(message, otherTag, CHAIN_ID));
   });
 });

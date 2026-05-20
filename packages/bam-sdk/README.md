@@ -7,10 +7,13 @@ generate KZG proofs, and interact with on-chain contracts.
 ## Signature schemes
 
 BAM messages are signed under ERC-8180's
-`messageHash = keccak256(sender ‖ nonce ‖ contents)` (chain-agnostic,
-exported as `computeMessageHash`). The wire format mandates a
-32-byte `contentTag` prefix in `contents`; every scheme that signs over
-`contents` therefore binds the tag.
+`messageHash = keccak256(sender ‖ contentTag ‖ nonce ‖ contents)`
+(chain-agnostic, exported as `computeMessageHash`). `contentTag` is a
+first-class signed field — it rides alongside `(sender, nonce, contents)`
+through every signing helper and is bound into the digest verbatim, so a
+signature authored for one `contentTag` will not verify under any other.
+`contents` is app-opaque bytes; nothing about the tag is encoded inside
+them.
 
 - **Scheme 0x01 (ECDSA-secp256k1).** All ECDSA signing in this SDK
   uses **EIP-712 typed data over `BAMMessage`** with domain

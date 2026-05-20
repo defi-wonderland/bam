@@ -22,7 +22,8 @@ Otherwise identical: same `bam-sdk`, same Poster, same Reader, same Postgres `ba
 
 ## Wire format
 
-Inside `contents[32:]` (the bytes after the contentTag prefix):
+`contents` carries the app body directly — `contentTag` is bound into
+the signed digest, not prepended. Layout:
 
 ```
 byte  0       : version (uint8)  — currently 0x01
@@ -35,7 +36,7 @@ bytes 2..     : kind-specific payload
 | `post` | `u64 BE timestamp ‖ u32 BE contentLen ‖ utf8 content` |
 | `reply` | `u64 BE timestamp ‖ bytes32 parentMessageHash ‖ u32 BE contentLen ‖ utf8 content` |
 
-`parentMessageHash` is the ERC-8180 `messageHash` (`keccak256(sender ‖ nonce ‖ contents)`) — chain-agnostic, computable pre-batch, and stable across the pending → confirmed transition. The Timeline groups replies under their parent on this hash; orphan replies (parent not in the visible window) are hidden.
+`parentMessageHash` is the ERC-8180 `messageHash` (`keccak256(sender ‖ contentTag ‖ nonce ‖ contents)`) — chain-agnostic, computable pre-batch, and stable across the pending → confirmed transition. The Timeline groups replies under their parent on this hash; orphan replies (parent not in the visible window) are hidden.
 
 The single source of truth for this codec is `src/lib/contents-codec.ts`. A round-trip + negative test suite lives at `test/lib/contents-codec.test.ts`.
 

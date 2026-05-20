@@ -28,10 +28,10 @@ export const DEFAULT_MAX_MESSAGE_SIZE_BYTES =
   BLOB_USABLE_CAPACITY - BATCH_HEADER_FIXED_SIZE - MESSAGE_HEADER_SIZE - BATCH_FRAMING_SLACK;
 
 /**
- * Default cap on `contents` length. The 32-byte `contentTag` prefix
- * plus app bytes must fit under this; the envelope-wire bound
- * `DEFAULT_MAX_MESSAGE_SIZE_BYTES` allows room for the outer JSON
- * framing (sender/nonce/signature fields).
+ * Default cap on `contents` length (app-opaque body bytes). The
+ * envelope-wire bound `DEFAULT_MAX_MESSAGE_SIZE_BYTES` allows room
+ * for the outer JSON framing around it (sender/nonce/contentTag/
+ * signature fields).
  */
 export const DEFAULT_MAX_CONTENTS_SIZE_BYTES =
   DEFAULT_MAX_MESSAGE_SIZE_BYTES - 1024;
