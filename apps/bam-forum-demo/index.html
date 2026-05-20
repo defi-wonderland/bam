@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>BAM Forum Demo</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <header class="site">
+        <span class="brand">BAM Forum</span>
+        <nav>
+          <a href="/index.html">Home</a>
+          <a href="/thread.html">Thread</a>
+        </nav>
+      </header>
+
+      <main>
+        <div class="page-header">
+          <h1>General Discussion</h1>
+          <p class="sub">Decentralised threads, backed by blobs.</p>
+        </div>
+
+        <ul class="thread-list">
+          <li class="thread-item">
+            <div class="thread-meta">
+              <span class="thread-tag">Protocol</span>
+              <span class="thread-dot">·</span>
+              <span class="thread-author">0xdead…beef</span>
+              <span class="thread-dot">·</span>
+              <span class="thread-time">2 hours ago</span>
+            </div>
+            <a class="thread-title" href="/thread.html">
+              How does BAM handle message ordering across blobs?
+            </a>
+            <p class="thread-preview">
+              Each sender maintains a monotonically increasing nonce. The
+              Reader reconstructs order from (sender, nonce) pairs, so
+              batches can land out of order without losing thread coherence…
+            </p>
+            <div class="thread-footer">
+              <span class="reply-count">12 replies</span>
+            </div>
+          </li>
+
+          <li class="thread-item">
+            <div class="thread-meta">
+              <span class="thread-tag">Dev</span>
+              <span class="thread-dot">·</span>
+              <span class="thread-author">0xc0ff…ee42</span>
+              <span class="thread-dot">·</span>
+              <span class="thread-time">5 hours ago</span>
+            </div>
+            <a class="thread-title" href="/thread.html">
+              Running the full stack locally — a step-by-step guide
+            </a>
+            <p class="thread-preview">
+              Start with <code>pnpm install</code> at the workspace root,
+              then <code>pnpm db:up</code> to spin up Postgres. The Poster
+              and Reader share the same database…
+            </p>
+            <div class="thread-footer">
+              <span class="reply-count">7 replies</span>
+            </div>
+          </li>
+
+          <li class="thread-item">
+            <div class="thread-meta">
+              <span class="thread-tag">General</span>
+              <span class="thread-dot">·</span>
+              <span class="thread-author">0xface…1234</span>
+              <span class="thread-dot">·</span>
+              <span class="thread-time">1 day ago</span>
+            </div>
+            <a class="thread-title" href="/thread.html">
+              ERC-8180 vs. other on-chain messaging standards
+            </a>
+            <p class="thread-preview">
+              The key difference is that ERC-8180 uses blob data for
+              content storage, keeping calldata costs near zero while
+              still anchoring authenticity on-chain via the Poster…
+            </p>
+            <div class="thread-footer">
+              <span class="reply-count">24 replies</span>
+            </div>
+          </li>
+        </ul>
+      </main>
+    </div>
+  </body>
+</html>
