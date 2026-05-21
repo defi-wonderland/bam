@@ -89,14 +89,14 @@ verify it. Both `prove-reader` and `prove-from-reader` already do this.
 
 ```bash
 # Circuit 1 — compressed proof
-SP1_PROVER=network SP1_PRIVATE_KEY=<key> \
+SP1_PROVER=network NETWORK_PRIVATE_KEY=0x<key> \
 cargo run --release --bin prove-reader -- \
   --prove --chain-id 11155111 \
   --cache ../bam-indexer/cache/batches.json \
   --output c1_proof.bin
 
 # Circuit 2 — recursive proof
-SP1_PROVER=network SP1_PRIVATE_KEY=<key> \
+SP1_PROVER=network NETWORK_PRIVATE_KEY=0x<key> \
 cargo run --release --bin prove-app -- \
   --prove --c1-proof c1_proof.bin \
   --reader-url https://bam-reader.fly.dev \

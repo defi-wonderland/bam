@@ -18,7 +18,7 @@
 //!         See CIRCUIT2.md § "Compressed proof" for the full sequence.
 //!         Replace [0u32; 8] in verify_sp1_proof (program-app/src/main.rs) with
 //!         pk1.verifying_key().hash_u32() before the recursive proof is sound.
-//!   SP1_PROVER=network SP1_PRIVATE_KEY=<key> \
+//!   SP1_PROVER=network NETWORK_PRIVATE_KEY=0x<key> \
 //!   cargo run --release --bin prove-app -- \
 //!     --prove \
 //!     --c1-proof c1_proof.bin \

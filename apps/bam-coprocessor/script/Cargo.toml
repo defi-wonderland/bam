@@ -24,7 +24,8 @@ name = "print-vk"
 path = "src/bin/print-vk.rs"
 
 [dependencies]
-sp1-sdk             = { version = "6.0.1", features = ["blocking"] }
+sp1-sdk             = { version = "6.0.1", features = ["blocking", "network"] }
+sp1-verifier        = { version = "=6.1.0", default-features = false }
 bam-coprocessor-lib = { path = "../lib" }
 serde               = { workspace = true }
 serde_json          = { workspace = true }
@@ -32,6 +33,7 @@ hex                 = "0.4.3"
 c-kzg               = { version = "2.1", default-features = true }
 sha2                = { workspace = true }
 clap                = { version = "4.0", features = ["derive"] }
+num-bigint          = "0.4"
 ureq                = { version = "2", features = ["json"] }
 
 [dev-dependencies]

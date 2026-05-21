@@ -22,6 +22,20 @@ Circuit 1 handles the expensive verification and commits to M, a sha256 over the
 
 ---
 
+## Proof formats
+
+Circuit 1 supports two output formats, selected with `--proof-type`:
+
+**`compressed` (default)** — a STARK proof. This is the format Circuit 2 requires to run its recursive verification step (`verify_sp1_proof` inside the SP1 guest). Use this when the proof will be consumed by another SP1 program.
+
+**`groth16`** — a succinct BN254 Groth16 proof (~200 bytes). This is the format for final output: it can be verified by [snarkjs](https://github.com/iden3/snarkjs) in the browser, a Solidity contract, or any standard Groth16 verifier. It cannot be consumed by Circuit 2's recursive verify step.
+
+The two formats are **not interchangeable**: Circuit 2 consumes a compressed STARK; a browser or on-chain verifier consumes Groth16.
+
+In the full two-circuit flow, the proof you ship to end users is Circuit 2's Groth16 proof — it already embeds the recursive C1 verification, so you get the full chain of trust in a single small proof. If Circuit 1 is used standalone (no Circuit 2), generate a Groth16 directly from `prove-reader --proof-type groth16`.
+
+---
+
 ## Workspace layout
 
 The workspace contains four crates. `program-reader/` is the Circuit 1 guest and `program-app/` is the Circuit 2 guest, both compiled for the SP1 zkVM. `lib/` holds the shared types and pipeline functions compiled for both host and guest. `script/` contains the five host binaries (`prove-reader`, `prove-from-reader`, `prove-app`, `print-vk`, `show-proof`).
@@ -58,7 +72,48 @@ The circuit commits `chain_id || M || R || tweet_count` as its public output.
 
 ### Demo results
 
-The demo ran against 9 Sepolia blobs downloaded from the bam-indexer cache. Circuit 1 produced message commitment M = `0x6cb1ce626cfcb014807ca66751398d97f1477f6d0eacc5d1cfbc987bb29c799c` in roughly 230M SP1 cycles (~25M per blob, dominated by KZG and ECDSA). All 9 messages in that batch were bam-twitter posts, so Circuit 2 produced a timeline of 9 tweets with root R = `0x30126f1c725b81fd92348c92ff15a8017585329cfde6d43e07ed0f178f20e2a5` in roughly 1.5M cycles — about 150× cheaper than Circuit 1 since it skips KZG and ECDSA entirely.
+**Execute mode** ran against 9 Sepolia blobs from the bam-indexer cache. Circuit 1 produced message commitment M = `0x6cb1ce626cfcb014807ca66751398d97f1477f6d0eacc5d1cfbc987bb29c799c` in roughly 230M SP1 cycles (~25M per blob, dominated by KZG and ECDSA). All 9 messages in that batch were bam-twitter posts, so Circuit 2 produced a timeline of 9 tweets with root R = `0x30126f1c725b81fd92348c92ff15a8017585329cfde6d43e07ed0f178f20e2a5` in roughly 1.5M cycles — about 150× cheaper than Circuit 1 since it skips KZG and ECDSA entirely.
+
+Both proofs below ran against the same single blob — block 10767913, tx 146, the `Hello world` bam-twitter post from the EXPLAINER. Same program, same input, different output format.
+
+| Field | Compressed | Groth16 |
+|---|---|---|
+| Proof mode | Compressed STARK | Groth16 (BN254) |
+| Proof size | 1.2 MB | **1.8 KB** |
+| Proving time | 20s | 30s |
+| Base fee | 0.2 PROVE | 0.3 PROVE |
+| Prover fee | 0.013 PROVE | 0.013 PROVE |
+| Total fee | 0.213 PROVE | 0.313 PROVE |
+| Gas used | 25,839,061 PGUs | 25,839,061 PGUs |
+| Price | 0.49 PROVE / bPGU | 0.49 PROVE / bPGU |
+
+The Groth16 proof is **680× smaller** at the cost of +0.1 PROVE base fee and +10s proving time. The prover fee is identical since the underlying computation (PGUs) is the same. Groth16's higher base fee reflects the additional wrapping step on the network's side.
+
+**Use compressed** when the proof will be recursively verified by Circuit 2. **Use Groth16** when the proof is the final output — it can be verified by snarkjs in the browser, a Solidity contract, or any standard BN254 Groth16 verifier.
+
+**Compressed proof** (2026-05-20):
+
+| Field | Value |
+|---|---|
+| M (message commitment) | `0x30774dd5d445ee8549abf847572ece0c0b7f594ca1da16dffae4694a519b16c8` |
+| SP1 version | sp1-v6.1.0 |
+| Cycles | 25,632,786 |
+| Request ID | `0xaa2caee39af75e6d124cb87c23983b484a29c90a26da8a1e37fedcecd9dddc36` |
+| Program hash | `0x4b8cee8e1111f1e72230616020ce5c1e6fbf9d980640c7895b7d13496f5f6c9c` |
+| Tx hash | `0x03f41203e8c4a3f128942cbecb15b5bf34a2062bbe02c9a48fc48591cea6cb88` |
+
+**Groth16 proof** (2026-05-20):
+
+| Field | Value |
+|---|---|
+| M (message commitment) | `0x30774dd5d445ee8549abf847572ece0c0b7f594ca1da16dffae4694a519b16c8` |
+| SP1 version | sp1-v6.1.0 |
+| Cycles | 25,632,786 |
+| Request ID | `0x186d4e805a09260414bbd4dfe0ce91d142b74cef24be4cb96b7e05b48a71dd2d` |
+| Program hash | `0x4b8cee8e1111f1e72230616020ce5c1e6fbf9d980640c7895b7d13496f5f6c9c` |
+| Tx hash | `0xe5e2a321a66c3f0070cdc675d43147b5bfabd16c3e79b58217569f8bc9daf7a2` |
+
+Note: the SDK automatically sets the gas limit from a simulation run before submitting — the gas limit shown equals the measured PGU count exactly.
 
 ---
 
@@ -92,39 +147,63 @@ cargo run --release --bin prove-app -- \
 
 ### Prove mode (Succinct network)
 
-> **Not yet run.** The instructions below are correct and the code is wired up, but prove mode has not been tested against Succinct's prover network. Execute mode works end-to-end; this is the next step.
+Requires a [Succinct network](https://explorer.succinct.xyz) account with PROVE tokens deposited. Set `NETWORK_PRIVATE_KEY` to your requester account's private key (secp256k1, same format as an Ethereum key). The old `SP1_PRIVATE_KEY` variable name is not read by sp1-sdk v6.x.
 
-Before proving for the first time, or after any change to Circuit 1's code, derive the C1 verifying key hash and paste it into `program-app/src/main.rs`. The file currently holds a `[0u32; 8]` placeholder that is safe for execute mode but produces an unsound recursive proof in prove mode.
+The `script/Cargo.toml` dependency must include the `network` feature:
+
+```toml
+sp1-sdk = { version = "6.0.1", features = ["blocking", "network"] }
+```
+
+**Circuit 1** — from a local blob cache (tested path):
+
+```bash
+export NETWORK_PRIVATE_KEY=0x<your_key>
+
+# Compressed STARK — for Circuit 2 recursive consumption (default)
+SP1_PROVER=network cargo run --release --bin prove-reader -- \
+  --prove --chain-id 11155111 \
+  --cache script/single-blob-cache.json \
+  --output c1_proof.bin
+
+# Groth16 — for client-side / browser / on-chain verification (standalone C1)
+SP1_PROVER=network cargo run --release --bin prove-reader -- \
+  --prove --proof-type groth16 --chain-id 11155111 \
+  --cache script/single-blob-cache.json \
+  --output c1_proof_groth16.bin
+```
+
+`script/single-blob-cache.json` contains the single Sepolia blob from the first network proof. Swap in the full `../bam-indexer/cache/batches.json` for all 9 blobs (~230M cycles, ~9× the cost).
+
+`prove-from-reader` is the intended live path (fetches blobs directly from a bam-reader instance) but has not been tested end-to-end against a live blob archive.
+
+**Verify Circuit 1:**
+
+```bash
+cargo run --release --bin show-proof -- c1_proof.bin --circuit reader --verify
+```
+
+**Before proving Circuit 2**, derive the C1 verifying key and paste it into `program-app/src/main.rs`. The file currently holds a `[0u32; 8]` placeholder that is safe for execute mode but produces an unsound recursive proof in prove mode.
 
 ```bash
 cargo run --release --bin print-vk
-# prints the [u32; 8] array to paste into program-app/src/main.rs
+# paste the printed [u32; 8] array into program-app/src/main.rs
 ```
 
-Then prove both circuits on the Succinct network:
+**Circuit 2** — recursive proof:
 
 ```bash
-# Circuit 1 (compressed proof, required for C2 recursive verify)
-SP1_PROVER=network SP1_PRIVATE_KEY=<key> \
-cargo run --release --bin prove-from-reader -- \
-  --prove --chain-id 11155111 \
-  --content-tag 0xf0fea94ffd2ae32ed878c57e3427bbffab46d333d09837bc640d952795090718 \
-  --reader-url https://bam-reader.fly.dev \
-  --output c1_proof.bin
-
-# Circuit 2 (recursive proof)
-SP1_PROVER=network SP1_PRIVATE_KEY=<key> \
-cargo run --release --bin prove-app -- \
+export NETWORK_PRIVATE_KEY=0x<your_key>
+SP1_PROVER=network cargo run --release --bin prove-app -- \
   --prove \
   --c1-proof c1_proof.bin \
   --reader-url https://bam-reader.fly.dev \
   --output c2_proof.bin
 
-# Inspect and verify the final proof
 cargo run --release --bin show-proof -- c2_proof.bin --circuit app --verify
 ```
 
-Circuit 1 dominates the proving cost since it runs KZG verification and ECDSA; Circuit 2 adds only a recursive verification step on top.
+Circuit 1 dominates cost (KZG + ECDSA). Circuit 2 adds only the recursive verification step — execute mode measured ~1.5M cycles vs ~25M for C1.
 
 ### Building the guest programs
 
@@ -141,4 +220,4 @@ cargo build -p bam-coprocessor-script
 1. `start_fe` and `end_fe` are not committed to C1 public outputs, so a verifier can confirm which blob was used but not which segment of it was processed. Fixing this requires a coordinated update to the bam-store schema and C1 output layout.
 2. The circuit panics on ZSTD-compressed batches (codec 0x01). None of the current demo blobs use ZSTD, but any production blob that does is outside Circuit 1's scope.
 3. The blob archive was not deployed on the bam-reader instance when this was built, so `prove-from-reader` has not been tested end-to-end against a live archive. The demo was run from a locally cached blob set.
-4. Prove mode has not been tested on Succinct's prover network — see the note in the prove mode section above.
+4. Circuit 2 has not yet been proved on the network. The C1 verifying key placeholder `[0u32; 8]` in `program-app/src/main.rs` must be replaced with the output of `print-vk` before prove mode produces a sound recursive proof.

@@ -45,6 +45,15 @@ struct Args {
     #[arg(long)]
     prove: bool,
 
+    /// Proof format for --prove mode.
+    ///
+    /// compressed (default): a STARK that Circuit 2 can recursively verify inside the SP1 zkVM.
+    /// groth16: a succinct BN254 proof verifiable by snarkjs in the browser, a Solidity contract,
+    ///   or any standard Groth16 verifier. Cannot be consumed by Circuit 2's recursive verify step.
+    ///   Use this when Circuit 1 is the final output (no Circuit 2), e.g. for client-side UX.
+    #[arg(long, default_value = "compressed", value_parser = ["compressed", "groth16"])]
+    proof_type: String,
+
     /// Ethereum chain ID to use for EIP-712 signature verification.
     #[arg(long, default_value = "1")]
     chain_id: u64,
@@ -217,7 +226,8 @@ fn main() {
         print_public_values(&pv);
 
         let total = report.total_instruction_count();
-        println!("\nCycles: {}", total);
+        println!("\nCycles:     {}", total);
+        println!("Prover gas (PGUs): {:?}", report.gas());
 
         if let Some(path) = &args.output {
             let json = serde_json::json!({
@@ -232,12 +242,17 @@ fn main() {
         println!("Mode: prove\n");
         println!(
             "NOTE: proof generation is slow.\n\
-             Set SP1_PROVER=network and SP1_PRIVATE_KEY=... for remote proving."
+             Set SP1_PROVER=network and NETWORK_PRIVATE_KEY=0x<key> for remote proving."
         );
 
         let pk = client.setup(BAM_READER_ELF).expect("setup failed");
-        let proof = client.prove(&pk, stdin).compressed().run().expect("prove failed");
-        println!("Proof generated!");
+        let prove_req = client.prove(&pk, stdin);
+        let proof = if args.proof_type == "groth16" {
+            prove_req.groth16().run().expect("prove failed")
+        } else {
+            prove_req.compressed().run().expect("prove failed")
+        };
+        println!("Proof generated! ({})", args.proof_type);
 
         let is_mock = std::env::var("SP1_PROVER").unwrap_or_default() == "mock";
         if is_mock {

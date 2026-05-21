@@ -353,7 +353,7 @@ fn main() {
         println!("Mode: prove\n");
         println!(
             "NOTE: proof generation is slow.\n\
-             Set SP1_PROVER=network and SP1_PRIVATE_KEY=... for remote proving."
+             Set SP1_PROVER=network and NETWORK_PRIVATE_KEY=0x<key> for remote proving."
         );
 
         let pk = client.setup(BAM_READER_ELF).expect("setup failed");

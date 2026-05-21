@@ -16,13 +16,20 @@ const BAM_READER_ELF: Elf = include_elf!("bam-reader-program");
 fn main() {
     let client = ProverClient::from_env();
     let pk = client.setup(BAM_READER_ELF).expect("setup failed");
-    let hash = pk.verifying_key().hash_u32();
-    println!("C1 verifying key hash (u32 x8):");
-    println!("{:?}", hash);
+    let vk = pk.verifying_key();
+
+    let hash_u32 = vk.hash_u32();
+    println!("C1 verifying key hash (u32 x8, for verify_sp1_proof in program-app):");
+    println!("{:?}", hash_u32);
     println!();
     println!("Paste into program-app/src/main.rs:");
     println!(
         "    sp1_zkvm::lib::verify::verify_sp1_proof(&{:?}, &[0u8; 32]);",
-        hash
+        hash_u32
     );
+    println!();
+
+    let bytes32 = vk.bytes32();
+    println!("C1 verifying key hash (bytes32, for Groth16Verifier::verify / WASM demo):");
+    println!("{}", bytes32);
 }
