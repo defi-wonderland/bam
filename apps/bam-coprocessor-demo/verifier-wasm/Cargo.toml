@@ -1,0 +1,16 @@
+[package]
+name = "sp1-wasm-verifier"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wasm-bindgen = "0.2"
+sp1-verifier = { version = "=6.1.0", default-features = false }
+getrandom = { version = "0.2", features = ["js"] }
+
+[profile.release]
+opt-level = "s"
+lto = true

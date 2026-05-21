@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>BAM coprocessor — proof verification</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body class="min-h-screen bg-slate-50">
+
+    <header class="sticky top-0 z-10 backdrop-blur bg-white/80 border-b border-slate-200">
+      <div class="max-w-2xl mx-auto px-4 py-3 flex items-center gap-3">
+        <span class="text-lg font-bold text-bird-700">BAM coprocessor</span>
+        <span class="text-xs px-2 py-0.5 rounded-full bg-bird-100 text-bird-700">proof verification demo</span>
+      </div>
+    </header>
+
+    <main class="max-w-2xl mx-auto px-4 py-8 space-y-5">
+
+      <!-- Story -->
+      <div class="card space-y-2">
+        <p class="text-sm text-slate-700 leading-relaxed">
+          EIP-4844 blobs expire from Ethereum's consensus layer in roughly 18 days.
+          After that, verifying any message from the blob requires trusting whoever ran the pipeline.
+        </p>
+        <p class="text-sm text-slate-700 leading-relaxed">
+          This demo shows a ZK proof that runs the full BAM reader pipeline inside the
+          <a href="https://docs.succinct.xyz" target="_blank" rel="noopener" class="text-bird-600 hover:underline">SP1 zkVM</a> —
+          KZG verification, ECDSA signature checking, and message decoding.
+          The proof is 1.8 KB and can be verified locally in your browser.
+          No trust in the server required.
+        </p>
+      </div>
+
+      <!-- Tweet card -->
+      <div class="card">
+        <div class="flex items-center justify-between mb-2">
+          <a
+            href="https://sepolia.etherscan.io/address/0x2f47568fbb8c1fdf0e904fab02004a9560e4cd5f"
+            target="_blank"
+            rel="noopener"
+            class="font-mono text-xs text-bird-700 hover:underline"
+          >0x2f47…4cd5f</a>
+          <div class="flex items-center gap-2">
+            <span class="text-xs text-slate-400">block 10767913 · tx 146</span>
+            <span class="text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">on-chain</span>
+          </div>
+        </div>
+        <p class="text-slate-900 text-base">Hello world</p>
+        <div class="mt-3 pt-3 border-t border-slate-100 space-y-1.5">
+          <div class="flex items-baseline gap-2">
+            <span class="label">blob tx</span>
+            <a
+              href="https://sepolia.etherscan.io/tx/0x01450506121d21480f0786b669c5baef9b594bb6a8da0000415568bdf04dbc95"
+              target="_blank"
+              rel="noopener"
+              class="mono hover:text-bird-600"
+            >0x014505…bc95 ↗</a>
+          </div>
+          <div class="flex items-baseline gap-2">
+            <span class="label">versioned hash</span>
+            <span class="mono">0x01e88c3f78543596ba21c5def18454d0f5dc8c921c8d12b80059a4522ffd76819</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Proof details -->
+      <div class="card space-y-3">
+        <div class="flex items-center justify-between">
+          <h2 class="font-semibold text-slate-800">ZK proof</h2>
+          <div class="flex gap-1.5 text-xs">
+            <span class="px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">Groth16</span>
+            <span class="px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">SP1 v6.1.0</span>
+            <span class="px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">1.8 KB</span>
+          </div>
+        </div>
+        <div class="space-y-2 text-sm">
+          <div>
+            <div class="label mb-0.5">message commitment M</div>
+            <div class="mono">0x30774dd5d445ee8549abf847572ece0c0b7f594ca1da16dffae4694a519b16c8</div>
+          </div>
+          <div>
+            <div class="label mb-0.5">program hash (VK)</div>
+            <div class="mono">0x009719dd1c4447c79d11830b020ce5c1edf7f3b3019031e26dbe89a4ef5f6c9c</div>
+          </div>
+          <div class="flex gap-6 text-xs text-slate-500">
+            <span>proved 2026-05-20</span>
+            <span>30s proving time</span>
+            <span>0.313 PROVE</span>
+            <a
+              href="https://explorer.succinct.xyz/request/0x186d4e805a09260414bbd4dfe0ce91d142b74cef24be4cb96b7e05b48a71dd2d"
+              target="_blank"
+              rel="noopener"
+              class="text-bird-600 hover:underline"
+            >Succinct explorer ↗</a>
+          </div>
+        </div>
+      </div>
+
+      <!-- Verify section -->
+      <div class="card space-y-4">
+        <div>
+          <h2 class="font-semibold text-slate-800 mb-1">Verify locally</h2>
+          <p class="text-sm text-slate-500">
+            Fetches the 1.8 KB proof and runs verification in your browser using the
+            SP1 WASM verifier — no server call for the verification step.
+          </p>
+        </div>
+
+        <button
+          id="verify-btn"
+          class="w-full py-2.5 px-4 rounded-lg bg-bird-600 text-white font-medium text-sm
+                 hover:bg-bird-700 active:bg-bird-800 transition-colors
+                 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          Fetch &amp; verify proof
+        </button>
+
+        <div id="verify-result" class="hidden"></div>
+      </div>
+
+    </main>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
