@@ -231,11 +231,14 @@ export async function signBLS(
   messageHash: Bytes32
 ): Promise<BLSSignature> {
   // @noble/bls12-381 requires raw bytes for the message — passing a
-  // 0x-prefixed hex string fails with "Invalid byte sequence".
-  const hashBytes = bytes32HexToBytes(messageHash);
+  // 0x-prefixed hex string fails with "Invalid byte sequence". Decode
+  // inside the try so a malformed-hex `messageHash` surfaces as
+  // SignatureError rather than leaking RangeError from hexToBytes.
   try {
+    const hashBytes = bytes32HexToBytes(messageHash);
     return await bls.sign(hashBytes, privateKey);
   } catch (error) {
+    if (error instanceof SignatureError) throw error;
     throw new SignatureError(
       `BLS signing failed: ${error instanceof Error ? error.message : String(error)}`
     );

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { SignatureError } from '../../src/errors.js';
 import type { Bytes32 } from '../../src/types.js';
 import {
   deriveBLSPublicKey,
@@ -78,6 +79,18 @@ describe('BLS sign/verify smoke', () => {
 
     const tooLong = ('0x' + 'aa'.repeat(33)) as Bytes32;
     await expect(signBLS(PRIV, tooLong)).rejects.toThrow(/32 bytes/);
+  });
+
+  it('signBLS wraps malformed-hex messageHash as SignatureError, not RangeError', async () => {
+    // hexToBytes throws RangeError on non-hex / odd-length input; that
+    // must not leak across the SDK boundary — every signBLS failure
+    // should surface as SignatureError so callers can rely on a single
+    // catch path for user-provided inputs.
+    const badHex = '0xzz' as Bytes32;
+    await expect(signBLS(PRIV, badHex)).rejects.toBeInstanceOf(SignatureError);
+
+    const oddLength = '0xabc' as Bytes32;
+    await expect(signBLS(PRIV, oddLength)).rejects.toBeInstanceOf(SignatureError);
   });
 
   it('verifyBLS returns false on a non-32-byte messageHash (consistent with bad-signature path)', async () => {
