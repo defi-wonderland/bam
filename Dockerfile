@@ -1,8 +1,8 @@
 # syntax=docker/dockerfile:1.7
 
-# Shared image for bam-poster and bam-reader. Each fly app overrides CMD
-# to pick its service binary; the build is identical so layer caching
-# wins on the second deploy of any pair.
+# Shared image for bam-poster, bam-reader, and bam-indexer. Each fly app
+# overrides CMD to pick its service binary; the build is identical so
+# layer caching wins on the second deploy of any.
 
 FROM node:20-bookworm-slim AS builder
 
@@ -21,28 +21,32 @@ COPY packages/bam-sdk/package.json packages/bam-sdk/
 COPY packages/bam-store/package.json packages/bam-store/
 COPY packages/bam-poster/package.json packages/bam-poster/
 COPY packages/bam-reader/package.json packages/bam-reader/
+COPY packages/bam-indexer/package.json packages/bam-indexer/
 COPY packages/bam-cli/package.json packages/bam-cli/
 COPY apps/bam-sdk-test/package.json apps/bam-sdk-test/
 COPY apps/message-in-a-blobble/package.json apps/message-in-a-blobble/
 
 RUN pnpm install --frozen-lockfile \
-      --filter @bam/poster... --filter bam-reader...
+      --filter @bam/poster... --filter bam-reader... --filter bam-indexer...
 
-# Source for the four packages we actually build.
+# Source for the five packages we actually build.
 COPY packages/bam-sdk packages/bam-sdk
 COPY packages/bam-store packages/bam-store
 COPY packages/bam-poster packages/bam-poster
 COPY packages/bam-reader packages/bam-reader
+COPY packages/bam-indexer packages/bam-indexer
 
 # Build in dependency order.
 RUN pnpm --filter bam-sdk build \
  && pnpm --filter bam-store build \
  && pnpm --filter @bam/poster build \
- && pnpm --filter bam-reader build
+ && pnpm --filter bam-reader build \
+ && pnpm --filter bam-indexer build
 
-# Produce two self-contained, prod-only deploy trees.
+# Produce three self-contained, prod-only deploy trees.
 RUN pnpm deploy --filter=@bam/poster --prod --legacy /out/poster \
- && pnpm deploy --filter=bam-reader  --prod --legacy /out/reader
+ && pnpm deploy --filter=bam-reader  --prod --legacy /out/reader \
+ && pnpm deploy --filter=bam-indexer --prod --legacy /out/indexer
 
 # ---------------- runtime ----------------
 FROM node:20-bookworm-slim AS runtime
@@ -51,10 +55,12 @@ ENV NODE_ENV=production
 WORKDIR /app
 
 # Trim the default node user's home noise; we only need the binary to run.
-COPY --from=builder /out/poster /app/poster
-COPY --from=builder /out/reader /app/reader
+COPY --from=builder /out/poster  /app/poster
+COPY --from=builder /out/reader  /app/reader
+COPY --from=builder /out/indexer /app/indexer
 
 USER node
 
-# Default to poster; bam-reader's fly.toml overrides this with the reader bin.
+# Default to poster; bam-reader and bam-indexer's fly.tomls override this
+# with their own bin.
 CMD ["node", "/app/poster/dist/esm/bin/bam-poster.js"]

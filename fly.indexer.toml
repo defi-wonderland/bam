@@ -1,0 +1,38 @@
+# bam-indexer — consumes confirmed messages from bam-store, projects per-
+# contentTag entities, serves /<handler>/* read routes. Builds the shared
+# image; overrides CMD to the indexer binary in `serve` mode.
+
+app = "bam-indexer"
+primary_region = "ams"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[experimental]
+  cmd = ["node", "/app/indexer/dist/esm/bin/bam-indexer.js", "serve"]
+
+[env]
+  INDEXER_HTTP_BIND = "0.0.0.0"
+  INDEXER_HTTP_PORT = "8789"
+
+[http_service]
+  internal_port = 8789
+  force_https = true
+  # Keep the machine running — the indexer's tick loop must keep advancing
+  # between HTTP reads. Fly's auto-stop only watches incoming proxy
+  # traffic, not internal CPU. Same reasoning as bam-reader.
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["app"]
+
+  [[http_service.checks]]
+    interval = "15s"
+    timeout = "5s"
+    grace_period = "10s"
+    method = "GET"
+    path = "/health"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
