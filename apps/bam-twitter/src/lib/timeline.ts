@@ -52,7 +52,7 @@ function safeDecode(contentsHex: string): {
   parentMessageHash: Bytes32 | null;
 } | null {
   try {
-    const { app } = decodePostReplyContents(hexToBytes(contentsHex));
+    const app = decodePostReplyContents(hexToBytes(contentsHex));
     if (app.kind === 'reply') {
       return {
         timestamp: app.timestamp,

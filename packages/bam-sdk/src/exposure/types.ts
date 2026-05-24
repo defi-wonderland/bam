@@ -82,6 +82,13 @@ export interface ExposureParams {
   blsSignature: Uint8Array;
   /** Registration proof (empty for SimpleBoolVerifier) */
   registrationProof: Uint8Array;
+  /**
+   * ERC-8180 contentTag the message was signed under. Bound into the
+   * on-chain `messageHash` and `messageId` so a wrong tag yields a
+   * different digest and the BLS signature check rejects it. Source
+   * from the `BlobBatchRegistered` event's indexed `contentTag` topic.
+   */
+  contentTag: Bytes32;
 }
 
 /**
@@ -151,6 +158,12 @@ export interface CalldataExposureParams {
   signature: Uint8Array;
   /** Registration proof (empty for SimpleBoolVerifier) */
   registrationProof: Uint8Array;
+  /**
+   * ERC-8180 contentTag the message was signed under. Bound into the
+   * on-chain `messageHash` and `messageId`; source from the
+   * `CalldataBatchRegistered` event's indexed `contentTag` topic.
+   */
+  contentTag: Bytes32;
 }
 
 /**

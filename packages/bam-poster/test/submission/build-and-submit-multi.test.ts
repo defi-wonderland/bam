@@ -3,7 +3,6 @@ import {
   computeMessageHashForMessage,
   deriveAddress,
   encodeBatch,
-  encodeContents,
   generateECDSAPrivateKey,
   hexToBytes,
   loadTrustedSetup,
@@ -82,9 +81,9 @@ function signed(
 ): { decoded: DecodedMessage; bam: BAMMessage; signature: Uint8Array } {
   const priv = generateECDSAPrivateKey();
   const sender = deriveAddress(priv);
-  const contents = encodeContents(tag, payload);
+  const contents = payload;
   const bam: BAMMessage = { sender, nonce, contents };
-  const sigHex = signECDSAWithKey(priv, bam, CHAIN_ID);
+  const sigHex = signECDSAWithKey(priv, bam, tag, CHAIN_ID);
   const signature = hexToBytes(sigHex);
   return {
     bam,
@@ -95,7 +94,7 @@ function signed(
       contents,
       contentTag: tag,
       signature,
-      messageHash: computeMessageHashForMessage(bam),
+      messageHash: computeMessageHashForMessage(bam, tag),
       ingestedAt: Number(nonce) * 1_000,
     },
   };

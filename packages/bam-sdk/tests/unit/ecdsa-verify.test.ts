@@ -1,7 +1,7 @@
 import * as secp256k1 from '@noble/secp256k1';
 import { describe, expect, it } from 'vitest';
 
-import type { Address, BAMMessage } from '../../src/types.js';
+import type { Address, BAMMessage, Bytes32 } from '../../src/types.js';
 import {
   computeECDSADigest,
   signECDSAWithKey,
@@ -11,6 +11,8 @@ import {
 const PRIV = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80' as const;
 // Corresponding Ethereum address (Anvil default account[0]).
 const ADDR = '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266' as Address;
+const TAG_A = ('0x' + 'aa'.repeat(32)) as Bytes32;
+const TAG_B = ('0x' + 'bb'.repeat(32)) as Bytes32;
 
 function hexToBytes(hex: string): Uint8Array {
   const c = hex.startsWith('0x') ? hex.slice(2) : hex;
@@ -25,60 +27,54 @@ function bytesToHex(b: Uint8Array): `0x${string}` {
 const SECP_N = 0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141n;
 
 describe('verifyECDSA', () => {
-  const tag = 'aa'.repeat(32);
-  const contents = hexToBytes(tag + '414243');
+  const contents = hexToBytes('414243');
   const msg: BAMMessage = { sender: ADDR, nonce: 7n, contents };
   const CHAIN = 31337;
 
   it('accepts a valid signature produced by signECDSAWithKey', () => {
-    const sig = signECDSAWithKey(PRIV, msg, CHAIN);
-    expect(verifyECDSA(msg, sig, ADDR, CHAIN)).toBe(true);
+    const sig = signECDSAWithKey(PRIV, msg, TAG_A, CHAIN);
+    expect(verifyECDSA(msg, TAG_A, sig, ADDR, CHAIN)).toBe(true);
   });
 
   it('rejects against a different expectedSender', () => {
-    const sig = signECDSAWithKey(PRIV, msg, CHAIN);
+    const sig = signECDSAWithKey(PRIV, msg, TAG_A, CHAIN);
     const wrong = ('0x' + '22'.repeat(20)) as Address;
-    expect(verifyECDSA(msg, sig, wrong, CHAIN)).toBe(false);
+    expect(verifyECDSA(msg, TAG_A, sig, wrong, CHAIN)).toBe(false);
   });
 
   it('rejects against a different chainId (cross-chain replay blocked)', () => {
-    const sig = signECDSAWithKey(PRIV, msg, CHAIN);
-    expect(verifyECDSA(msg, sig, ADDR, 1)).toBe(false);
+    const sig = signECDSAWithKey(PRIV, msg, TAG_A, CHAIN);
+    expect(verifyECDSA(msg, TAG_A, sig, ADDR, 1)).toBe(false);
   });
 
-  it('rejects when contents are tampered outside the tag prefix', () => {
-    const sig = signECDSAWithKey(PRIV, msg, CHAIN);
-    const tampered: BAMMessage = {
-      ...msg,
-      contents: hexToBytes(tag + '414244'),
-    };
-    expect(verifyECDSA(tampered, sig, ADDR, CHAIN)).toBe(false);
+  it('rejects against a different contentTag (cross-app re-routing blocked)', () => {
+    const sig = signECDSAWithKey(PRIV, msg, TAG_A, CHAIN);
+    expect(verifyECDSA(msg, TAG_B, sig, ADDR, CHAIN)).toBe(false);
   });
 
-  it('rejects when the contentTag prefix is tampered', () => {
-    const sig = signECDSAWithKey(PRIV, msg, CHAIN);
-    const tagTampered = 'bb'.repeat(32);
+  it('rejects when contents are tampered', () => {
+    const sig = signECDSAWithKey(PRIV, msg, TAG_A, CHAIN);
     const tampered: BAMMessage = {
       ...msg,
-      contents: hexToBytes(tagTampered + '414243'),
+      contents: hexToBytes('414244'),
     };
-    expect(verifyECDSA(tampered, sig, ADDR, CHAIN)).toBe(false);
+    expect(verifyECDSA(tampered, TAG_A, sig, ADDR, CHAIN)).toBe(false);
   });
 
   it('rejects a tampered nonce', () => {
-    const sig = signECDSAWithKey(PRIV, msg, CHAIN);
-    expect(verifyECDSA({ ...msg, nonce: 8n }, sig, ADDR, CHAIN)).toBe(false);
+    const sig = signECDSAWithKey(PRIV, msg, TAG_A, CHAIN);
+    expect(verifyECDSA({ ...msg, nonce: 8n }, TAG_A, sig, ADDR, CHAIN)).toBe(false);
   });
 
   it('rejects signature lengths ≠ 65 bytes', () => {
     for (const n of [48, 64, 66, 96, 128]) {
       const fake = bytesToHex(new Uint8Array(n));
-      expect(verifyECDSA(msg, fake, ADDR, CHAIN)).toBe(false);
+      expect(verifyECDSA(msg, TAG_A, fake, ADDR, CHAIN)).toBe(false);
     }
   });
 
   it('rejects high-s signature (malleability)', () => {
-    const sig = signECDSAWithKey(PRIV, msg, CHAIN);
+    const sig = signECDSAWithKey(PRIV, msg, TAG_A, CHAIN);
     const sigBytes = hexToBytes(sig);
     // Flip to high-s by computing n - s.
     const sHex =
@@ -96,25 +92,24 @@ describe('verifyECDSA', () => {
     mutated.set(sHighBytes, 32);
     // Flip v byte for the high-s form
     mutated[64] = sigBytes[64] === 27 ? 28 : 27;
-    expect(verifyECDSA(msg, bytesToHex(mutated), ADDR, CHAIN)).toBe(false);
+    expect(verifyECDSA(msg, TAG_A, bytesToHex(mutated), ADDR, CHAIN)).toBe(false);
   });
 
   it('never throws on malformed hex', () => {
-    // Non-hex chars embedded — hexToBytes may throw; verifyECDSA catches.
     expect(
-      verifyECDSA(msg, '0xnothexhex' as `0x${string}`, ADDR, CHAIN)
+      verifyECDSA(msg, TAG_A, '0xnothexhex' as `0x${string}`, ADDR, CHAIN)
     ).toBe(false);
-    expect(verifyECDSA(msg, '0x' as `0x${string}`, ADDR, CHAIN)).toBe(false);
+    expect(verifyECDSA(msg, TAG_A, '0x' as `0x${string}`, ADDR, CHAIN)).toBe(false);
   });
 
   it('recovers the sender from the digest (independent of signECDSAWithKey)', () => {
     // Build a signature manually via noble to prove the verifier is not
     // trivially reflecting the signer.
-    const digest = hexToBytes(computeECDSADigest(msg, CHAIN));
+    const digest = hexToBytes(computeECDSADigest(msg, TAG_A, CHAIN));
     const sig = secp256k1.sign(digest, hexToBytes(PRIV));
     const out = new Uint8Array(65);
     out.set(sig.toCompactRawBytes());
     out[64] = sig.recovery + 27;
-    expect(verifyECDSA(msg, bytesToHex(out), ADDR, CHAIN)).toBe(true);
+    expect(verifyECDSA(msg, TAG_A, bytesToHex(out), ADDR, CHAIN)).toBe(true);
   });
 });

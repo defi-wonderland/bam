@@ -420,6 +420,7 @@ export class BAMClient {
       messageBytes: toHex(params.messageBytes),
       blsSignature: toHex(params.blsSignature),
       registrationProof: toHex(params.registrationProof),
+      contentTag: params.contentTag as `0x${string}`,
     };
 
     const hash = await wallet.writeContract({
@@ -455,6 +456,7 @@ export class BAMClient {
       messageBytes: toHex(params.messageBytes),
       signature: toHex(params.signature),
       registrationProof: toHex(params.registrationProof),
+      contentTag: params.contentTag as `0x${string}`,
     };
 
     const hash = await wallet.writeContract({
@@ -508,6 +510,7 @@ export class BAMClient {
       messageBytes: toHex(params.messageBytes),
       blsSignature: toHex(params.blsSignature),
       registrationProof: toHex(params.registrationProof),
+      contentTag: params.contentTag as `0x${string}`,
     };
 
     return this.publicClient.estimateContractGas({
@@ -529,6 +532,7 @@ export class BAMClient {
       messageBytes: toHex(params.messageBytes),
       signature: toHex(params.signature),
       registrationProof: toHex(params.registrationProof),
+      contentTag: params.contentTag as `0x${string}`,
     };
 
     return this.publicClient.estimateContractGas({

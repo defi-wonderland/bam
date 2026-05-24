@@ -1,7 +1,6 @@
 import {
   computeMessageHashForMessage,
   deriveAddress,
-  encodeContents,
   generateECDSAPrivateKey,
   hexToBytes,
   signECDSAWithKey,
@@ -32,13 +31,13 @@ interface SignedMessage {
 function makeSignedMessage(nonce: bigint, payload: Uint8Array, tag: Bytes32 = TAG_A): SignedMessage {
   const priv = generateECDSAPrivateKey();
   const sender = deriveAddress(priv);
-  const contents = encodeContents(tag, payload);
+  const contents = payload;
   const message: BAMMessage = { sender, nonce, contents };
-  const sigHex = signECDSAWithKey(priv, message, CHAIN_ID);
+  const sigHex = signECDSAWithKey(priv, message, tag, CHAIN_ID);
   return {
     message,
     signature: hexToBytes(sigHex),
-    messageHash: computeMessageHashForMessage(message),
+    messageHash: computeMessageHashForMessage(message, tag),
   };
 }
 
@@ -227,7 +226,7 @@ describe('processBatch', () => {
         sender: m1.message.sender,
         nonce: 1n,
         contentTag: TAG_A,
-        contents: encodeContents(TAG_A, new Uint8Array([99])),
+        contents: new Uint8Array([99]),
         signature: new Uint8Array(65),
         messageHash: ('0x' + 'ee'.repeat(32)) as Bytes32,
         status: 'confirmed',

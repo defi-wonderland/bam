@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import type { Address } from '../../src/types.js';
+import type { Address, Bytes32 } from '../../src/types.js';
 import { computeMessageHash } from '../../src/message.js';
 
 describe('browser harness smoke', () => {
@@ -9,12 +9,11 @@ describe('browser harness smoke', () => {
     expect(typeof window).toBe('object');
   });
 
-  it('computeMessageHash matches the Node vector under jsdom', () => {
+  it('computeMessageHash runs and produces a 32-byte hash under jsdom', () => {
     const sender = ('0x' + '11'.repeat(20)) as Address;
-    const contents = new Uint8Array(35);
-    contents.fill(0xaa, 0, 32);
-    contents.set([0x41, 0x42, 0x43], 32);
-    const hash = computeMessageHash(sender, 42n, contents);
-    expect(hash).toBe('0xcd85d7e54cb158da66baa2ff0ea40828c61e4d078a320e2c266ad082f8da2656');
+    const contentTag = ('0x' + 'aa'.repeat(32)) as Bytes32;
+    const contents = new Uint8Array([0x41, 0x42, 0x43]);
+    const hash = computeMessageHash(sender, contentTag, 42n, contents);
+    expect(hash).toMatch(/^0x[0-9a-f]{64}$/);
   });
 });

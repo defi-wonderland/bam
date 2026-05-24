@@ -14,15 +14,15 @@ const TEXT_DECODER = new TextDecoder();
  *       "message": {
  *         "sender":    "0x<20 bytes>",
  *         "nonce":     decimal-string | hex-string | number,
- *         "contents":  "0x<>=32 bytes>",
+ *         "contents":  "0x<app body bytes>",
  *         "signature": "0x<65 bytes>"
  *       }
  *     }
  *
- * `contentTag` MUST equal `contents[0..32]` — that check is the
- * pipeline's `checkContentTag` stage; this parser only validates
- * structure. `contents.length >= 32` is enforced here to guarantee a
- * tag prefix exists to inspect.
+ * `contents` is opaque app body bytes (no tag prefix); `contentTag`
+ * is bound into the `messageHash` formula directly, so the signature
+ * check enforces tag attribution. The pipeline gates the envelope tag
+ * on the operator allowlist before any crypto runs.
  */
 export interface MessageEnvelope {
   contentTag: Bytes32;
@@ -67,7 +67,7 @@ export function parseEnvelope(raw: Uint8Array): ParseResult {
   if (parsedNonce === null) return { ok: false, result: { ok: false, reason: 'malformed' } };
 
   const contentsBytes = parseHexBytes(contents);
-  if (contentsBytes === null || contentsBytes.length < 32) {
+  if (contentsBytes === null) {
     return { ok: false, result: { ok: false, reason: 'malformed' } };
   }
 

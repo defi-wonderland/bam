@@ -21,22 +21,41 @@ export const EIP712_DOMAIN_VERSION = '1';
 
 /**
  * EIP-712 typed-data schema for a BAM message.
+ *
+ * Field order mirrors the `messageHash` preimage:
+ * `sender, contentTag, nonce, contents`. `contentTag` is bound here
+ * so the digest a scheme-0x01 signer signs is tied to a specific app;
+ * an aggregator that places the signed envelope into a segment with a
+ * different `contentTag` produces a digest that does not match.
  */
 export const EIP712_TYPES = {
   BAMMessage: [
     { name: 'sender', type: 'address' },
+    { name: 'contentTag', type: 'bytes32' },
     { name: 'nonce', type: 'uint64' },
     { name: 'contents', type: 'bytes' },
   ],
 } as const;
 
 /**
- * Compute the EIP-712 digest a scheme-0x01 signer signs. Chain-bound
- * by construction: the same `BAMMessage` on a different `chainId`
- * yields a different digest, so cross-chain signature replay is not
- * reachable.
+ * Compute the EIP-712 digest a scheme-0x01 signer signs.
+ *
+ * Chain-bound by construction: the same message on a different
+ * `chainId` yields a different digest, so cross-chain signature replay
+ * is not reachable. Tag-bound: the same `(sender, nonce, contents)`
+ * under a different `contentTag` yields a different digest, so the
+ * cross-app re-routing that the BLS path's `messageHash` formula
+ * prevents is closed for ECDSA too.
+ *
+ * `contentTag` is supplied separately because it is a property of the
+ * batch the message lands in (read from the registration event), not
+ * of the message itself.
  */
-export function computeECDSADigest(message: BAMMessage, chainId: number): Bytes32 {
+export function computeECDSADigest(
+  message: BAMMessage,
+  contentTag: Bytes32,
+  chainId: number
+): Bytes32 {
   return hashTypedData({
     domain: {
       name: EIP712_DOMAIN_NAME,
@@ -47,6 +66,7 @@ export function computeECDSADigest(message: BAMMessage, chainId: number): Bytes3
     primaryType: 'BAMMessage',
     message: {
       sender: message.sender,
+      contentTag,
       nonce: message.nonce,
       contents: bytesToHex(message.contents) as `0x${string}`,
     },

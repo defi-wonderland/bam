@@ -32,7 +32,7 @@ describe('@bam/poster public surface', () => {
   it('exports rejection enum values', () => {
     expect(Array.isArray(poster.POSTER_REJECTIONS)).toBe(true);
     expect(poster.POSTER_REJECTIONS).toContain('stale_nonce');
-    expect(poster.POSTER_REJECTIONS).toContain('content_tag_mismatch');
+    expect(poster.POSTER_REJECTIONS).toContain('unknown_tag');
     expect(poster.POSTER_REJECTIONS).toContain('bad_signature');
     expect(poster.POSTER_REJECTIONS).toContain('message_too_large');
   });

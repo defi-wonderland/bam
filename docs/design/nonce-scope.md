@@ -1,6 +1,6 @@
 # Nonce scope and multi-app identity
 
-**Status:** open design question
+**Status:** resolved (2026-05) — the "fold `contentTag` into `messageHash`" alternative below was adopted in the tag-binding rework. The current ERC-8180 §*Signing Domain and Message Hash Convention* now defines `messageHash = keccak256(sender ‖ contentTag ‖ nonce ‖ contents)` and the EIP-712 `BAMMessage` struct includes `contentTag`. See [ERC-8180](../specs/erc-8180.md). The historical analysis below is retained because it captures the motivating use case and the trade-offs considered.
 **Raised:** 2026-04 (during BAM Poster feature planning)
 **Relevant ERC:** [ERC-8180](../specs/erc-8180.md) §*Nonce Semantics*, §*Signing Domain and Message Hash Convention*
 
@@ -58,24 +58,19 @@ Alternative: fold `contentTag` into `messageHash` itself (`keccak256(sender, con
 
 Out of scope for this note: how to handle a message that legitimately belongs to multiple content tags (e.g. cross-posted). The current ERC doesn't support this either; v2 wouldn't have to.
 
-## Current stance (2026-04)
+## Resolution (2026-05)
 
-The BAM Poster ships under the **current** ERC-8180:
+The tag-binding rework adopted the second alternative — folding `contentTag` into `messageHash` itself — across the spec, SDK, Poster, Reader, and demos:
 
-- Per-sender nonce monotonicity, scoped per sender globally across all served tags.
-- Byte-equal resubmissions of the last-accepted message tolerated as no-ops (retry).
-- Any other ingest with `nonce ≤ last_accepted[sender]` rejected as `stale_nonce`.
+- `messageHash = keccak256(sender ‖ contentTag ‖ nonce ‖ contents)`.
+- The EIP-712 `BAMMessage` struct includes `contentTag` as a bound field.
+- The Poster's per-sender monotonicity rule is unchanged (still global per sender across served tags); a same-`(sender, nonce)` pair under a different tag now produces a different `messageHash`, so the byte-equal retry path still works without a per-tag scope.
+- Indexers and the Reader source `contentTag` from the L1 `BlobBatchRegistered` / `CalldataBatchRegistered` event topic and feed it into `verifyECDSA` / `verifyBLS`. The signature alone is no longer sufficient to attribute a message — the L1 event is the trust anchor for which tag it was bound to.
 
-If the ERC evolves to per-tag signing domains, the Poster's rule narrows to per-`(sender, contentTag)` with a small code change; no re-architecting is needed.
-
-## Action items
-
-- [ ] **Raise with ERC-8180 authors** (Vitalik, Kimmo, Skeletor Spaceman). Share this note as the motivating use case. Venue: `ethereum-magicians.org` ERC-8180 discussion thread or direct review.
-- [ ] **Gather signal from demo usage.** If users hit the multi-app coordination cost during the BAM Poster's demo integration, collect the anecdote and fold it into the ERC discussion.
-- [ ] **If ERC accepts the change**, open a separate feature to thread it through `bam-sdk`, the sync indexer, and any other callers. The Poster update ships as part of that feature.
-- [ ] **If ERC declines**, document the rationale here and update guidance for multi-app BAM clients (recommend per-app keys, or shared-Poster nonce-read helper).
+The Sybil/multi-app coordination story this doc opened with is closed by the binding itself: a key reused across apps still shares one nonce sequence per sender (the ERC's monotonicity rule), but a signature can no longer be re-routed across apps, so the worst-case failure mode is "the second submission lost the nonce race" rather than "the wrong app accepted a foreign message."
 
 ## References
 
-- ERC-8180 §*Nonce Semantics* — `docs/specs/erc-8180.md` (lines 332–343)
-- ERC-8180 §*Signing Domain and Message Hash Convention* — `docs/specs/erc-8180.md` (lines 517–545)
+- ERC-8180 §*Signing Domain and Message Hash Convention* — `docs/specs/erc-8180.md`
+- Cross-tag replay regression — `packages/bam-poster/test/ingest/cross-tag-replay.test.ts`
+- Verifier sourcing `contentTag` from the L1 event — `packages/bam-reader/src/verify/dispatch.ts`

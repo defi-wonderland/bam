@@ -604,6 +604,11 @@ export const BLS_EXPOSER_ABI = [
             "name": "registrationProof",
             "type": "bytes",
             "internalType": "bytes"
+          },
+          {
+            "name": "contentTag",
+            "type": "bytes32",
+            "internalType": "bytes32"
           }
         ]
       }
@@ -650,6 +655,11 @@ export const BLS_EXPOSER_ABI = [
             "name": "registrationProof",
             "type": "bytes",
             "internalType": "bytes"
+          },
+          {
+            "name": "contentTag",
+            "type": "bytes32",
+            "internalType": "bytes32"
           }
         ]
       }

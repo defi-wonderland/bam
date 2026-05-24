@@ -12,7 +12,6 @@ import type {
   PosterLogger,
   BamStore,
   Status,
-  SubmitHint,
   SubmitResult,
   SubmittedBatch,
   SubmittedBatchesQuery,
@@ -286,16 +285,12 @@ export async function createPoster(
     };
 
     const internal: InternalPoster = {
-      async submit(message: Uint8Array, hint?: SubmitHint): Promise<SubmitResult> {
+      async submit(message: Uint8Array): Promise<SubmitResult> {
         const { state } = aggregateHealth();
         if (state === 'unhealthy') {
           return { accepted: false, reason: 'unhealthy' };
         }
-        const canonicalHint: SubmitHint | undefined =
-          hint?.contentTag !== undefined
-            ? { ...hint, contentTag: canonicalTag(hint.contentTag) }
-            : hint;
-        return pipeline.ingest(message, canonicalHint);
+        return pipeline.ingest(message);
       },
       async listPending(query?: PendingQuery): Promise<Pending[]> {
         const q: PendingQuery = query ?? {};

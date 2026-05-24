@@ -1,9 +1,11 @@
 /**
  * Public types and interfaces for the BAM Poster library.
  *
- * Messages flow as `BAMMessage`-shaped records (`sender, nonce, contents`)
- * where `contents[0..32]` is the authoritative `contentTag`. App-level
- * structure lives inside the app-opaque portion of `contents`.
+ * Messages flow as `BAMMessage`-shaped records (`sender, nonce, contents`).
+ * `contentTag` is carried alongside the message and bound into the signed
+ * digest via the ERC-8180 `messageHash` formula
+ * (`keccak256(sender ‖ contentTag ‖ nonce ‖ contents)`) and, for ECDSA,
+ * the EIP-712 `BAMMessage` typed-data struct. `contents` is app-opaque.
  */
 
 import type { Address, Bytes32 } from 'bam-sdk';
@@ -51,15 +53,6 @@ export interface SubmittedBatchesQuery {
 // Submit API
 // ═══════════════════════════════════════════════════════════════════════
 
-/**
- * Optional transport-supplied hint. The hint is advisory only — the tag
- * bound in `contents[0..32]` is the authoritative source. Any mismatch
- * is rejected at ingest before signature verification.
- */
-export interface SubmitHint {
-  contentTag?: Bytes32;
-}
-
 export type SubmitResult =
   | { accepted: true; messageHash: Bytes32 }
   | { accepted: false; reason: PosterRejection };
@@ -70,22 +63,25 @@ export type SubmitResult =
 
 /**
  * Canonical internal representation of a signed, well-formed message.
- * `contents` is the full byte string including the 32-byte `contentTag`
- * prefix; `contents[0..32]` and the top-level `contentTag` are guaranteed
- * equal after the ingest's `checkContentTag` stage.
+ * `contents` is the app-opaque payload; `contentTag` rides alongside
+ * and is the value bound into `messageHash` (and into the EIP-712
+ * BAMMessage struct for ECDSA scheme 0x01).
  */
 export interface DecodedMessage {
   /** Signed sender (recovered address or asserted + checked). */
   sender: Address;
   /** Per-sender sequential counter. uint64. */
   nonce: bigint;
-  /** Full signed content bytes (tag prefix + app-opaque payload). */
+  /** App-opaque content bytes — no tag prefix. */
   contents: Uint8Array;
-  /** Authoritative content tag = `contents[0..32]`. */
+  /** Authoritative content tag taken from the validated envelope. */
   contentTag: Bytes32;
   /** Raw signature bytes (65-byte ECDSA for scheme 0x01). */
   signature: Uint8Array;
-  /** ERC-8180 messageHash: keccak256(sender || nonce || contents). Stable client-facing pre-batch identifier. */
+  /**
+   * ERC-8180 messageHash: `keccak256(sender || contentTag || nonce || contents)`.
+   * Stable client-facing pre-batch identifier.
+   */
   messageHash: Bytes32;
   /** Poster-side ingest time, ms since epoch; populated once the message has been inserted. */
   ingestedAt?: number;
@@ -205,6 +201,16 @@ export interface HealthTagEntry {
 
 export type ValidationResult = { ok: true } | { ok: false; reason: PosterRejection };
 
+/**
+ * Pluggable per-message verifier.
+ *
+ * Implementations MUST verify the signature under `msg.contentTag` —
+ * i.e., reconstruct the digest from `(sender, contentTag, nonce, contents)`
+ * exactly as `computeMessageHash` / `computeECDSADigest` do. A
+ * validator that ignores `contentTag` reopens cross-tag replay locally:
+ * a signature authored for tag A would silently verify under tag B,
+ * defeating the whole point of binding the tag into the digest.
+ */
 export interface MessageValidator {
   validate(msg: DecodedMessage): ValidationResult;
   /**
@@ -287,7 +293,7 @@ export interface PosterConfig {
   batchPolicy?: BatchPolicy;
   /** Max per-message wire-envelope size in bytes. */
   maxMessageSizeBytes?: number;
-  /** Max `contents` (tag prefix + app bytes) size in bytes. */
+  /** Max `contents` (app body bytes) size in bytes. */
   maxContentsSizeBytes?: number;
   blobCapacityBytes?: number;
   reorgWindowBlocks?: number;
@@ -340,7 +346,7 @@ export interface PosterConfig {
 // ═══════════════════════════════════════════════════════════════════════
 
 export interface Poster {
-  submit(message: Uint8Array, hint?: SubmitHint): Promise<SubmitResult>;
+  submit(message: Uint8Array): Promise<SubmitResult>;
   listPending(query?: PendingQuery): Promise<Pending[]>;
   listSubmittedBatches(query?: SubmittedBatchesQuery): Promise<SubmittedBatch[]>;
   /**

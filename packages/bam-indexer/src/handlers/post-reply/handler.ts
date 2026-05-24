@@ -60,7 +60,7 @@ export function createPostReplyHandler(
 
     decode(contents: Uint8Array): PostReplyMessage | null {
       try {
-        return decodePostReplyContents(contents).app;
+        return decodePostReplyContents(contents);
       } catch {
         return null;
       }

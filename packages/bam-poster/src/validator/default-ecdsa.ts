@@ -10,8 +10,9 @@ import type { DecodedMessage, MessageValidator, ValidationResult } from '../type
  * last gate before pool insertion.
  *
  * The validator calls `verifyECDSA` directly against the sender bound
- * in the message. The EIP-712 domain is chain-bound, so a matching
- * `chainId` is required.
+ * in the message, with the segment's `contentTag` as a load-bearing
+ * input. The EIP-712 domain is chain-bound, so a matching `chainId`
+ * is required.
  *
  * Cross-scheme safety: `verifyECDSA` returns `false` for any signature
  * length ≠ 65 bytes, so a BLS signature routed through this validator
@@ -25,6 +26,7 @@ export function defaultEcdsaValidator(chainId: number): MessageValidator {
       const sigHex = toHex(msg.signature);
       const ok = verifyECDSA(
         { sender: msg.sender, nonce: msg.nonce, contents: msg.contents },
+        msg.contentTag,
         sigHex,
         msg.sender,
         chainId
@@ -40,6 +42,7 @@ export function defaultEcdsaValidator(chainId: number): MessageValidator {
       const sigHex = toHex(msg.signature);
       const ok = verifyECDSA(
         { sender: msg.sender, nonce: msg.nonce, contents: msg.contents },
+        msg.contentTag,
         sigHex,
         msg.sender,
         chainId

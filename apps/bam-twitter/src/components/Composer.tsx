@@ -71,7 +71,7 @@ export function Composer({ replyTo, onSent, placeholder, autoFocus }: ComposerPr
                 content: content.trim(),
               }
             : { kind: 'post', timestamp, content: content.trim() };
-        const contents = encodePostReplyContents(TWITTER_TAG, app);
+        const contents = encodePostReplyContents(app);
 
         const signature = await signTypedDataAsync({
           domain: {
@@ -83,6 +83,7 @@ export function Composer({ replyTo, onSent, placeholder, autoFocus }: ComposerPr
           primaryType: 'BAMMessage',
           message: {
             sender: address as Address,
+            contentTag: TWITTER_TAG,
             nonce,
             contents: bytesToHex(contents),
           },
@@ -91,13 +92,12 @@ export function Composer({ replyTo, onSent, placeholder, autoFocus }: ComposerPr
         // Optimistic preview: compute the same messageHash the Poster
         // will compute on accept so the UI could surface it without
         // waiting for the round-trip.
-        void computeMessageHash(address as Address, nonce, contents);
+        void computeMessageHash(address as Address, TWITTER_TAG, nonce, contents);
 
         return fetch('/api/messages', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            contentTag: TWITTER_TAG,
             message: {
               sender: address,
               nonce: nonce.toString(),

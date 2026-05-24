@@ -122,8 +122,10 @@ const MAX_CONTENTS_HEX_CHARS = MAX_CONTENTS_BYTES * 2;
 
 /**
  * Best-effort decode of a BAM message's `contents` into UTF-8 text.
- * Each app's `contents[32:]` codec ends in `[u32 BE length][utf8]`,
- * so we scan for the offset whose trailing bytes form a valid
+ * After the tag-binding rework, `contents` carries the app body
+ * directly — `contentTag` is bound into the signed digest, not
+ * prepended. Each app's codec ends in `[u32 BE length][utf8]`, so we
+ * scan for the offset whose trailing bytes form a valid
  * length-prefixed UTF-8 string. Returns null if no candidate fits.
  *
  * Exported for test/decode-text.test.ts; not part of the panel's
@@ -138,16 +140,15 @@ export function decodeText(contents: unknown): string | null {
   } catch {
     return null;
   }
-  if (bytes.length < 32 + 4) return null;
-  const app = bytes.subarray(32);
-  for (let p = 0; p + 4 <= app.length; p++) {
+  if (bytes.length < 4) return null;
+  for (let p = 0; p + 4 <= bytes.length; p++) {
     const len =
-      (app[p] * 0x1000000 + (app[p + 1] << 16) + (app[p + 2] << 8) + app[p + 3]) >>> 0;
+      (bytes[p] * 0x1000000 + (bytes[p + 1] << 16) + (bytes[p + 2] << 8) + bytes[p + 3]) >>> 0;
     // `len === 0` is valid (empty UTF-8); cap at 4096 to bound work.
     if (len > 4096) continue;
-    if (p + 4 + len !== app.length) continue;
+    if (p + 4 + len !== bytes.length) continue;
     try {
-      return utf8.decode(app.subarray(p + 4, p + 4 + len));
+      return utf8.decode(bytes.subarray(p + 4, p + 4 + len));
     } catch {
       // not valid UTF-8 at this offset; keep scanning
     }

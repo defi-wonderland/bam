@@ -9,7 +9,6 @@ import {
   decodeBatchBPEPerMessage,
   deriveAddress,
   encodeBatchBPE,
-  encodeContents,
   generateECDSAPrivateKey,
   hexToBytes,
   loadBPEDictionaryFromChain,
@@ -86,11 +85,11 @@ export function BpeBatchSection() {
       const msg: BAMMessage = {
         sender,
         nonce: BigInt(i),
-        contents: encodeContents(DEMO_CONTENT_TAG, new TextEncoder().encode(lines[i])),
+        contents: new TextEncoder().encode(lines[i]),
       };
       messages.push(msg);
       if (sigMode === 'per-message') {
-        const sigHex = signECDSAWithKey(sk as `0x${string}`, msg, Number(chainId));
+        const sigHex = signECDSAWithKey(sk as `0x${string}`, msg, DEMO_CONTENT_TAG, Number(chainId));
         const sig = hexToBytes(sigHex);
         const padded = new Uint8Array(unit);
         padded.set(sig.subarray(0, Math.min(unit, sig.length)));

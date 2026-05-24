@@ -25,7 +25,6 @@ import {
   decodeBatch,
   deriveAddress,
   encodeBatch,
-  encodeContents,
   generateECDSAPrivateKey,
   hexToBytes,
   signECDSAWithKey,
@@ -61,13 +60,13 @@ interface SignedEntry {
 function signedEntry(tag: Bytes32, nonce: bigint, marker: number): SignedEntry {
   const priv = generateECDSAPrivateKey();
   const sender = deriveAddress(priv);
-  const contents = encodeContents(tag, new Uint8Array([marker]));
+  const contents = new Uint8Array([marker]);
   const message: BAMMessage = { sender, nonce, contents };
-  const sigHex = signECDSAWithKey(priv, message, CHAIN_ID);
+  const sigHex = signECDSAWithKey(priv, message, tag, CHAIN_ID);
   return {
     message,
     signature: hexToBytes(sigHex),
-    messageHash: computeMessageHashForMessage(message),
+    messageHash: computeMessageHashForMessage(message, tag),
   };
 }
 

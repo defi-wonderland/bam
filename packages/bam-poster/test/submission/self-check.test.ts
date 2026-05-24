@@ -4,7 +4,6 @@ import {
   encodeBatch,
   generateECDSAPrivateKey,
   deriveAddress,
-  encodeContents,
   signECDSAWithKey,
   hexToBytes,
   computeMessageHashForMessage,
@@ -34,11 +33,11 @@ function makeSignedMessage(
 ): { decoded: DecodedMessage; bam: BAMMessage; signature: Uint8Array } {
   const priv = generateECDSAPrivateKey();
   const sender = deriveAddress(priv);
-  const contents = encodeContents(tag, payload);
+  const contents = payload;
   const bam: BAMMessage = { sender, nonce, contents };
-  const sigHex = signECDSAWithKey(priv, bam, CHAIN_ID);
+  const sigHex = signECDSAWithKey(priv, bam, tag, CHAIN_ID);
   const signature = hexToBytes(sigHex);
-  const messageHash = computeMessageHashForMessage(bam);
+  const messageHash = computeMessageHashForMessage(bam, tag);
   return {
     bam,
     signature,
@@ -46,6 +45,7 @@ function makeSignedMessage(
       sender,
       nonce,
       contents,
+      contentTag: tag,
       signature,
       messageHash,
       ingestedAt: 0,

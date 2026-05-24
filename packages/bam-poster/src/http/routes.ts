@@ -120,12 +120,7 @@ export const submitHandler: Handler = async (req, res, ctx) => {
     // Client disconnected mid-upload. Nothing to respond to.
     return;
   }
-  const url = new URL(req.url ?? '/', 'http://local');
-  const hintTag = url.searchParams.get('contentTag') ?? undefined;
-  const result = await ctx.poster.submit(
-    new Uint8Array(body),
-    hintTag ? { contentTag: hintTag as `0x${string}` } : undefined
-  );
+  const result = await ctx.poster.submit(new Uint8Array(body));
   if (result.accepted) {
     return sendJson(res, 201, { accepted: true, messageHash: result.messageHash });
   }

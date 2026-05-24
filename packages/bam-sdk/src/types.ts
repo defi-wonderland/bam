@@ -46,17 +46,20 @@ export interface BAMMessage {
 /**
  * ERC-BAM hash types used in the decode → hash → verify flow.
  *
- * messageHash: keccak256(sender || nonce || contents) — security bridge
- * messageId:   keccak256(sender || nonce || contentHash) — deduplication key
+ * messageHash: keccak256(sender || contentTag || nonce || contents) — security bridge
+ * messageId:   keccak256(sender || contentTag || nonce || contentHash) — deduplication key
  * signedHash:  keccak256(domain || messageHash) — cross-chain replay prevention
  *
- * The domain separator keccak256("ERC-BAM.v1" || chainId) is used to compute signedHash
- * but is not included as a field — it is derived from the chain context.
+ * `contentTag` binds each message to the batch it was registered under, so an
+ * untrusted aggregator cannot lift a signed message into a batch with a
+ * different `contentTag`. The domain separator
+ * `keccak256("ERC-BAM.v1" || chainId)` feeds into `signedHash` but is not
+ * included here — it is derived from the chain context.
  */
 export interface BAMHashes {
-  /** keccak256(abi.encodePacked(sender, nonce, contents)) */
+  /** keccak256(abi.encodePacked(sender, contentTag, nonce, contents)) */
   messageHash: Bytes32;
-  /** keccak256(abi.encodePacked(sender, nonce, contentHash)) */
+  /** keccak256(abi.encodePacked(sender, contentTag, nonce, contentHash)) */
   messageId: Bytes32;
   /** keccak256(abi.encodePacked(domain, messageHash)) */
   signedHash: Bytes32;
@@ -108,7 +111,7 @@ export interface CalldataBatchRegisteredEvent {
 export interface MessageExposedEvent {
   /** Content identifier (versioned hash for blob, keccak256 for calldata) */
   contentHash: Bytes32;
-  /** Unique message identifier: keccak256(sender || nonce || contentHash) */
+  /** Unique message identifier: keccak256(sender || contentTag || nonce || contentHash) */
   messageId: Bytes32;
   /** Sender's Ethereum address */
   sender: Address;
@@ -251,5 +254,4 @@ export enum ErrorCode {
   UNSUPPORTED_SCHEME_VERSION = 'E013',
   TOO_MANY_AUTHORS = 'E014',
   AUTHOR_NOT_FOUND = 'E015',
-  CONTENTS_TOO_SHORT = 'E016',
 }

@@ -49,7 +49,7 @@ describe('poster-client — wrapping fetch', () => {
     global.fetch = ORIGINAL_FETCH;
   });
 
-  it('submitMessage POSTs the raw envelope + optional hint', async () => {
+  it('submitMessage POSTs the raw envelope to /submit', async () => {
     fetchMock.mockResolvedValueOnce(
       new Response(JSON.stringify({ accepted: true, messageId: '0xabc' }), {
         status: 201,
@@ -58,14 +58,11 @@ describe('poster-client — wrapping fetch', () => {
     );
     const res = await submitMessage({
       rawEnvelope: new TextEncoder().encode('{}'),
-      hintContentTag: '0x' + 'aa'.repeat(32),
       envUrl: 'http://p',
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe(
-      `http://p/submit?contentTag=${encodeURIComponent('0x' + 'aa'.repeat(32))}`
-    );
+    expect(url).toBe('http://p/submit');
     expect((init as { method: string }).method).toBe('POST');
     expect(res.status).toBe(201);
     expect(res.body).toEqual({ accepted: true, messageId: '0xabc' });

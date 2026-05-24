@@ -4,7 +4,6 @@ import { useState } from 'react';
 import {
   computeECDSADigest,
   deriveAddress,
-  encodeContents,
   generateECDSAPrivateKey,
   signECDSA,
   signECDSAWithKey,
@@ -48,7 +47,7 @@ export function EcdsaSection() {
     return {
       sender,
       nonce: 0n,
-      contents: encodeContents(DEMO_CONTENT_TAG, new TextEncoder().encode(appText)),
+      contents: new TextEncoder().encode(appText),
     };
   }
 
@@ -80,7 +79,7 @@ export function EcdsaSection() {
       title="ECDSA — Scheme 0x01 (EIP-712 over BAMMessage)"
       description="Headless: generateECDSAPrivateKey, signECDSAWithKey, verifyECDSA. Wallet: signECDSA against an injected viem WalletClient."
     >
-      <Field label="app bytes (utf-8) — wrapped in tag-prefixed contents (shared by both paths)">
+      <Field label="contents (utf-8 body — shared by both paths; contentTag is bound separately)">
         <TextInput value={appText} onChange={(e) => setAppText(e.target.value)} />
       </Field>
 
@@ -139,7 +138,11 @@ export function EcdsaSection() {
             disabled={!privateKey || headlessChainId === null}
             onClick={() =>
               digest.run(() =>
-                computeECDSADigest(buildMessage(address as Address), headlessChainId!)
+                computeECDSADigest(
+                  buildMessage(address as Address),
+                  DEMO_CONTENT_TAG,
+                  headlessChainId!
+                )
               )
             }
           >
@@ -153,6 +156,7 @@ export function EcdsaSection() {
                   const sig = signECDSAWithKey(
                     privateKey as `0x${string}`,
                     buildMessage(address as Address),
+                    DEMO_CONTENT_TAG,
                     headlessChainId!
                   );
                   updateSignature(sig, 'headless');
@@ -212,7 +216,11 @@ export function EcdsaSection() {
             onClick={() =>
               walletSign.run(
                 async () => {
-                  const sig = await signECDSA(wallet.client!, buildMessage(wallet.address!));
+                  const sig = await signECDSA(
+                    wallet.client!,
+                    buildMessage(wallet.address!),
+                    DEMO_CONTENT_TAG
+                  );
                   updateSignature(sig, 'wallet');
                   return sig;
                 },
@@ -252,6 +260,7 @@ export function EcdsaSection() {
               () =>
                 verifyECDSA(
                   buildMessage(verifySender!),
+                  DEMO_CONTENT_TAG,
                   signature as `0x${string}`,
                   verifySender!,
                   verifyChain!

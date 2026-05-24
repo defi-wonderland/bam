@@ -14,7 +14,8 @@ interface IERC_BAM_Exposer {
 
     /// @notice Emitted when a message is exposed on-chain.
     /// @param contentHash Content identifier (versioned hash for blob, keccak256 for calldata).
-    /// @param messageId   Unique message identifier: keccak256(sender || nonce || contentHash).
+    /// @param messageId   Unique message identifier:
+    ///                    `keccak256(sender || contentTag || nonce || contentHash)`.
     /// @param sender      Sender's Ethereum address.
     /// @param exposer     Address that called the expose function.
     /// @param timestamp   Block timestamp when exposed.

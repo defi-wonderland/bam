@@ -19,10 +19,21 @@ describe('SDK security surface', () => {
   it('EIP-712 domain is `{ name: "BAM", version: "1", chainId }` — no verifyingContract', () => {
     expect(EIP712_DOMAIN_NAME).toBe('BAM');
     expect(EIP712_DOMAIN_VERSION).toBe('1');
-    // BAMMessage must bind exactly (sender, nonce uint64, contents bytes)
-    // — that's the set every signer signs over.
-    expect(EIP712_TYPES.BAMMessage.map((f) => f.name)).toEqual(['sender', 'nonce', 'contents']);
-    expect(EIP712_TYPES.BAMMessage.map((f) => f.type)).toEqual(['address', 'uint64', 'bytes']);
+    // BAMMessage must bind exactly (sender, contentTag bytes32, nonce uint64,
+    // contents bytes) — that's the set every signer signs over. Omitting
+    // contentTag would reopen cross-app re-routing for the ECDSA path.
+    expect(EIP712_TYPES.BAMMessage.map((f) => f.name)).toEqual([
+      'sender',
+      'contentTag',
+      'nonce',
+      'contents',
+    ]);
+    expect(EIP712_TYPES.BAMMessage.map((f) => f.type)).toEqual([
+      'address',
+      'bytes32',
+      'uint64',
+      'bytes',
+    ]);
   });
 
   it('exports ERC-8180 `computeMessageHash` so clients can recompute the pre-batch identifier', () => {
@@ -43,9 +54,21 @@ describe('SDK security surface', () => {
   it('cross-chain replay is rejected by the EIP-712 construction', () => {
     const { computeECDSADigest } = mainModule;
     const sender = ('0x' + '11'.repeat(20)) as `0x${string}`;
-    const contents = new Uint8Array(32);
-    const d1 = computeECDSADigest({ sender, nonce: 0n, contents }, 1);
-    const d2 = computeECDSADigest({ sender, nonce: 0n, contents }, 2);
+    const contentTag = ('0x' + 'aa'.repeat(32)) as `0x${string}`;
+    const contents = new Uint8Array(0);
+    const d1 = computeECDSADigest({ sender, nonce: 0n, contents }, contentTag, 1);
+    const d2 = computeECDSADigest({ sender, nonce: 0n, contents }, contentTag, 2);
+    expect(d1).not.toBe(d2);
+  });
+
+  it('cross-app re-routing is rejected by the EIP-712 construction (contentTag binding)', () => {
+    const { computeECDSADigest } = mainModule;
+    const sender = ('0x' + '11'.repeat(20)) as `0x${string}`;
+    const tagA = ('0x' + 'aa'.repeat(32)) as `0x${string}`;
+    const tagB = ('0x' + 'bb'.repeat(32)) as `0x${string}`;
+    const contents = new Uint8Array(0);
+    const d1 = computeECDSADigest({ sender, nonce: 0n, contents }, tagA, 1);
+    const d2 = computeECDSADigest({ sender, nonce: 0n, contents }, tagB, 1);
     expect(d1).not.toBe(d2);
   });
 

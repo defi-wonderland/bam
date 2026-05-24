@@ -2,7 +2,6 @@ import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import {
   computeMessageHashForMessage,
   deriveAddress,
-  encodeContents,
   generateECDSAPrivateKey,
   hexToBytes,
   loadTrustedSetup,
@@ -52,11 +51,11 @@ async function ingest(
     for (let i = 0; i < count; i++) {
       const priv = generateECDSAPrivateKey();
       const sender = deriveAddress(priv);
-      const contents = encodeContents(tag, new Uint8Array([i, i, i, i]));
+      const contents = new Uint8Array([i, i, i, i]);
       const message: BAMMessage = { sender, nonce: 1n, contents };
-      const sigHex = signECDSAWithKey(priv, message, CHAIN_ID);
+      const sigHex = signECDSAWithKey(priv, message, tag, CHAIN_ID);
       const signature = hexToBytes(sigHex);
-      const messageHash = computeMessageHashForMessage(message);
+      const messageHash = computeMessageHashForMessage(message, tag);
       const ingestSeq = await txn.nextIngestSeq(tag);
       await txn.insertPending({
         contentTag: tag,

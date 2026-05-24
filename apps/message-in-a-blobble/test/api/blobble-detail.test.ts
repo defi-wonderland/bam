@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { MESSAGE_IN_A_BLOBBLE_TAG } from '@/lib/constants';
 import { encodeSocialContents } from '@/lib/contents-codec';
-import type { Bytes32 } from 'bam-sdk/browser';
 
 const ORIGINAL_FETCH = global.fetch;
 
@@ -19,7 +18,7 @@ function bytesToHex(bytes: Uint8Array): string {
 }
 
 function makeContentsHex(content: string, timestamp = 1_700_000_000): string {
-  const bytes = encodeSocialContents(MESSAGE_IN_A_BLOBBLE_TAG as Bytes32, {
+  const bytes = encodeSocialContents({
     timestamp,
     content,
   });

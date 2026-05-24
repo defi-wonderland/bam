@@ -99,9 +99,7 @@ export {
   computeMessageHash,
   computeMessageHashForMessage,
   computeMessageId,
-  encodeContents,
   hexToBytes,
-  splitContents,
 } from './message.js';
 
 // ERC-8180 scheme-0x01 EIP-712 typed-data primitives.

@@ -77,17 +77,19 @@ export type ECDSASignature = Uint8Array;
 // ═════════════════════════════════════════════════════════════════════════
 
 /**
- * Headless ECDSA signing: sign the EIP-712 digest of `message` on
- * `chainId` with `privateKey`, returning a 65-byte hex signature with
- * canonical low-s (via @noble's default) and `v ∈ {27, 28}`.
+ * Headless ECDSA signing: sign the EIP-712 digest of `message` under
+ * `contentTag` on `chainId` with `privateKey`, returning a 65-byte hex
+ * signature with canonical low-s (via @noble's default) and
+ * `v ∈ {27, 28}`.
  */
 export function signECDSAWithKey(
   privateKey: `0x${string}`,
   message: BAMMessage,
+  contentTag: Bytes32,
   chainId: number
 ): `0x${string}` {
   try {
-    const digest = computeECDSADigest(message, chainId);
+    const digest = computeECDSADigest(message, contentTag, chainId);
     const digestBytes = hexToBytes(digest);
     const privBytes = hexToBytes(privateKey);
     const sig = secp256k1.sign(digestBytes, privBytes);
@@ -110,7 +112,8 @@ export function signECDSAWithKey(
  */
 export async function signECDSA(
   walletClient: WalletClient,
-  message: BAMMessage
+  message: BAMMessage,
+  contentTag: Bytes32
 ): Promise<`0x${string}`> {
   if (walletClient.account == null) {
     throw new SignatureError('walletClient.account is required for ECDSA signing');
@@ -131,6 +134,7 @@ export async function signECDSA(
     primaryType: 'BAMMessage',
     message: {
       sender: message.sender,
+      contentTag,
       nonce: message.nonce,
       contents: bytesToHex(message.contents) as `0x${string}`,
     },
@@ -141,12 +145,14 @@ export async function signECDSA(
 
 /**
  * Verify an EIP-712-constructed ECDSA signature against
- * `expectedSender` on `chainId`. Returns `false` on every failure path
- * (wrong sender, tampered contents, tampered tag prefix, non-canonical
- * high-s, wrong chain id, length ≠ 65, non-hex). Never throws.
+ * `expectedSender` on `chainId`, under `contentTag`. Returns `false` on
+ * every failure path (wrong sender, tampered contents, tampered tag,
+ * non-canonical high-s, wrong chain id, length ≠ 65, non-hex). Never
+ * throws.
  */
 export function verifyECDSA(
   message: BAMMessage,
+  contentTag: Bytes32,
   signature: `0x${string}`,
   expectedSender: Address,
   chainId: number
@@ -155,7 +161,7 @@ export function verifyECDSA(
     const sigBytes = hexToBytes(signature);
     if (sigBytes.length !== 65) return false;
 
-    const digest = hexToBytes(computeECDSADigest(message, chainId));
+    const digest = hexToBytes(computeECDSADigest(message, contentTag, chainId));
     const compact = sigBytes.slice(0, 64);
     const v = sigBytes[64];
     const recovery = v >= 27 ? v - 27 : v;
@@ -202,14 +208,37 @@ export function deriveBLSPublicKey(privateKey: BLSPrivateKey): BLSPublicKey {
   return bls.getPublicKey(privateKey);
 }
 
+/**
+ * Decode a `Bytes32` hex string to exactly 32 raw bytes, or throw.
+ * The `Bytes32` type alias is just `0x${string}` with no length
+ * enforcement, so a caller passing `'0xabcd'` would silently produce a
+ * 2-byte input — fine for @noble's `sign`/`verify`, but the resulting
+ * signature can never interoperate with on-chain `bytes32 messageHash`
+ * registries. Fail fast at the SDK boundary.
+ */
+function bytes32HexToBytes(hash: Bytes32): Uint8Array {
+  const raw = hexToBytes(hash);
+  if (raw.length !== 32) {
+    throw new SignatureError(
+      `messageHash must decode to exactly 32 bytes, got ${raw.length}`
+    );
+  }
+  return raw;
+}
+
 export async function signBLS(
   privateKey: BLSPrivateKey,
   messageHash: Bytes32
 ): Promise<BLSSignature> {
+  // @noble/bls12-381 requires raw bytes for the message — passing a
+  // 0x-prefixed hex string fails with "Invalid byte sequence". Decode
+  // inside the try so a malformed-hex `messageHash` surfaces as
+  // SignatureError rather than leaking RangeError from hexToBytes.
   try {
-    const signature = await bls.sign(messageHash, privateKey);
-    return signature;
+    const hashBytes = bytes32HexToBytes(messageHash);
+    return await bls.sign(hashBytes, privateKey);
   } catch (error) {
+    if (error instanceof SignatureError) throw error;
     throw new SignatureError(
       `BLS signing failed: ${error instanceof Error ? error.message : String(error)}`
     );
@@ -221,8 +250,16 @@ export async function verifyBLS(
   messageHash: Bytes32,
   signature: BLSSignature
 ): Promise<boolean> {
+  // Reject non-32-byte hashes the same way bls.verify rejects bad
+  // signatures — false, not a throw.
+  let hashBytes: Uint8Array;
   try {
-    return await bls.verify(signature, messageHash, publicKey);
+    hashBytes = bytes32HexToBytes(messageHash);
+  } catch {
+    return false;
+  }
+  try {
+    return await bls.verify(signature, hashBytes, publicKey);
   } catch {
     return false;
   }

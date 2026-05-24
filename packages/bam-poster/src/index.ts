@@ -13,7 +13,6 @@ export type {
   PosterConfig,
   Poster,
   SubmitResult,
-  SubmitHint,
   Pending,
   PendingQuery,
   MessageCursor,

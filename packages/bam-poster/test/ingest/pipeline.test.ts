@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  encodeContents,
+  computeMessageHash,
   signECDSAWithKey,
   type Address,
   type BAMMessage,
@@ -32,16 +32,18 @@ function signedEnvelope(opts: {
   sender?: Address;
   nonce?: bigint;
   tag?: Bytes32;
-  appBytes?: Uint8Array;
+  /** Tag the signer commits to, when different from the envelope tag (forgery scenarios). */
+  signTag?: Bytes32;
+  contents?: Uint8Array;
 }): Uint8Array {
   const privateKey = opts.privateKey ?? PRIV;
   const sender = opts.sender ?? SENDER;
   const nonce = opts.nonce ?? 1n;
   const tag = opts.tag ?? TAG;
-  const appBytes = opts.appBytes ?? new TextEncoder().encode('hi');
-  const contents = encodeContents(tag, appBytes);
+  const signTag = opts.signTag ?? tag;
+  const contents = opts.contents ?? new TextEncoder().encode('hi');
   const msg: BAMMessage = { sender, nonce, contents };
-  const signature = signECDSAWithKey(privateKey, msg, CHAIN_ID);
+  const signature = signECDSAWithKey(privateKey, msg, signTag, CHAIN_ID);
   const env = {
     contentTag: tag,
     message: {
@@ -111,7 +113,28 @@ describe('IngestPipeline — happy path', () => {
     expect(rows.length).toBe(1);
     expect(rows[0].sender.toLowerCase()).toBe(SENDER.toLowerCase());
     expect(rows[0].nonce).toBe(1n);
-    expect(rows[0].contents.length).toBeGreaterThanOrEqual(32);
+    // After the tag-binding rework, `contents` carries the app body
+    // directly — no 32-byte tag prefix.
+    expect(rows[0].contents.length).toBeGreaterThan(0);
+  });
+
+  it('persisted MessageRow.messageHash equals computeMessageHash(sender, contentTag, nonce, contents)', async () => {
+    // Defense-in-depth: the aggregator reads `messageHash` from the
+    // persisted row, so a regression in the ingest-side hash formula
+    // would silently propagate to confirmed batches. Pin the
+    // persisted value against the SDK helper here, with a non-trivial
+    // nonce and non-empty body so a misalignment can't accidentally
+    // produce the same digest as the canonical zero input.
+    const h = await mkHarness();
+    const contents = new TextEncoder().encode('persisted-hash-check');
+    const raw = signedEnvelope({ nonce: 12n, contents });
+    const res = await h.pipeline.ingest(raw);
+    expect(res.accepted).toBe(true);
+    const rows = await h.store.withTxn(async (txn) => txn.listPendingByTag(TAG));
+    expect(rows.length).toBe(1);
+    const expected = computeMessageHash(SENDER, TAG, 12n, contents);
+    expect(rows[0].messageHash).toBe(expected);
+    if (res.accepted) expect(res.messageHash).toBe(expected);
   });
 });
 
@@ -125,26 +148,9 @@ describe('IngestPipeline — structural rejections', () => {
     expect(h.verifyCalls.count).toBe(0);
   });
 
-  it('contents < 32 bytes → malformed (before validator)', async () => {
-    const h = await mkHarness();
-    const env = {
-      contentTag: TAG,
-      message: {
-        sender: SENDER,
-        nonce: '1',
-        contents: '0x' + '00'.repeat(16), // only 16 bytes
-        signature: '0x' + '00'.repeat(65),
-      },
-    };
-    const raw = new TextEncoder().encode(JSON.stringify(env));
-    const res = await h.pipeline.ingest(raw);
-    expect(res.accepted).toBe(false);
-    if (!res.accepted) expect(res.reason).toBe('malformed');
-  });
-
   it('oversized envelope (> maxMessageSizeBytes) → message_too_large', async () => {
     const h = await mkHarness({ maxMessageSizeBytes: 200 });
-    const raw = signedEnvelope({ appBytes: new Uint8Array(1024) });
+    const raw = signedEnvelope({ contents: new Uint8Array(1024) });
     const res = await h.pipeline.ingest(raw);
     expect(res.accepted).toBe(false);
     if (!res.accepted) expect(res.reason).toBe('message_too_large');
@@ -163,7 +169,7 @@ describe('IngestPipeline — ordering (CPU-grief) + atomicity', () => {
         message: {
           sender: ('0x' + '00'.repeat(20)) as Address,
           nonce: '1',
-          contents: '0x' + 'aa'.repeat(32) + '00',
+          contents: '0x00',
           signature: '0x' + '11'.repeat(65),
         },
       };
@@ -182,26 +188,13 @@ describe('IngestPipeline — ordering (CPU-grief) + atomicity', () => {
     expect(h.verifyCalls.count).toBeLessThanOrEqual(2);
   });
 
-  it('cross-tag attribution attempts reject before the validator runs', async () => {
-    const h = await mkHarness({ allowlist: [TAG, ('0x' + 'bb'.repeat(32)) as Bytes32] });
-    // Signer signs for TAG but hint says another tag (same allowlist).
-    const otherTag = ('0x' + 'bb'.repeat(32)) as Bytes32;
-    const contents = encodeContents(TAG, new Uint8Array([1, 2, 3]));
-    const msg: BAMMessage = { sender: SENDER, nonce: 1n, contents };
-    const signature = signECDSAWithKey(PRIV, msg, CHAIN_ID);
-    const env = {
-      contentTag: otherTag, // mismatch
-      message: {
-        sender: SENDER,
-        nonce: '1',
-        contents: bytesToHexStr(contents),
-        signature,
-      },
-    };
-    const raw = new TextEncoder().encode(JSON.stringify(env));
+  it('envelope contentTag not on allowlist rejects before the validator runs', async () => {
+    const h = await mkHarness({ allowlist: [TAG] });
+    const offTag = ('0x' + 'cc'.repeat(32)) as Bytes32;
+    const raw = signedEnvelope({ tag: offTag, signTag: offTag });
     const res = await h.pipeline.ingest(raw);
     expect(res.accepted).toBe(false);
-    if (!res.accepted) expect(res.reason).toBe('content_tag_mismatch');
+    if (!res.accepted) expect(res.reason).toBe('unknown_tag');
     expect(h.verifyCalls.count).toBe(0);
   });
 
@@ -323,7 +316,7 @@ describe('IngestPipeline — contentTag canonicalization', () => {
     // row must be inserted under lowercase to be discoverable.
     const mixedCase = ('0x' + 'Aa'.repeat(32)) as Bytes32;
     const h = await mkHarness();
-    const raw = signedEnvelope({ tag: mixedCase });
+    const raw = signedEnvelope({ tag: mixedCase, signTag: mixedCase });
     const res = await h.pipeline.ingest(raw);
     expect(res.accepted).toBe(true);
 

@@ -18,7 +18,7 @@ interface ConfirmedRow {
   message_id: string;
   sender: string;
   nonce: string;
-  contents: string; // 0x-prefixed hex; first 32 bytes are the contentTag
+  contents: string; // 0x-prefixed hex; app-opaque body (no tag prefix)
   signature: string;
   tx_hash: string;
   block_number: number | null;

@@ -53,7 +53,7 @@ export function MessageComposer() {
 
       const trySend = async (nonce: bigint): Promise<Response> => {
         const timestamp = Math.floor(Date.now() / 1000);
-        const contents = encodeSocialContents(MESSAGE_IN_A_BLOBBLE_TAG, {
+        const contents = encodeSocialContents({
           timestamp,
           content: content.trim(),
         });
@@ -71,6 +71,7 @@ export function MessageComposer() {
           primaryType: 'BAMMessage',
           message: {
             sender: address as Address,
+            contentTag: MESSAGE_IN_A_BLOBBLE_TAG,
             nonce,
             contents: bytesToHex(contents),
           },
@@ -80,7 +81,7 @@ export function MessageComposer() {
         // Poster will compute — lets us lift the messageHash into the
         // UI optimistically. Not required for correctness; the
         // Poster recomputes it on accept.
-        void computeMessageHash(address as Address, nonce, contents);
+        void computeMessageHash(address as Address, MESSAGE_IN_A_BLOBBLE_TAG, nonce, contents);
 
         return fetch('/api/messages', {
           method: 'POST',

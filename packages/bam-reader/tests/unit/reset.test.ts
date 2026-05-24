@@ -82,7 +82,7 @@ function batchRow(over: Partial<BatchRow> = {}): BatchRow {
     l1IncludedAtUnixSec: null,
     messageSnapshot: [
       {
-        author: ADDR,
+        sender: ADDR,
         nonce: 1n,
         messageId: MID,
         messageHash: MHASH,
@@ -96,7 +96,7 @@ function batchRow(over: Partial<BatchRow> = {}): BatchRow {
 function messageRow(over: Partial<MessageRow> = {}): MessageRow {
   return {
     messageId: MID,
-    author: ADDR,
+    sender: ADDR,
     nonce: 1n,
     contentTag: TAG,
     contents: new Uint8Array([1, 2, 3]),

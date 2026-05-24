@@ -136,7 +136,7 @@ describe('createPostReplyHandler schema quoting', () => {
 
 describe('post-reply handler.decode', () => {
   it('round-trips a post payload', () => {
-    const bytes = encodePostReplyContents(TWITTER_TAG, {
+    const bytes = encodePostReplyContents({
       kind: 'post',
       timestamp: 1700,
       content: 'hello',
@@ -146,7 +146,7 @@ describe('post-reply handler.decode', () => {
   });
 
   it('round-trips a reply payload', () => {
-    const bytes = encodePostReplyContents(TWITTER_TAG, {
+    const bytes = encodePostReplyContents({
       kind: 'reply',
       timestamp: 1700,
       parentMessageHash: PARENT_HASH,
@@ -176,7 +176,7 @@ describe('post-reply handler.migrate', () => {
 
 describe('post-reply handler.project', () => {
   it('inserts a post row with version_id + lowercased hex', async () => {
-    const bytes = encodePostReplyContents(TWITTER_TAG, {
+    const bytes = encodePostReplyContents({
       kind: 'post',
       timestamp: 9001,
       content: 'gm',
@@ -212,7 +212,7 @@ describe('post-reply handler.project', () => {
   });
 
   it('inserts a reply row with lowercased parent hash', async () => {
-    const bytes = encodePostReplyContents(TWITTER_TAG, {
+    const bytes = encodePostReplyContents({
       kind: 'reply',
       timestamp: 9001,
       parentMessageHash: PARENT_HASH,
@@ -238,7 +238,7 @@ describe('post-reply handler.project', () => {
   });
 
   it('throws when messageId is null (Reader-side bug guard)', async () => {
-    const bytes = encodePostReplyContents(TWITTER_TAG, {
+    const bytes = encodePostReplyContents({
       kind: 'post',
       timestamp: 1,
       content: 'x',
@@ -257,7 +257,7 @@ describe('post-reply handler.project', () => {
   });
 
   it('throws when chain coord is incomplete', async () => {
-    const bytes = encodePostReplyContents(TWITTER_TAG, {
+    const bytes = encodePostReplyContents({
       kind: 'post',
       timestamp: 1,
       content: 'x',

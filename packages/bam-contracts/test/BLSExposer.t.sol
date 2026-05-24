@@ -49,6 +49,7 @@ contract BLSExposerTest is Test {
     address public mockCore;
 
     address public constant ALICE = address(0xA11CE);
+    bytes32 public constant TAG = bytes32(uint256(0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa));
     bytes public constant FAKE_BLS_PUBKEY =
         hex"aabbccddaabbccddaabbccddaabbccddaabbccddaabbccddaabbccddaabbccddaabbccddaabbccddaabbccddaabbccdd";
     bytes public constant FAKE_BLS_SIG =
@@ -89,26 +90,27 @@ contract BLSExposerTest is Test {
             messageOffset: 0,
             messageBytes: messageBytes,
             signature: FAKE_BLS_SIG,
-            registrationProof: ""
+            registrationProof: "",
+            contentTag: TAG
         });
     }
 
-    /// @dev Compute the expected messageHash per ERC-BAM
+    /// @dev Compute the expected messageHash per ERC-8180 (tag-bound).
     function _computeMessageHash(address sender, uint64 nonce, bytes memory contents)
         internal
         pure
         returns (bytes32)
     {
-        return keccak256(abi.encodePacked(sender, nonce, contents));
+        return keccak256(abi.encodePacked(sender, TAG, nonce, contents));
     }
 
-    /// @dev Compute the expected messageId per ERC-BAM
+    /// @dev Compute the expected messageId per ERC-8180 (tag-bound).
     function _computeMessageId(address sender, uint64 nonce, bytes32 contentHash)
         internal
         pure
         returns (bytes32)
     {
-        return keccak256(abi.encodePacked(sender, nonce, contentHash));
+        return keccak256(abi.encodePacked(sender, TAG, nonce, contentHash));
     }
 
     /// @dev Compute the expected domain separator
@@ -231,37 +233,65 @@ contract BLSExposerTest is Test {
     // ═══════════════════════════════════════════════════════════════════════════════
 
     function test_messageHash_formulaMatchesSpec() public {
-        // ERC-BAM: messageHash = keccak256(abi.encodePacked(sender, nonce, contents))
-        // where sender is address (20 bytes), nonce is uint64 (8 bytes), contents is bytes
+        // ERC-8180: messageHash =
+        //   keccak256(abi.encodePacked(sender, contentTag, nonce, contents))
+        // where sender is address (20B), contentTag is bytes32 (32B), nonce is uint64 (8B).
 
         address sender = ALICE;
         uint64 nonce = 42;
         bytes memory contents = "hello world";
 
-        bytes32 expectedHash = keccak256(abi.encodePacked(sender, nonce, contents));
+        bytes32 expectedHash = keccak256(abi.encodePacked(sender, TAG, nonce, contents));
 
-        // Verify the formula uses sender (20B) + nonce (8B) + contents (variable)
-        // Total prefix = 28 bytes (not 26 — nonce is uint64 in the hash, even though wire format
-        // uses uint16)
-        bytes memory packed = abi.encodePacked(sender, nonce, contents);
-        assertEq(packed.length, 20 + 8 + contents.length);
+        // Total prefix = 60 bytes (sender 20 + contentTag 32 + nonce 8).
+        bytes memory packed = abi.encodePacked(sender, TAG, nonce, contents);
+        assertEq(packed.length, 20 + 32 + 8 + contents.length);
         assertEq(keccak256(packed), expectedHash);
     }
 
     function test_messageId_formulaMatchesSpec() public {
-        // ERC-BAM: messageId = keccak256(abi.encodePacked(sender, nonce, contentHash))
-        // where sender is address (20B), nonce is uint64 (8B), contentHash is bytes32 (32B)
+        // ERC-8180: messageId =
+        //   keccak256(abi.encodePacked(sender, contentTag, nonce, contentHash))
+        // where sender is address (20B), contentTag is bytes32 (32B),
+        // nonce is uint64 (8B), contentHash is bytes32 (32B).
 
         address sender = ALICE;
         uint64 nonce = 42;
         bytes32 contentHash = keccak256("some batch data");
 
-        bytes32 expectedId = keccak256(abi.encodePacked(sender, nonce, contentHash));
+        bytes32 expectedId = keccak256(abi.encodePacked(sender, TAG, nonce, contentHash));
 
-        // All fixed-size: 20 + 8 + 32 = 60 bytes
-        bytes memory packed = abi.encodePacked(sender, nonce, contentHash);
-        assertEq(packed.length, 60);
+        // All fixed-size: 20 + 32 + 8 + 32 = 92 bytes.
+        bytes memory packed = abi.encodePacked(sender, TAG, nonce, contentHash);
+        assertEq(packed.length, 92);
         assertEq(keccak256(packed), expectedId);
+    }
+
+    function test_messageHash_bindsContentTag() public {
+        // A different contentTag MUST produce a different messageId. The signature
+        // check (skipped in this mock) is the cryptographic enforcement; the
+        // structural side-effect surfaced here is that two exposures of the same
+        // (sender, nonce, contents) under different tags get distinct messageIds
+        // and therefore distinct `_exposed` keys.
+        bytes memory contents = "tag binding";
+        uint16 nonce = 9;
+        bytes memory messageBytes = _buildMessage(ALICE, 1_700_000_000, nonce, contents);
+        bytes32 batchContentHash = keccak256(messageBytes);
+
+        SocialBlobsTypes.CalldataExposureParams memory p1 = _buildCalldataParams(messageBytes);
+        bytes32 id1 = exposer.exposeFromCalldata(p1);
+
+        bytes32 otherTag = bytes32(uint256(0xbbbb << 240));
+        SocialBlobsTypes.CalldataExposureParams memory p2 = _buildCalldataParams(messageBytes);
+        p2.contentTag = otherTag;
+        bytes32 id2 = exposer.exposeFromCalldata(p2);
+
+        assertTrue(id1 != id2);
+        bytes32 expectedId1 = keccak256(abi.encodePacked(ALICE, TAG, uint64(nonce), batchContentHash));
+        bytes32 expectedId2 =
+            keccak256(abi.encodePacked(ALICE, otherTag, uint64(nonce), batchContentHash));
+        assertEq(id1, expectedId1);
+        assertEq(id2, expectedId2);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════════
@@ -304,7 +334,8 @@ contract BLSExposerTest is Test {
                 messageOffset: 0,
                 messageBytes: messageBytes,
                 signature: FAKE_BLS_SIG,
-                registrationProof: ""
+                registrationProof: "",
+                contentTag: TAG
             });
 
         vm.expectRevert(BLSExposer.MessageMismatch.selector);
@@ -321,7 +352,8 @@ contract BLSExposerTest is Test {
                 messageOffset: batch.length, // offset at end = overflow
                 messageBytes: messageBytes,
                 signature: FAKE_BLS_SIG,
-                registrationProof: ""
+                registrationProof: "",
+                contentTag: TAG
             });
 
         vm.expectRevert(BLSExposer.MessageMismatch.selector);

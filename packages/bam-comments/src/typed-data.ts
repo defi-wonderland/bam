@@ -10,8 +10,8 @@
  * The shape MUST match `bam-sdk`'s `computeECDSADigest`:
  *
  *   domain   = { name: "BAM", version: "1", chainId }
- *   types    = { BAMMessage: [sender, nonce, contents] }
- *   message  = { sender, nonce, contents (hex) }
+ *   types    = { BAMMessage: [sender, contentTag, nonce, contents] }
+ *   message  = { sender, contentTag, nonce, contents (hex) }
  *
  * `typed-data-parity.test.ts` pins this with several fixtures.
  */
@@ -35,6 +35,7 @@ export interface BamTypedData {
   primaryType: 'BAMMessage';
   message: {
     sender: `0x${string}`;
+    contentTag: `0x${string}`;
     nonce: bigint;
     contents: `0x${string}`;
   };
@@ -42,6 +43,7 @@ export interface BamTypedData {
 
 export function buildTypedData(args: {
   sender: `0x${string}`;
+  contentTag: `0x${string}`;
   nonce: bigint;
   contents: Uint8Array;
   chainId: number;
@@ -56,6 +58,7 @@ export function buildTypedData(args: {
     primaryType: 'BAMMessage',
     message: {
       sender: args.sender,
+      contentTag: args.contentTag,
       nonce: args.nonce,
       contents: bytesToHex(args.contents),
     },
@@ -75,9 +78,6 @@ export function digestTypedData(td: BamTypedData): `0x${string}` {
     primaryType: td.primaryType,
     message: {
       ...td.message,
-      // viem's `signTypedData`/`hashTypedData` expects the EIP-712
-      // bigint serialised as a number-or-bigint; a regular bigint is
-      // accepted directly.
     },
   });
 }
@@ -105,6 +105,7 @@ export function serializeTypedDataForRpc(td: BamTypedData): string {
     },
     message: {
       sender: td.message.sender,
+      contentTag: td.message.contentTag,
       nonce: td.message.nonce.toString(),
       contents: td.message.contents,
     },

@@ -21,6 +21,7 @@ import { getMessagePosition } from './blob-parser.js';
  * @param message Parsed message to expose
  * @param blsSignature BLS signature on the message
  * @param versionedHash EIP-4844 versioned hash of the blob
+ * @param contentTag ERC-8180 contentTag the message was signed under
  * @param batchStartOffset Optional batch start offset (defaults to message's offset)
  * @returns Exposure parameters for contract call
  */
@@ -29,6 +30,7 @@ export function buildExposureParams(
   message: ParsedMessage,
   blsSignature: Uint8Array,
   versionedHash: Bytes32,
+  contentTag: Bytes32,
   batchStartOffset?: number
 ): ExposureParams {
   // Ensure KZG setup is loaded
@@ -60,6 +62,7 @@ export function buildExposureParams(
     messageBytes: message.rawBytes,
     blsSignature,
     registrationProof: new Uint8Array(0),
+    contentTag,
   };
 }
 
@@ -70,6 +73,7 @@ export function buildExposureParams(
  * @param messageBytes Raw message bytes
  * @param blsSignature BLS signature
  * @param versionedHash EIP-4844 versioned hash of the blob
+ * @param contentTag ERC-8180 contentTag the message was signed under
  * @param batchStartOffset Byte offset where batch starts in blob (default: 0)
  * @returns Exposure parameters for contract call
  */
@@ -79,6 +83,7 @@ export function buildExposureParamsRaw(
   messageBytes: Uint8Array,
   blsSignature: Uint8Array,
   versionedHash: Bytes32,
+  contentTag: Bytes32,
   batchStartOffset = 0
 ): ExposureParams {
   loadTrustedSetup();
@@ -100,6 +105,7 @@ export function buildExposureParamsRaw(
     messageBytes,
     blsSignature,
     registrationProof: new Uint8Array(0),
+    contentTag,
   };
 }
 
@@ -122,6 +128,7 @@ export function encodeExposureParams(params: ExposureParams): {
   messageBytes: Uint8Array;
   blsSignature: Uint8Array;
   registrationProof: Uint8Array;
+  contentTag: Bytes32;
 } {
   return {
     versionedHash: params.versionedHash,
@@ -137,6 +144,7 @@ export function encodeExposureParams(params: ExposureParams): {
     messageBytes: params.messageBytes,
     blsSignature: params.blsSignature,
     registrationProof: params.registrationProof,
+    contentTag: params.contentTag,
   };
 }
 
@@ -239,12 +247,14 @@ export function validateExposureParams(params: ExposureParams): void {
  * Create a minimal exposure params for testing
  * @param messageBytes Message to expose
  * @param versionedHash Versioned hash (default: test hash)
+ * @param contentTag Test contentTag (default: 0x00…00)
  * @param batchStartOffset Batch start offset (default: 0)
  * @returns Minimal params for testing (without real proofs)
  */
 export function createTestExposureParams(
   messageBytes: Uint8Array,
   versionedHash: Bytes32 = ('0x01' + 'ab'.repeat(31)) as Bytes32,
+  contentTag: Bytes32 = ('0x' + '00'.repeat(32)) as Bytes32,
   batchStartOffset = 0
 ): ExposureParams {
   // Create mock KZG proof
@@ -264,5 +274,6 @@ export function createTestExposureParams(
     messageBytes,
     blsSignature: new Uint8Array(96),
     registrationProof: new Uint8Array(0),
+    contentTag,
   };
 }

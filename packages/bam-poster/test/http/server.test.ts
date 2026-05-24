@@ -7,7 +7,6 @@ import type {
   Pending,
   Poster,
   Status,
-  SubmitHint,
   SubmitResult,
   SubmittedBatch,
 } from '../../src/types.js';
@@ -16,7 +15,7 @@ const TAG = ('0x' + 'aa'.repeat(32)) as Bytes32;
 const WALLET = ('0x' + '99'.repeat(20)) as Address;
 
 interface StubOverrides {
-  submit?: (raw: Uint8Array, hint?: SubmitHint) => Promise<SubmitResult>;
+  submit?: (raw: Uint8Array) => Promise<SubmitResult>;
   pending?: Pending[];
   submittedBatches?: SubmittedBatch[];
   status?: Status;
@@ -26,9 +25,9 @@ interface StubOverrides {
 
 function stubPoster(o: StubOverrides = {}): Poster {
   return {
-    async submit(raw, hint) {
+    async submit(raw) {
       return (
-        o.submit?.(raw, hint) ??
+        o.submit?.(raw) ??
         Promise.resolve({ accepted: true, messageHash: ('0x' + 'aa'.repeat(32)) as Bytes32 })
       );
     },

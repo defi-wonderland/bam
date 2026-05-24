@@ -2,15 +2,12 @@ import { describe, expect, it } from 'vitest';
 
 import { decodeText } from '../src/components/ReaderMessagesPanel';
 
-// Build a `contents` hex string with the same shape the BAM apps
-// produce: 32-byte content tag prefix, then the app's payload.
+// After the tag-binding rework, `contents` carries the app body
+// directly — `contentTag` is bound into the signed digest, not
+// prepended. Build a `contents` hex string from a raw app payload.
 // Returns the `0x`-prefixed hex.
-function buildContents(payload: Uint8Array, tagByte = 0xaa): string {
-  const tag = new Uint8Array(32).fill(tagByte);
-  const out = new Uint8Array(tag.length + payload.length);
-  out.set(tag, 0);
-  out.set(payload, tag.length);
-  return '0x' + Array.from(out, (b) => b.toString(16).padStart(2, '0')).join('');
+function buildContents(payload: Uint8Array): string {
+  return '0x' + Array.from(payload, (b) => b.toString(16).padStart(2, '0')).join('');
 }
 
 function lenPrefixed(text: string): Uint8Array {
@@ -74,13 +71,11 @@ describe('decodeText — input validation', () => {
     // Includes a `g` — `parseInt('ag', 16)` is NaN, which would
     // become 0 in a Uint8Array. The fix should reject the whole
     // string instead of decoding a corrupted byte stream.
-    const tag = '0x' + 'aa'.repeat(32);
-    const trailing = '00000003zzzz'; // length 3 then non-hex
-    expect(decodeText(tag + trailing)).toBeNull();
+    expect(decodeText('0x00000003zzzz')).toBeNull();
   });
 
-  it('returns null when the buffer is shorter than the 32-byte tag plus a 4-byte length prefix', () => {
-    expect(decodeText('0x' + 'aa'.repeat(35))).toBeNull();
+  it('returns null when the buffer is shorter than the 4-byte length prefix', () => {
+    expect(decodeText('0x' + 'aa'.repeat(3))).toBeNull();
   });
 });
 
@@ -114,10 +109,9 @@ describe('decodeText — bounds work on oversized input', () => {
   });
 
   it('decodes payloads at exactly the cap', () => {
-    // 16 KB total: 32-byte tag + (16384 - 32 - 4) zero preamble +
-    // u32 length 0 + zero-length tail.
+    // 16 KB total: (16384 - 4) zero preamble + u32 length 0 + zero-length tail.
     const tail = new Uint8Array([0, 0, 0, 0]);
-    const preamble = new Uint8Array(16_384 - 32 - tail.length);
+    const preamble = new Uint8Array(16_384 - tail.length);
     const payload = new Uint8Array(preamble.length + tail.length);
     payload.set(preamble, 0);
     payload.set(tail, preamble.length);

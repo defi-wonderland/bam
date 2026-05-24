@@ -266,8 +266,8 @@ async function bootstrapAndTick(
 
 describe('tick — forward pass', () => {
   it('projects every confirmed row and advances the cursor monotonically', async () => {
-    const bytesA = encodePostReplyContents(TWITTER_TAG, { kind: 'post', timestamp: 1, content: 'a' });
-    const bytesB = encodePostReplyContents(TWITTER_TAG, { kind: 'post', timestamp: 2, content: 'b' });
+    const bytesA = encodePostReplyContents({ kind: 'post', timestamp: 1, content: 'a' });
+    const bytesB = encodePostReplyContents({ kind: 'post', timestamp: 2, content: 'b' });
     const source = new FakeSource([row(1, bytesA), row(2, bytesB)]);
     const client = new FakeClient();
     const pool = new FakePool(client);
@@ -283,7 +283,7 @@ describe('tick — forward pass', () => {
   });
 
   it('skips malformed payloads but advances the cursor past them', async () => {
-    const good = encodePostReplyContents(TWITTER_TAG, { kind: 'post', timestamp: 1, content: 'a' });
+    const good = encodePostReplyContents({ kind: 'post', timestamp: 1, content: 'a' });
     const bad = new Uint8Array(5); // too short
     const source = new FakeSource([row(1, bad), row(2, good)]);
     const client = new FakeClient();
@@ -294,7 +294,7 @@ describe('tick — forward pass', () => {
   });
 
   it('does NOT advance the cursor when project itself throws', async () => {
-    const good = encodePostReplyContents(TWITTER_TAG, { kind: 'post', timestamp: 1, content: 'a' });
+    const good = encodePostReplyContents({ kind: 'post', timestamp: 1, content: 'a' });
     const source = new FakeSource([row(1, good)]);
     const client = new FakeClient();
     client.shouldFailProject = true;
@@ -305,8 +305,8 @@ describe('tick — forward pass', () => {
   });
 
   it('stops at first project failure; later rows are not processed and cursor stays put', async () => {
-    const a = encodePostReplyContents(TWITTER_TAG, { kind: 'post', timestamp: 1, content: 'a' });
-    const b = encodePostReplyContents(TWITTER_TAG, { kind: 'post', timestamp: 2, content: 'b' });
+    const a = encodePostReplyContents({ kind: 'post', timestamp: 1, content: 'a' });
+    const b = encodePostReplyContents({ kind: 'post', timestamp: 2, content: 'b' });
     const source = new FakeSource([row(1, a), row(2, b)]);
     const client = new FakeClient();
     client.projectFailFirst = 1; // first INSERT throws, second would succeed
@@ -320,7 +320,7 @@ describe('tick — forward pass', () => {
 
 describe('tick — reorg pass', () => {
   it('calls onReorg for each reorged batch and bumps the reorg cursor', async () => {
-    const good = encodePostReplyContents(TWITTER_TAG, { kind: 'post', timestamp: 1, content: 'a' });
+    const good = encodePostReplyContents({ kind: 'post', timestamp: 1, content: 'a' });
     const source = new FakeSource(
       [row(1, good)],
       [

@@ -164,7 +164,7 @@ export class AggregatorLoop {
           const snapshot: BatchMessageSnapshotEntry[] = entry.messages.map((m, i) => ({
             sender: m.sender,
             nonce: m.nonce,
-            messageId: computeMessageId(m.sender, m.nonce, batchContentHash),
+            messageId: computeMessageId(m.sender, entry.contentTag, m.nonce, batchContentHash),
             messageHash: m.messageHash,
             messageIndexWithinBatch: i,
           }));
@@ -194,6 +194,7 @@ export class AggregatorLoop {
             if (row === null) continue;
             const messageId = computeMessageId(
               m.sender,
+              entry.contentTag,
               m.nonce,
               batchContentHash
             );

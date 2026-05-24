@@ -3,8 +3,8 @@
  *
  * `computeMessageHash` is the ERC-8180 standardised per-message identifier;
  * `computeMessageId` is the batch-scoped id (computable only after batch
- * assembly); `encodeContents` / `splitContents` assemble and parse the
- * tag-prefixed `contents` byte string BAM's wire format requires.
+ * assembly). Both bind the batch's `contentTag` into the hash so a signed
+ * message cannot be re-routed into a different app's segment.
  *
  * Hex helpers (`hexToBytes` / `bytesToHex`) live alongside the message
  * primitives so every byte-level message operation sits in one module.
@@ -15,9 +15,6 @@
 import { keccak_256 } from '@noble/hashes/sha3';
 
 import type { Address, BAMMessage, Bytes32 } from './types.js';
-import { ContentsTooShortError } from './errors.js';
-
-const CONTENT_TAG_PREFIX_BYTES = 32;
 
 // ── Hex helpers ──────────────────────────────────────────────────────────
 
@@ -58,24 +55,25 @@ export function bytesToHex(bytes: Uint8Array): string {
 /**
  * ERC-8180 `messageHash`.
  *
- * `keccak256(abi.encodePacked(sender, nonce, contents))` — the
- * standardised per-message identifier ERC-8180 defines in §Terms /
+ * `keccak256(abi.encodePacked(sender, contentTag, nonce, contents))` —
+ * the standardised per-message identifier ERC-8180 defines in §Terms /
  * §Signing Domain and Message Hash Convention. Chain-agnostic. Used as
  * the Poster's client-facing pre-batch identifier and as the input to
  * ECDSA's EIP-712 digest (which additionally binds chainId via the
  * signing domain).
  *
- * @param sender   20-byte message sender address.
- * @param nonce    uint64 per-sender monotonic nonce.
- * @param contents Message content bytes. Length MUST be ≥ 32; the first 32
- *                 bytes are the ERC-8179 `contentTag` under BAM's
- *                 tag-prefixed contents convention. This function does
- *                 not enforce the length bound — callers that receive
- *                 `contents` at a trust boundary should check separately
- *                 or invoke `splitContents` first.
+ * @param sender     20-byte message sender address.
+ * @param contentTag 32-byte protocol/content identifier for the batch.
+ *                   MUST equal the `contentTag` emitted in the
+ *                   `BlobBatchRegistered` / `CalldataBatchRegistered`
+ *                   event for the batch the message belongs to.
+ * @param nonce      uint64 per-sender monotonic nonce.
+ * @param contents   Message content bytes (opaque body; no per-message
+ *                   tag prefix).
  */
 export function computeMessageHash(
   sender: Address,
+  contentTag: Bytes32,
   nonce: bigint,
   contents: Uint8Array
 ): Bytes32 {
@@ -88,33 +86,51 @@ export function computeMessageHash(
     throw new RangeError('sender must be 20 bytes');
   }
 
-  const buf = new Uint8Array(20 + 8 + contents.length);
+  const tagBytes = hexToBytes(contentTag);
+  if (tagBytes.length !== 32) {
+    throw new RangeError('contentTag must be 32 bytes');
+  }
+
+  const buf = new Uint8Array(20 + 32 + 8 + contents.length);
   buf.set(senderBytes, 0);
-  writeUint64BE(buf, 20, nonce);
-  buf.set(contents, 28);
+  buf.set(tagBytes, 20);
+  writeUint64BE(buf, 52, nonce);
+  buf.set(contents, 60);
 
   return bytesToHex(keccak_256(buf)) as Bytes32;
 }
 
 /**
  * Convenience: compute the ERC `messageHash` for a `BAMMessage`.
+ *
+ * `contentTag` is supplied separately because it is a property of the
+ * batch the message lands in (read from the registration event), not
+ * of the message itself.
  */
-export function computeMessageHashForMessage(message: BAMMessage): Bytes32 {
-  return computeMessageHash(message.sender, message.nonce, message.contents);
+export function computeMessageHashForMessage(
+  message: BAMMessage,
+  contentTag: Bytes32
+): Bytes32 {
+  return computeMessageHash(message.sender, contentTag, message.nonce, message.contents);
 }
 
 /**
  * ERC-8180 `messageId`.
  *
- * `keccak256(abi.encodePacked(sender, nonce, batchContentHash))`. The
- * `batchContentHash` is the batch-scoped identifier — the EIP-4844
+ * `keccak256(abi.encodePacked(sender, contentTag, nonce, batchContentHash))`.
+ * The `batchContentHash` is the batch-scoped identifier — the EIP-4844
  * versioned hash for blob batches or `keccak256(batchData)` for
  * calldata batches. Only computable after the batch a message lands in
  * has been assembled.
  *
+ * Binding `contentTag` here means two messages with the same
+ * `(sender, nonce)` posted to distinct apps produce distinct
+ * `messageId`s — they are distinct messages under the per-app
+ * identity model.
  */
 export function computeMessageId(
   sender: Address,
+  contentTag: Bytes32,
   nonce: bigint,
   batchContentHash: Bytes32
 ): Bytes32 {
@@ -127,54 +143,23 @@ export function computeMessageId(
     throw new RangeError('sender must be 20 bytes');
   }
 
+  const tagBytes = hexToBytes(contentTag);
+  if (tagBytes.length !== 32) {
+    throw new RangeError('contentTag must be 32 bytes');
+  }
+
   const bchBytes = hexToBytes(batchContentHash);
   if (bchBytes.length !== 32) {
     throw new RangeError('batchContentHash must be 32 bytes');
   }
 
-  const buf = new Uint8Array(20 + 8 + 32);
+  const buf = new Uint8Array(20 + 32 + 8 + 32);
   buf.set(senderBytes, 0);
-  writeUint64BE(buf, 20, nonce);
-  buf.set(bchBytes, 28);
+  buf.set(tagBytes, 20);
+  writeUint64BE(buf, 52, nonce);
+  buf.set(bchBytes, 60);
 
   return bytesToHex(keccak_256(buf)) as Bytes32;
-}
-
-/**
- * Assemble a `contents` byte string under BAM's tag-prefixed convention.
- *
- * Layout: `contentTag (32) ‖ appBytes (n)`. Returns a fresh buffer of
- * length `32 + appBytes.length`. `appBytes` may be zero-length.
- */
-export function encodeContents(contentTag: Bytes32, appBytes: Uint8Array): Uint8Array {
-  const tagBytes = hexToBytes(contentTag);
-  if (tagBytes.length !== CONTENT_TAG_PREFIX_BYTES) {
-    throw new RangeError('contentTag must be 32 bytes');
-  }
-
-  const out = new Uint8Array(CONTENT_TAG_PREFIX_BYTES + appBytes.length);
-  out.set(tagBytes, 0);
-  out.set(appBytes, CONTENT_TAG_PREFIX_BYTES);
-  return out;
-}
-
-/**
- * Split a `contents` byte string into `(contentTag, appBytes)`.
- *
- * Throws `ContentsTooShortError` when `contents.length < 32`.
- */
-export function splitContents(contents: Uint8Array): {
-  contentTag: Bytes32;
-  appBytes: Uint8Array;
-} {
-  if (contents.length < CONTENT_TAG_PREFIX_BYTES) {
-    throw new ContentsTooShortError(contents.length);
-  }
-
-  const contentTag = bytesToHex(contents.slice(0, CONTENT_TAG_PREFIX_BYTES)) as Bytes32;
-  // `.slice()` returns a copy, so callers may mutate `appBytes` freely.
-  const appBytes = contents.slice(CONTENT_TAG_PREFIX_BYTES);
-  return { contentTag, appBytes };
 }
 
 function writeUint64BE(buf: Uint8Array, offset: number, value: bigint): void {
