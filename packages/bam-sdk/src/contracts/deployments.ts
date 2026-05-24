@@ -10,7 +10,7 @@ export interface DeployedContract {
 export interface ChainDeployment {
   chainId: number;
   name: string;
-  contracts: Partial<Record<'ABIDecoder' | 'BLSExposer' | 'BLSRegistry' | 'BlobAuthenticatedMessagingCore' | 'ECDSARegistry' | 'SignatureRegistryDispatcher' | 'SimpleBoolVerifier' | 'SocialBlobsCore', DeployedContract>>;
+  contracts: Partial<Record<'ABIDecoder' | 'BLSExposer' | 'BLSRegistry' | 'BPEDecoderAggregate' | 'BPEDecoderPerMessage' | 'BPEDictionary' | 'BlobAuthenticatedMessagingCore' | 'ECDSARegistry' | 'SignatureRegistryDispatcher' | 'SimpleBoolVerifier' | 'SocialBlobsCore', DeployedContract>>;
 }
 
 const DEPLOYMENTS: Record<number, ChainDeployment> = {
@@ -22,10 +22,13 @@ const DEPLOYMENTS: Record<number, ChainDeployment> = {
       SimpleBoolVerifier: { address: '0xdec5faa3e32d6296e53bae7e359e059b58a482f4' },
       BLSRegistry: { address: '0x15866bf5a8724f2aa9fe75e262d8f00ba2818e25' },
       BLSExposer: { address: '0x443029b4b96fbf2d8feba77d828a394d19615a48' },
-      BlobAuthenticatedMessagingCore: { address: '0xAC01D2d2E8016a14eb2b4bd318ae221f866B9725', deployBlock: 10764769 },
+      BlobAuthenticatedMessagingCore: { address: '0xC572A7F6dba1f3cB666b14d357671903685BeDdb', deployBlock: 10912245 },
       SignatureRegistryDispatcher: { address: '0x3431A94c9132b8a1b0c4aE8a80E7Ef0F0EC630Cf' },
       ECDSARegistry: { address: '0xF4Ce909305a112C2CBEC6b339a42f34bA8bf3381' },
       ABIDecoder: { address: '0x3a1bB111079cBaF4CAc320545Bfd1f6A92250425', deployBlock: 10751263 },
+      BPEDictionary: { address: '0x2265A46e594a67E1d54755BF45362deaacF55A64', deployBlock: 10857072 },
+      BPEDecoderAggregate: { address: '0x71Ce0a68B1DFB9CcaE6C2A1a00840c9248d7B41f', deployBlock: 10861565 },
+      BPEDecoderPerMessage: { address: '0xCF8c9477f2EaB21Db47a66AA18805350c2F714c6', deployBlock: 10861565 },
     },
   },
 };
