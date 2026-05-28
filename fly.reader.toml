@@ -13,6 +13,16 @@ primary_region = "ams"
 [env]
   READER_HTTP_BIND = "0.0.0.0"
   READER_HTTP_PORT = "8788"
+  # Persistent blob archive — multi-source fetcher reads from here
+  # first (before beacon/Blobscan) and writes successful network
+  # fetches back. Backed by the `bam_blob_archive` Fly volume mounted
+  # at `/data/blob-archive` (see [mounts] below). Exposed via
+  # `GET /blobs/:versionedHash` as a content-addressed CDN.
+  READER_BLOB_ARCHIVE_DIR = "/data/blob-archive"
+
+[mounts]
+  source = "bam_blob_archive"
+  destination = "/data/blob-archive"
 
 [http_service]
   internal_port = 8788
