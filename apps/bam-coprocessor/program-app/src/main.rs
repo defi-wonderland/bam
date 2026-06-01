@@ -46,7 +46,7 @@ pub fn main() {
     // generated yet), so the placeholder is acceptable for now. Before proving, replace it with
     // the real C1 VK hash (run `print-vk` to derive it). The VK is stable across runs; it only
     // changes if Circuit 1 code changes.
-    sp1_zkvm::lib::verify::verify_sp1_proof(&[0u32; 8], &[0u8; 32]);
+    sp1_zkvm::lib::verify::verify_sp1_proof(&[2124368815, 315437710, 1646293900, 1740293713, 479365109, 1557134685, 1497185811, 1720145984], &[0u8; 32]);
 
     // Step 2 — parse chain_id and M from C1 public output, assert chain_id matches stdin
     assert!(
@@ -64,12 +64,18 @@ pub fn main() {
     let computed_m = compute_message_commitment(&messages);
     assert_eq!(computed_m, m, "messages do not match C1 commitment M");
 
-    // Step 4 — filter by TWITTER_TAG, decode app envelope, drop failures
+    // Step 4 — assert all batches have TWITTER_TAG, decode app envelope, drop failures.
+    // content_tag for batch i is at c1_public_values[44 + i*124 + 80 .. 44 + i*124 + 112].
+    let batch_count = u32::from_le_bytes(c1_public_values[40..44].try_into().unwrap()) as usize;
+    const BATCH_STRIDE: usize = 124;
+    for i in 0..batch_count {
+        let base = 44 + i * BATCH_STRIDE;
+        let tag: [u8; 32] = c1_public_values[base + 80..base + 112].try_into().unwrap();
+        assert_eq!(tag, TWITTER_TAG, "batch {} content_tag is not TWITTER_TAG", i);
+    }
+
     let tweets: Vec<IndexedTweet> = messages
         .iter()
-        .filter(|msg| {
-            msg.contents.len() >= 32 && msg.contents[0..32] == TWITTER_TAG
-        })
         .filter_map(|msg| {
             decode_twitter_contents(&msg.contents).map(|tweet| IndexedTweet {
                 sender: msg.sender,

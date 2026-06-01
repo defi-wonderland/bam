@@ -8,7 +8,7 @@
 //!   → sort by chain order → compute_message_commitment M
 //!
 //! Circuit 2 pipeline (app coprocessor, bam-twitter):
-//!   verify π₁ → assert M matches → filter TWITTER_TAG → decode_twitter_contents
+//!   verify π₁ → assert M matches → assert batch content_tags == TWITTER_TAG → decode_twitter_contents
 //!   → build_timeline → compute_timeline_root R
 
 use std::collections::HashSet;
@@ -55,7 +55,7 @@ pub struct ReaderBatch {
 pub struct BamMessage {
     pub sender: [u8; 20],
     pub nonce: u64,
-    /// Raw contents bytes: first 32 bytes = contentTag, rest = app payload.
+    /// Raw contents bytes — pure app payload (no contentTag prefix).
     pub contents: Vec<u8>,
 }
 
@@ -65,7 +65,7 @@ pub struct BamMessage {
 pub struct VerifiedMessage {
     pub sender: [u8; 20],
     pub nonce: u64,
-    /// Full contents including 32-byte contentTag prefix.
+    /// Pure app payload contents (no contentTag prefix).
     pub contents: Vec<u8>,
     pub block_number: u64,
     pub tx_index: u32,
@@ -128,15 +128,22 @@ pub fn keccak256(data: &[u8]) -> [u8; 32] {
 /// Matches packages/bam-sdk/src/eip712.ts → computeECDSADigest exactly.
 ///
 /// Domain:  { name: "BAM", version: "1", chainId }
-/// Struct:  BAMMessage { sender: address, nonce: uint64, contents: bytes }
+/// Struct:  BAMMessage { sender: address, contentTag: bytes32, nonce: uint64, contents: bytes }
 ///
 /// ABI encoding rules (EIP-712 §4):
 ///   address  → 32 bytes, zero-padded left (12 zeros + 20 bytes)
+///   bytes32  → 32 bytes as-is
 ///   uint64   → 32 bytes, zero-padded left as uint256
 ///   bytes    → keccak256(value), 32 bytes
 ///   string   → keccak256(utf8(value)), 32 bytes
 ///   uint256  → 32 bytes big-endian
-pub fn eip712_digest(sender: &[u8; 20], nonce: u64, contents: &[u8], chain_id: u64) -> [u8; 32] {
+pub fn eip712_digest(
+    sender: &[u8; 20],
+    content_tag: &[u8; 32],
+    nonce: u64,
+    contents: &[u8],
+    chain_id: u64,
+) -> [u8; 32] {
     // Domain separator
     let domain_typehash =
         keccak256(b"EIP712Domain(string name,string version,uint256 chainId)");
@@ -156,18 +163,21 @@ pub fn eip712_digest(sender: &[u8; 20], nonce: u64, contents: &[u8], chain_id: u
 
     // Struct hash
     let struct_typehash =
-        keccak256(b"BAMMessage(address sender,uint64 nonce,bytes contents)");
+        keccak256(b"BAMMessage(address sender,bytes32 contentTag,uint64 nonce,bytes contents)");
     let contents_hash = keccak256(contents);
 
-    // abi.encode(structTypeHash, sender, nonce, keccak256(contents))
-    let mut struct_data = [0u8; 128];
+    // abi.encode(structTypeHash, sender, contentTag, nonce, keccak256(contents))
+    // 5 × 32 bytes = 160 bytes
+    let mut struct_data = [0u8; 160];
     struct_data[0..32].copy_from_slice(&struct_typehash);
     // address: 12 zero bytes then 20 bytes → occupies [32..64], sender at [44..64]
     struct_data[44..64].copy_from_slice(sender);
-    // uint64 as uint256: 24 zero bytes then 8 bytes → occupies [64..96], nonce at [88..96]
-    struct_data[88..96].copy_from_slice(&nonce.to_be_bytes());
-    // keccak256(contents): occupies [96..128]
-    struct_data[96..128].copy_from_slice(&contents_hash);
+    // bytes32: occupies [64..96]
+    struct_data[64..96].copy_from_slice(content_tag);
+    // uint64 as uint256: 24 zero bytes then 8 bytes → occupies [96..128], nonce at [120..128]
+    struct_data[120..128].copy_from_slice(&nonce.to_be_bytes());
+    // keccak256(contents): occupies [128..160]
+    struct_data[128..160].copy_from_slice(&contents_hash);
 
     let struct_hash = keccak256(&struct_data);
 
@@ -220,12 +230,13 @@ fn ecrecover(digest: &[u8; 32], sig_bytes: &[u8; 65]) -> Option<[u8; 20]> {
 /// (correct, ~5-10× more cycles than the accelerated path).
 pub fn verify_ecdsa(
     sender: &[u8; 20],
+    content_tag: &[u8; 32],
     nonce: u64,
     contents: &[u8],
     sig: &[u8; 65],
     chain_id: u64,
 ) -> bool {
-    let digest = eip712_digest(sender, nonce, contents, chain_id);
+    let digest = eip712_digest(sender, content_tag, nonce, contents, chain_id);
     match ecrecover(&digest, sig) {
         Some(recovered) => &recovered == sender,
         None => false,
@@ -266,7 +277,7 @@ pub fn extract_segment_bytes(blob: &[u8], start_fe: u16, end_fe: u16) -> Vec<u8>
 ///   20 bytes:  sender
 ///    8 bytes:  nonce (uint64 BE)
 ///    4 bytes:  contents_len (uint32 BE)
-///    N bytes:  contents (first 32 = contentTag)
+///    N bytes:  contents (pure app payload)
 ///   65 bytes:  signature (scheme 0x01 ECDSA)
 ///
 /// TypeScript ref: packages/bam-sdk/src/batch.ts
@@ -345,7 +356,7 @@ pub fn decode_batch(data: &[u8]) -> (Vec<BamMessage>, Vec<[u8; 65]>) {
 ///   bytes 20: sender
 ///   uint64:   nonce
 ///   uint32:   contents_len
-///   bytes N:  contents  (includes 32-byte contentTag prefix)
+///   bytes N:  contents  (pure app payload)
 ///   uint64:   block_number
 ///   uint32:   tx_index
 ///   uint32:   msg_index
@@ -372,28 +383,27 @@ pub fn compute_message_commitment(messages: &[VerifiedMessage]) -> [u8; 32] {
 
 /// Parse the bam-twitter app envelope out of a message's contents bytes.
 ///
-/// contents layout:
-///   bytes  0..31:  contentTag (caller checks this == TWITTER_TAG before calling)
-///   byte  32:      envelope version (must be 0x01)
-///   byte  33:      kind (0x00 = post, 0x01 = reply)
+/// Post-PR#59 contents layout (no contentTag prefix):
+///   byte  0:      envelope version (must be 0x01)
+///   byte  1:      kind (0x00 = post, 0x01 = reply)
 ///
-/// Post payload (from byte 34):
-///   bytes 0..7:   timestamp (uint64 BE, Unix seconds)
-///   bytes 8..11:  content_len (uint32 BE)
-///   bytes 12..:   UTF-8 content
+/// Post payload (from byte 2):
+///   bytes 2..9:   timestamp (uint64 BE, Unix seconds)
+///   bytes 10..13: content_len (uint32 BE)
+///   bytes 14..:   UTF-8 content
 ///
-/// Reply payload (from byte 34):
-///   bytes 0..7:   timestamp
-///   bytes 8..39:  parent_message_hash (bytes32)
-///   bytes 40..43: content_len
-///   bytes 44..:   UTF-8 content
+/// Reply payload (from byte 2):
+///   bytes 2..9:   timestamp
+///   bytes 10..41: parent_message_hash (bytes32)
+///   bytes 42..45: content_len
+///   bytes 46..:   UTF-8 content
 ///
 /// TypeScript ref: apps/bam-twitter/src/lib/contents-codec.ts
 pub fn decode_twitter_contents(contents: &[u8]) -> Option<TwitterMessage> {
-    if contents.len() < 34 {
+    if contents.len() < 2 {
         return None;
     }
-    let app = &contents[32..];
+    let app = contents;
     if app[0] != 0x01 {
         return None;
     }
@@ -487,8 +497,8 @@ mod tests {
         addr
     }
 
-    fn sign_bam(key: &SigningKey, sender: &[u8; 20], nonce: u64, contents: &[u8], chain_id: u64) -> [u8; 65] {
-        let digest = eip712_digest(sender, nonce, contents, chain_id);
+    fn sign_bam(key: &SigningKey, sender: &[u8; 20], content_tag: &[u8; 32], nonce: u64, contents: &[u8], chain_id: u64) -> [u8; 65] {
+        let digest = eip712_digest(sender, content_tag, nonce, contents, chain_id);
         let (sig, recid) = key.sign_prehash_recoverable(&digest).expect("sign failed");
         let mut sig65 = [0u8; 65];
         sig65[..64].copy_from_slice(&sig.to_bytes());
@@ -633,18 +643,31 @@ mod tests {
     #[test]
     fn test_eip712_digest_deterministic() {
         let sender = [0u8; 20];
+        let tag = [0u8; 32];
         assert_eq!(
-            eip712_digest(&sender, 1, b"hello", 1),
-            eip712_digest(&sender, 1, b"hello", 1)
+            eip712_digest(&sender, &tag, 1, b"hello", 1),
+            eip712_digest(&sender, &tag, 1, b"hello", 1)
         );
     }
 
     #[test]
     fn test_eip712_digest_chain_id_matters() {
         let sender = [0u8; 20];
+        let tag = [0u8; 32];
         assert_ne!(
-            eip712_digest(&sender, 1, b"hello", 1),
-            eip712_digest(&sender, 1, b"hello", 2)
+            eip712_digest(&sender, &tag, 1, b"hello", 1),
+            eip712_digest(&sender, &tag, 1, b"hello", 2)
+        );
+    }
+
+    #[test]
+    fn test_eip712_digest_contenttag_matters() {
+        let sender = [0u8; 20];
+        let tag_a = [1u8; 32];
+        let tag_b = [2u8; 32];
+        assert_ne!(
+            eip712_digest(&sender, &tag_a, 1, b"hello", 1),
+            eip712_digest(&sender, &tag_b, 1, b"hello", 1)
         );
     }
 
@@ -652,32 +675,84 @@ mod tests {
     fn test_verify_ecdsa_valid_signature() {
         let key = test_signing_key();
         let sender = address_of(&key);
+        let tag = [0xf0u8; 32];
         let nonce = 7u64;
         let contents = b"valid message contents";
         let chain_id = 11155111u64;
-        let sig = sign_bam(&key, &sender, nonce, contents, chain_id);
-        assert!(verify_ecdsa(&sender, nonce, contents, &sig, chain_id));
+        let sig = sign_bam(&key, &sender, &tag, nonce, contents, chain_id);
+        assert!(verify_ecdsa(&sender, &tag, nonce, contents, &sig, chain_id));
+    }
+
+    #[test]
+    fn test_verify_ecdsa_wrong_tag_fails() {
+        let key = test_signing_key();
+        let sender = address_of(&key);
+        let tag = [0xf0u8; 32];
+        let wrong_tag = [0u8; 32];
+        let nonce = 1u64;
+        let contents = b"message";
+        let chain_id = 1u64;
+        let sig = sign_bam(&key, &sender, &tag, nonce, contents, chain_id);
+        assert!(!verify_ecdsa(&sender, &wrong_tag, nonce, contents, &sig, chain_id));
     }
 
     #[test]
     fn test_verify_ecdsa_wrong_sender_fails() {
         let key = test_signing_key();
         let sender = address_of(&key);
+        let tag = [0u8; 32];
         let nonce = 7u64;
         let contents = b"message";
         let chain_id = 1u64;
-        let sig = sign_bam(&key, &sender, nonce, contents, chain_id);
+        let sig = sign_bam(&key, &sender, &tag, nonce, contents, chain_id);
         let wrong_sender = [0xFFu8; 20];
-        assert!(!verify_ecdsa(&wrong_sender, nonce, contents, &sig, chain_id));
+        assert!(!verify_ecdsa(&wrong_sender, &tag, nonce, contents, &sig, chain_id));
     }
 
     #[test]
     fn test_verify_ecdsa_wrong_contents_fails() {
         let key = test_signing_key();
         let sender = address_of(&key);
+        let tag = [0u8; 32];
         let nonce = 1u64;
         let chain_id = 1u64;
-        let sig = sign_bam(&key, &sender, nonce, b"original", chain_id);
-        assert!(!verify_ecdsa(&sender, nonce, b"tampered", &sig, chain_id));
+        let sig = sign_bam(&key, &sender, &tag, nonce, b"original", chain_id);
+        assert!(!verify_ecdsa(&sender, &tag, nonce, b"tampered", &sig, chain_id));
+    }
+
+    #[test]
+    fn test_decode_twitter_contents_no_prefix() {
+        // Post: version=0x01, kind=0x00, timestamp=1000, content="hi"
+        let mut post = vec![0u8; 16];
+        post[0] = 0x01;
+        post[1] = 0x00;
+        post[2..10].copy_from_slice(&1000u64.to_be_bytes());
+        post[10..14].copy_from_slice(&2u32.to_be_bytes());
+        post[14..16].copy_from_slice(b"hi");
+        match decode_twitter_contents(&post) {
+            Some(TwitterMessage::Post { timestamp, content }) => {
+                assert_eq!(timestamp, 1000);
+                assert_eq!(content, "hi");
+            }
+            _ => panic!("expected Post"),
+        }
+
+        // Reply: version=0x01, kind=0x01, timestamp=2000, parent=[0xAB;32], content="yo"
+        let parent = [0xABu8; 32];
+        let mut reply = vec![0u8; 48];
+        reply[0] = 0x01;
+        reply[1] = 0x01;
+        reply[2..10].copy_from_slice(&2000u64.to_be_bytes());
+        reply[10..42].copy_from_slice(&parent);
+        reply[42..46].copy_from_slice(&2u32.to_be_bytes());
+        reply[46..48].copy_from_slice(b"yo");
+        match decode_twitter_contents(&reply) {
+            Some(TwitterMessage::Reply { timestamp, parent_message_hash, content }) => {
+                assert_eq!(timestamp, 2000);
+                assert_eq!(parent_message_hash, parent);
+                assert_eq!(content, "yo");
+            }
+            _ => panic!("expected Reply"),
+        }
     }
 }

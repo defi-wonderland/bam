@@ -103,7 +103,7 @@ pub fn main() {
 
         // ── Step 5: verify ECDSA signatures, drop invalid messages ────────────
         for (msg_index, (msg, sig)) in messages.iter().zip(sigs.iter()).enumerate() {
-            if verify_ecdsa(&msg.sender, msg.nonce, &msg.contents, sig, chain_id) {
+            if verify_ecdsa(&msg.sender, &batch.content_tag, msg.nonce, &msg.contents, sig, chain_id) {
                 all_verified.push(VerifiedMessage {
                     sender: msg.sender,
                     nonce: msg.nonce,

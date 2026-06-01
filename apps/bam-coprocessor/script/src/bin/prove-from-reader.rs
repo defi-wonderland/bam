@@ -5,21 +5,22 @@
 //! guest program.  This is the production path; prove-reader.rs reads from a
 //! static JSON cache and is kept only for quick local iteration.
 //!
+//! Blob fetching strategy:
+//!   1. GET /blobs/:versionedHash from bam-reader (requires blob archive configured).
+//!   2. On failure, fall back to the Ethereum beacon chain (Sepolia only):
+//!      estimates the beacon slot from the execution block number via linear
+//!      interpolation, then searches ±50 slots on the Lodestar Sepolia public API.
+//!
 //! Usage:
 //!   cargo run --release --bin prove-from-reader -- --execute --content-tag 0xf0fea9...
 //!
 //! Remote proving (Succinct network):
-//!   SP1_PROVER=network SP1_PRIVATE_KEY=<key> \
+//!   SP1_PROVER=network NETWORK_PRIVATE_KEY=0x<key> \
 //!     cargo run --release --bin prove-from-reader -- --prove --content-tag 0xf0fea9...
 //!
 //! Known limitations:
 //!   startFE / endFE are not stored in bam-store's BatchRow and therefore not
 //!   available via /batches.  Both default to [0, 4096) here.
-//!
-//!   The GET /blobs/{hash} endpoint requires bam-reader to be running with a blob
-//!   archive directory configured.  That feature was not deployed on the bam-reader
-//!   instance when this was built, so the blob-fetching path has not been tested
-//!   end-to-end.  The demo was run against blobs downloaded and cached separately.
 
 use std::io::Read;
 
@@ -35,6 +36,17 @@ use sp1_sdk::{
 };
 
 const BAM_READER_ELF: Elf = include_elf!("bam-reader-program");
+
+// ── Beacon chain fallback (Sepolia) ───────────────────────────────────────────
+// Used when bam-reader's /blobs endpoint fails.  Calibration points map
+// execution block numbers to beacon slots via linear interpolation.
+
+const BEACON_URL_SEPOLIA: &str = "https://lodestar-sepolia.chainsafe.io";
+const REF_EXEC_A: f64 = 10_926_101.0;
+const REF_SLOT_A: f64 = 10_338_743.0;
+const REF_EXEC_B: f64 = 10_933_021.0;
+const REF_SLOT_B: f64 = 10_345_720.0;
+const BEACON_SEARCH_RADIUS: i64 = 50;
 
 // ── CLI ───────────────────────────────────────────────────────────────────────
 
@@ -130,6 +142,118 @@ fn decode_hex_bytes(s: &str) -> Vec<u8> {
     hex::decode(s).expect("invalid hex")
 }
 
+/// Fetch raw blob bytes, trying bam-reader first then the beacon chain.
+fn fetch_blob_bytes(
+    reader_url: &str,
+    versioned_hash_hex: &str,
+    versioned_hash: &[u8; 32],
+    exec_block: u64,
+    chain_id: u64,
+) -> Vec<u8> {
+    let url = format!("{}/blobs/{}", reader_url, versioned_hash_hex);
+    match ureq::get(&url).call() {
+        Ok(resp) => {
+            let mut bytes = Vec::with_capacity(131_072);
+            match resp.into_reader().read_to_end(&mut bytes) {
+                Ok(_) if bytes.len() == 131_072 => return bytes,
+                Ok(_) => eprintln!(
+                    "  bam-reader blob: got {} bytes (expected 131072), trying beacon chain…",
+                    bytes.len()
+                ),
+                Err(e) => eprintln!("  bam-reader blob read failed ({}), trying beacon chain…", e),
+            }
+        }
+        Err(e) => eprintln!("  bam-reader blob fetch failed ({}), trying beacon chain…", e),
+    }
+
+    let beacon_url = match chain_id {
+        11155111 => BEACON_URL_SEPOLIA,
+        other => panic!(
+            "bam-reader blob fetch failed and no beacon fallback is configured for chain {other}.\n\
+             Only Sepolia (11155111) has a built-in beacon fallback."
+        ),
+    };
+
+    eprintln!("  fetching from beacon chain (block {exec_block})…");
+    fetch_blob_from_beacon(beacon_url, exec_block, versioned_hash)
+        .unwrap_or_else(|e| panic!("beacon fallback failed: {e}"))
+}
+
+fn estimate_beacon_slot(exec_block: u64) -> u64 {
+    let slope = (REF_SLOT_B - REF_SLOT_A) / (REF_EXEC_B - REF_EXEC_A);
+    (REF_SLOT_A + slope * (exec_block as f64 - REF_EXEC_A)).round() as u64
+}
+
+fn get_exec_block_at_slot(beacon_url: &str, slot: u64) -> Option<u64> {
+    let url = format!("{}/eth/v2/beacon/blocks/{}", beacon_url, slot);
+    let resp = ureq::get(&url).call().ok()?;
+    let json: serde_json::Value = resp.into_json().ok()?;
+    json["data"]["message"]["body"]["execution_payload"]["block_number"]
+        .as_str()
+        .and_then(|s| s.parse().ok())
+}
+
+fn fetch_blob_from_beacon(
+    beacon_url: &str,
+    exec_block: u64,
+    want_vh: &[u8; 32],
+) -> Result<Vec<u8>, String> {
+    let approx = estimate_beacon_slot(exec_block);
+
+    let slot = {
+        let mut found = None;
+        'search: for delta in 0..=BEACON_SEARCH_RADIUS {
+            for d in if delta == 0 { vec![0] } else { vec![-delta, delta] } {
+                let candidate = (approx as i64 + d) as u64;
+                if get_exec_block_at_slot(beacon_url, candidate) == Some(exec_block) {
+                    found = Some(candidate);
+                    break 'search;
+                }
+            }
+        }
+        found.ok_or_else(|| {
+            format!("could not find beacon slot for exec block {exec_block} (searched ±{BEACON_SEARCH_RADIUS} of slot {approx})")
+        })?
+    };
+
+    eprintln!("  found beacon slot {slot} for exec block {exec_block}");
+
+    let url = format!("{}/eth/v1/beacon/blob_sidecars/{}", beacon_url, slot);
+    let resp = ureq::get(&url).call().map_err(|e| e.to_string())?;
+    let json: serde_json::Value = resp.into_json().map_err(|e| e.to_string())?;
+    let sidecars = json["data"]
+        .as_array()
+        .ok_or_else(|| "no 'data' array in sidecar response".to_string())?;
+
+    for sidecar in sidecars {
+        let commitment_hex = sidecar["kzg_commitment"]
+            .as_str()
+            .ok_or_else(|| "missing kzg_commitment in sidecar".to_string())?;
+        let c_bytes = hex::decode(commitment_hex.trim_start_matches("0x"))
+            .map_err(|e| e.to_string())?;
+        let c_hash: [u8; 32] = Sha256::digest(&c_bytes).into();
+        let mut vh = [0u8; 32];
+        vh[0] = 0x01;
+        vh[1..].copy_from_slice(&c_hash[1..]);
+        if &vh == want_vh {
+            let blob_hex = sidecar["blob"]
+                .as_str()
+                .ok_or_else(|| "missing blob field in sidecar".to_string())?;
+            let blob_bytes = hex::decode(blob_hex.trim_start_matches("0x"))
+                .map_err(|e| e.to_string())?;
+            if blob_bytes.len() != 131_072 {
+                return Err(format!("unexpected blob size: {} bytes", blob_bytes.len()));
+            }
+            return Ok(blob_bytes);
+        }
+    }
+
+    Err(format!(
+        "no sidecar matched versioned hash 0x{} at slot {slot}",
+        hex::encode(want_vh)
+    ))
+}
+
 /// Generate a real KZG commitment + blob proof using the mainnet trusted setup.
 fn generate_kzg_proof_real(blob_bytes: &[u8]) -> (Vec<u8>, Vec<u8>, [u8; 32]) {
     let settings = ethereum_kzg_settings(0);
@@ -205,37 +329,33 @@ fn main() {
         .iter()
         .enumerate()
         .map(|(i, ab)| {
-            let blob_url = format!("{}/blobs/{}", args.reader_url, ab.blob_versioned_hash);
-            let blob_resp = ureq::get(&blob_url).call().unwrap_or_else(|e| {
-                panic!(
-                    "GET /blobs/{} failed: {}\n\
-                     Tip: is bam-reader running with a blob archive directory configured?",
-                    ab.blob_versioned_hash, e
-                )
-            });
-
-            let mut blob_bytes: Vec<u8> = Vec::with_capacity(131_072);
-            blob_resp
-                .into_reader()
-                .read_to_end(&mut blob_bytes)
-                .expect("reading blob body failed");
-
-            let (commitment, opening_proof, computed_vh) = generate_kzg_proof_real(&blob_bytes);
-
+            let block_number = ab.block_number.expect("confirmed batch must have block_number");
+            let tx_index = ab.tx_index.expect("confirmed batch must have tx_index");
             let l1_vh = decode_hex32(&ab.blob_versioned_hash);
-            assert_eq!(
-                computed_vh, l1_vh,
-                "blob[{}] versioned_hash mismatch (block={:?} tx={:?}) — archive may be corrupt",
-                i, ab.block_number, ab.tx_index
-            );
 
             println!(
                 "  [{}/{}] block={} tx={} vh=0x{}…",
                 i + 1,
                 total,
-                ab.block_number.unwrap_or(0),
-                ab.tx_index.unwrap_or(0),
+                block_number,
+                tx_index,
                 &ab.blob_versioned_hash[2..10]
+            );
+
+            let blob_bytes = fetch_blob_bytes(
+                &args.reader_url,
+                &ab.blob_versioned_hash,
+                &l1_vh,
+                block_number,
+                args.chain_id,
+            );
+
+            let (commitment, opening_proof, computed_vh) = generate_kzg_proof_real(&blob_bytes);
+
+            assert_eq!(
+                computed_vh, l1_vh,
+                "blob[{}] versioned_hash mismatch (block={} tx={}) — blob may be corrupt",
+                i, block_number, tx_index
             );
 
             ReaderBatch {
@@ -247,10 +367,8 @@ fn main() {
                 // asserts both are 0x0 (see Step 0), so we supply zeros.
                 decoder:      [0u8; 20],
                 sig_registry: [0u8; 20],
-                block_number: ab.block_number
-                    .expect("confirmed batch must have block_number"),
-                tx_index: ab.tx_index
-                    .expect("confirmed batch must have tx_index"),
+                block_number,
+                tx_index,
                 // startFE / endFE are not stored in BatchRow — default to full
                 // blob.  See the known limitation in the module doc comment.
                 start_fe: 0,

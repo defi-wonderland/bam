@@ -1,0 +1,9 @@
+[package]
+name = "bam-twitter-program"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+sp1-zkvm = { version = "6.0.1" }
+bam-twitter-lib = { path = "../lib" }
+sha2 = { workspace = true }

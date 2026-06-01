@@ -52,3 +52,6 @@ apps/bam-sdk-test/public/bpe-v1.bin
 # Spec kit: per-feature scaffolding (spec.md/plan.md/tasks.md/red-team.md).
 # Promote anything worth persisting to docs/specs/ root.
 docs/specs/features/
+
+# Temporary PR description files.
+PR.md

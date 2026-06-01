@@ -1,0 +1,30 @@
+[package]
+version = "0.1.0"
+name = "bam-twitter-script"
+edition = "2021"
+default-run = "bam-indexer"
+
+[[bin]]
+name = "bam-indexer"
+path = "src/bin/main.rs"
+
+[[bin]]
+name = "benchmark"
+path = "src/bin/benchmark.rs"
+
+[[bin]]
+name = "kzg-inside"
+path = "src/bin/kzg_inside.rs"
+
+[dependencies]
+sp1-sdk = { version = "6.0.1", features = ["blocking"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+clap = { version = "4.0", features = ["derive"] }
+hex = "0.4.3"
+bam-twitter-lib = { path = "../lib" }
+bls12_381 = { version = "0.7", features = ["pairings"] }
+sha2 = { workspace = true }
+
+[build-dependencies]
+sp1-build = { version = "6.0.1" }
