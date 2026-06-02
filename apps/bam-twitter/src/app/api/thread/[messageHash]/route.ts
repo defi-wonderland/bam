@@ -75,7 +75,7 @@ function hexToBytes(hex: string): Uint8Array {
 async function fromReader(
   messageHash: string,
 ): Promise<{ post: ConfirmedRow; replies: ConfirmedRow[] } | null> {
-  const res = await listConfirmedMessages({ contentTag: TWITTER_TAG, status: 'confirmed' });
+  const res = await listConfirmedMessages({ contentTag: TWITTER_TAG, status: 'confirmed', limit: 1000 });
   if (res.status !== 200) {
     const err = new Error(`Reader returned ${res.status}`);
     throw err;
