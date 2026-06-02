@@ -72,7 +72,10 @@ async function fromReader(
   messageHash: string,
 ): Promise<{ post: ConfirmedRow; replies: ConfirmedRow[] } | null> {
   const res = await listConfirmedMessages({ contentTag: TWITTER_TAG, status: 'confirmed' });
-  if (res.status !== 200) return null;
+  if (res.status !== 200) {
+    const err = new Error(`Reader returned ${res.status}`);
+    throw err;
+  }
   const rows = (res.body as { messages?: ReaderMessageRow[] }).messages ?? [];
 
   const { decodePostReplyContents } = await import('bam-sdk/post-reply');
