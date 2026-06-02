@@ -2,7 +2,7 @@
 
 Demo app for the BAM protocol. Connect your wallet, write a message, sign it with ECDSA, and post it on-chain as an EIP-4844 blob on Sepolia.
 
-## How It Works
+## How it works
 
 1. **Connect** your wallet on Sepolia
 2. **Write** a message (280 char limit) and **sign** it (EIP-712 `signTypedData`)
@@ -79,7 +79,7 @@ Different processes, different owners. Backend-process vars stay in the root fil
 - **Poster deploy:** long-running Node process, needs the Sepolia signer key and a `bam-store` database (real Postgres in prod). Listens on `:8787` by default.
 - **Reader deploy:** long-running Node process, needs network access to a Sepolia execution RPC and a Beacon API endpoint, plus a `bam-store` database (`READER_DB_URL`, real Postgres in prod) and a stable URL the demo can reach via `READER_URL`. Listens on `:8788` by default and binds to `127.0.0.1` unless `READER_HTTP_BIND` is overridden — front it with a reverse proxy + auth before exposing publicly.
 
-## API Routes
+## API routes
 
 | Route | Method | Proxies to |
 |-------|--------|------------|
