@@ -159,6 +159,22 @@ export async function listTwitterReplies(
   });
 }
 
+export interface GetTwitterPostByHashArgs {
+  messageHash: string;
+  envUrl?: string;
+  signal?: AbortSignal;
+}
+
+/** GET /twitter/posts/hash/:hash — fetch a single post by its message_hash. */
+export async function getTwitterPostByHash(
+  args: GetTwitterPostByHashArgs
+): Promise<IndexerResponse> {
+  return rawFetch(`/twitter/posts/hash/${encodeURIComponent(args.messageHash)}`, {
+    envUrl: args.envUrl,
+    signal: args.signal,
+  });
+}
+
 export interface IndexerHealth {
   chainId: number;
   uptimeMs: number;
