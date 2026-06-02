@@ -296,6 +296,16 @@ h1 {
   }
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .msg,
+  .batch,
+  .chain .b,
+  .status .dot {
+    animation: none;
+  }
+  .msg { opacity: 0; }
+  .chain .b { opacity: 0.6; left: 50%; }
+}
 
 /* sections */
 section {
