@@ -5,7 +5,7 @@ Demo app for the BAM protocol. Connect your wallet, write a message, sign it wit
 ## How It Works
 
 1. **Connect** your wallet on Sepolia
-2. **Write** a message (280 char limit) and **sign** it (EIP-191 `personal_sign`)
+2. **Write** a message (280 char limit) and **sign** it (EIP-712 `signTypedData`)
 3. **Submit** — the demo forwards the signed message to a separately-running [`@bam/poster`](../../packages/bam-poster) service, which runs validation + pending-pool + batching + L1 submission
 4. **Post Blobble** — `@bam/poster` assembles blobs and submits type-3 transactions to BAM Core; the demo's `/api/post-blobble` is a thin proxy that nudges the Poster's per-tag flush endpoint
 5. **Confirm** — a separately-running [`bam-reader`](../../packages/bam-reader) tails L1 for `BlobBatchRegistered` events, decodes the blobs, verifies signatures, and writes confirmed rows into the shared `bam-store` substrate. The demo's `/api/confirmed-messages` and `/api/blobbles*` routes proxy to the Reader's HTTP surface
