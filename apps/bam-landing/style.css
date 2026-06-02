@@ -46,7 +46,7 @@ a:hover {
 }
 
 .eyebrow {
-  margin: 0 0 12px;
+  margin: 0 0 28px;
   color: var(--muted);
   font-size: 12px;
   letter-spacing: 0.18em;
@@ -97,7 +97,7 @@ h1 {
 }
 
 .tagline {
-  margin: 12px 0 32px;
+  margin: 12px 0 12px;
   color: var(--muted);
   font-size: 18px;
   max-width: 36ch;
@@ -296,16 +296,6 @@ h1 {
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .msg,
-  .batch,
-  .chain .b,
-  .status .dot {
-    animation: none;
-  }
-  .msg { opacity: 0.7; }
-  .chain .b { opacity: 0.6; left: 50%; }
-}
 
 /* sections */
 section {
@@ -460,7 +450,7 @@ a.cell:hover .cell-name {
 
 .layer-edge .bar {
   color: var(--accent);
-  font-size: 14px;
+  font-size: 18px;
 }
 
 /* specs list */
