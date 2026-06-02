@@ -43,6 +43,10 @@ async function tryIndexer(
     if (postRes.status !== 200) return null;
     const postRow = (postRes.body as { post?: TwitterPostRow }).post;
     if (!postRow) return null;
+    if (repliesRes.status !== 200) {
+      console.warn(`[bam-twitter] /api/thread: replies fetch returned ${repliesRes.status}, falling back to Reader`);
+      return null;
+    }
     const replies = (repliesRes.body as { replies?: TwitterPostRow[] }).replies ?? [];
     return { post: fromIndexerRow(postRow), replies: replies.map(fromIndexerRow) };
   } catch {
