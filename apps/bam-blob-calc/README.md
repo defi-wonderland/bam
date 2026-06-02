@@ -27,11 +27,6 @@ pnpm --filter bam-blob-calc dev
 
 Both are optional — the app works out of the box without any configuration.
 
-## Stack
-
-- **Next.js 15** (App Router)
-- **Tailwind CSS**
-
 ## Live
 
 https://bam-blob-calc.vercel.app

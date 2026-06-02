@@ -32,11 +32,6 @@ pnpm --filter bam-blog-demo build   # output → dist/
 pnpm --filter bam-blog-demo test:run
 ```
 
-## Stack
-
-- **Vite** — static site bundler
-- **bam-comments** — embeddable widget (workspace package)
-
 ## Live
 
 https://comments.bamstack.eth.limo

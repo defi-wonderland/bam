@@ -77,11 +77,6 @@ Tests cover env parsing, the `useExplorerConfig` hook (env defaults / overrides 
 - No background polling. Use the Refresh button.
 - No multi-deployment switching with shared state. Each viewer's Settings live in their own `localStorage` only.
 
-## Stack
-
-- **Next.js 15** (App Router), **Tailwind CSS**
-- **React Query** — data fetching + manual refresh
-
 ## Live
 
 https://bam-explorer.vercel.app

@@ -93,14 +93,6 @@ Different processes, different owners. Backend-process vars stay in the root fil
 | `/api/blobbles` | GET | Reader `GET /batches?contentTag=…&status=confirmed` |
 | `/api/blobbles/[txHash]` | GET | Reader `GET /batches/:txHash` |
 
-## Stack
-
-- **Next.js 15** (App Router), **Tailwind CSS**
-- **RainbowKit + wagmi** — wallet connection
-- **React Query** — data fetching
-- **bam-sdk** — encoding, signatures, KZG (browser entrypoint for client)
-- **viem** — EIP-4844 blob transactions (composer side)
-
 ## License
 
 MIT

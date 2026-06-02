@@ -84,14 +84,6 @@ All are thin proxies. The Poster, Reader, and Indexer handle the real work.
 
 A new app sharing this Poster needs to be appended to `KNOWN_CONTENT_TAGS`. Long-term that should be replaced by a Poster-side `/nonce/:sender` endpoint.
 
-## Stack
-
-- **Next.js 15** (App Router), **Tailwind CSS**
-- **RainbowKit + wagmi** — wallet connection
-- **React Query** — data fetching + cache
-- **bam-sdk** (browser entrypoint) — encoding, EIP-712 types, `messageHash`
-- **viem** — types + signing primitives via wagmi
-
 ## License
 
 MIT
