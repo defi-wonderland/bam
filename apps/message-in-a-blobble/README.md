@@ -2,10 +2,10 @@
 
 Demo app for the BAM protocol. Connect your wallet, write a message, sign it with ECDSA, and post it on-chain as an EIP-4844 blob on Sepolia.
 
-## How It Works
+## How it works
 
 1. **Connect** your wallet on Sepolia
-2. **Write** a message (280 char limit) and **sign** it (EIP-191 `personal_sign`)
+2. **Write** a message (280 char limit) and **sign** it (EIP-712 `signTypedData`)
 3. **Submit** — the demo forwards the signed message to a separately-running [`@bam/poster`](../../packages/bam-poster) service, which runs validation + pending-pool + batching + L1 submission
 4. **Post Blobble** — `@bam/poster` assembles blobs and submits type-3 transactions to BAM Core; the demo's `/api/post-blobble` is a thin proxy that nudges the Poster's per-tag flush endpoint
 5. **Confirm** — a separately-running [`bam-reader`](../../packages/bam-reader) tails L1 for `BlobBatchRegistered` events, decodes the blobs, verifies signatures, and writes confirmed rows into the shared `bam-store` substrate. The demo's `/api/confirmed-messages` and `/api/blobbles*` routes proxy to the Reader's HTTP surface
@@ -79,7 +79,7 @@ Different processes, different owners. Backend-process vars stay in the root fil
 - **Poster deploy:** long-running Node process, needs the Sepolia signer key and a `bam-store` database (real Postgres in prod). Listens on `:8787` by default.
 - **Reader deploy:** long-running Node process, needs network access to a Sepolia execution RPC and a Beacon API endpoint, plus a `bam-store` database (`READER_DB_URL`, real Postgres in prod) and a stable URL the demo can reach via `READER_URL`. Listens on `:8788` by default and binds to `127.0.0.1` unless `READER_HTTP_BIND` is overridden — front it with a reverse proxy + auth before exposing publicly.
 
-## API Routes
+## API routes
 
 | Route | Method | Proxies to |
 |-------|--------|------------|
@@ -92,14 +92,6 @@ Different processes, different owners. Backend-process vars stay in the root fil
 | `/api/confirmed-messages` | GET | Reader `GET /messages?contentTag=…&status=confirmed` |
 | `/api/blobbles` | GET | Reader `GET /batches?contentTag=…&status=confirmed` |
 | `/api/blobbles/[txHash]` | GET | Reader `GET /batches/:txHash` |
-
-## Stack
-
-- **Next.js 15** (App Router), **Tailwind CSS**
-- **RainbowKit + wagmi** — wallet connection
-- **React Query** — data fetching
-- **bam-sdk** — encoding, signatures, KZG (browser entrypoint for client)
-- **viem** — EIP-4844 blob transactions (composer side)
 
 ## License
 

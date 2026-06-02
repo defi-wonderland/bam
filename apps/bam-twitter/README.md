@@ -65,30 +65,24 @@ Both demos hit the same `POSTER_URL=http://localhost:8787` and `READER_URL=http:
 | `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` | RainbowKit / WalletConnect project id |
 | `POSTER_URL` | Shared `@bam/poster` (default `http://localhost:8787`) |
 | `READER_URL` | Shared `bam-reader` (default `http://localhost:8788`) |
+| `INDEXER_URL` | Optional. When set, `/api/confirmed-messages` prefers the indexer's pre-decoded rows over the Reader fallback. |
 
 ## API routes
 
-All four are thin proxies. The Poster and Reader handle the real work.
+All are thin proxies. The Poster, Reader, and Indexer handle the real work.
 
 | Route | Method | Proxies to |
 |---|---|---|
 | `/api/messages` | GET | Poster `/pending?contentTag=TWITTER_TAG` |
 | `/api/messages` | POST | Poster `/submit` (envelope backfilled with `TWITTER_TAG`) |
-| `/api/confirmed-messages` | GET | Reader `/messages?contentTag=TWITTER_TAG&status=confirmed` |
+| `/api/confirmed-messages` | GET | Indexer `/twitter/posts` when `INDEXER_URL` is set; Reader `/messages?contentTag=TWITTER_TAG&status=confirmed` otherwise |
+| `/api/thread/[messageHash]` | GET | Indexer `/twitter/posts/hash/:hash` + `/twitter/replies`; Reader fallback decodes raw contents |
 | `/api/post-blobble` | POST | Poster `/flush?contentTag=TWITTER_TAG` |
 | `/api/next-nonce` | GET | Poster `/pending` (no tag) + Reader `/messages` per known tag |
 
 `/api/next-nonce` is the **multi-app coordination point**. The Poster's monotonicity check is per sender across all tags (`packages/bam-poster/src/ingest/monotonicity.ts`), so a per-tag nonce estimate live-locks any wallet that has posted in another app on the same Poster. This route walks the Poster's pending queue (no tag filter) plus the Reader's confirmed view once per known tag — `KNOWN_CONTENT_TAGS` in `src/lib/constants.ts`.
 
 A new app sharing this Poster needs to be appended to `KNOWN_CONTENT_TAGS`. Long-term that should be replaced by a Poster-side `/nonce/:sender` endpoint.
-
-## Stack
-
-- **Next.js 15** (App Router), **Tailwind CSS**
-- **RainbowKit + wagmi** — wallet connection
-- **React Query** — data fetching + cache
-- **bam-sdk** (browser entrypoint) — encoding, EIP-712 types, `messageHash`
-- **viem** — types + signing primitives via wagmi
 
 ## License
 

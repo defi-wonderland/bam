@@ -11,7 +11,7 @@ The page is **fully client-rendered** and **read-only by design**. The Explorer'
 
 Each panel labels the upstream endpoint it reads, and renders one of four explicit states — **ok**, **not configured**, **unreachable**, or **error** — so a surprising number on the page is always traceable to a specific upstream call you can re-issue with `curl`. Panels degrade independently: if the Reader is down, the Poster panels still render, and vice versa.
 
-## Configuration: env defaults + per-viewer Settings
+## Environment variables
 
 Two configuration sources, in priority order:
 
@@ -34,7 +34,7 @@ Note: there is **no** `NEXT_PUBLIC_DEFAULT_POSTER_AUTH_TOKEN`. A bearer token ca
 
 Defaults: 50 each. Per-viewer overrides via Settings (clamped to `[1, 200]`). The Reader caps at 1000 and the Poster at 10 000, so 50 is well within both and human-scannable.
 
-## Local dev
+## Setup
 
 Both upstreams (`bam-reader`, `@bam/poster`) already CORS-allow `*` and accept the `Authorization` header on the relevant routes, so the browser-direct fetch works out of the box.
 
@@ -76,3 +76,11 @@ Tests cover env parsing, the `useExplorerConfig` hook (env defaults / overrides 
 - No build-time default for the Poster bearer token. A deployed Explorer never ships an operator's token to anonymous visitors.
 - No background polling. Use the Refresh button.
 - No multi-deployment switching with shared state. Each viewer's Settings live in their own `localStorage` only.
+
+## Live
+
+https://bam-explorer.vercel.app
+
+## License
+
+MIT
