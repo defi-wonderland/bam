@@ -37,3 +37,16 @@ The wallet's current chain id is what gets bound into the EIP-712 signature.
 
 For the wallet + on-chain flow, see the [`message-in-a-blobble`](../message-in-a-blobble)
 app instead.
+
+## Stack
+
+- **Next.js 15** (App Router)
+- **bam-sdk** (browser entrypoint) — all surfaced functions
+
+## Live
+
+https://bam-sdk-test.vercel.app
+
+## License
+
+MIT
