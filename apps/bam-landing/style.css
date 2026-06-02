@@ -531,6 +531,23 @@ a.cell:hover .cell-name {
   color: var(--fg);
 }
 
+.demo-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  background: rgba(167, 139, 250, 0.1);
+  border: 1px solid rgba(167, 139, 250, 0.35);
+  border-radius: 4px;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+  vertical-align: middle;
+}
+
+.demo-card--soon {
+  opacity: 0.55;
+}
+
 .demo-desc {
   margin: 0;
   font-size: 13px;
