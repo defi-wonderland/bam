@@ -1,5 +1,11 @@
 # Circuit 2 — bam-twitter coprocessor
 
+> **Wound down.** Circuit 2 is not being developed further. The C1 Groth16 proof is
+> the deliverable — self-contained per message, cheap to verify in-browser or on-chain.
+> This file is kept as a historical record. See `REDESIGN.md` for the current direction.
+
+---
+
 Recursively verifies the Circuit 1 proof inside SP1, applies bam-twitter
 deduplication and aggregation, and commits to a timeline root R.
 
