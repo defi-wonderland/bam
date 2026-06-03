@@ -16,10 +16,6 @@ name = "show-proof"
 path = "src/bin/show-proof.rs"
 
 [[bin]]
-name = "prove-app"
-path = "src/bin/prove-app.rs"
-
-[[bin]]
 name = "print-vk"
 path = "src/bin/print-vk.rs"
 
