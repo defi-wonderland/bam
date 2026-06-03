@@ -3,14 +3,12 @@
 //! Builds a synthetic blob containing a real BAM batch with one signed
 //! message, generates a real KZG proof against the mainnet trusted setup,
 //! runs the SP1 circuit in execute (simulation) mode, and asserts that the
-//! committed M matches the value computed directly via the shared lib.
+//! committed message_hash matches the value computed directly via the shared lib.
 //!
 //! No bam-reader instance or blob archive needed — everything is synthetic.
 //! Run with: cargo test --test circuit_e2e -- --nocapture
 
-use bam_coprocessor_lib::{
-    compute_message_commitment, eip712_digest, ReaderBatch, VerifiedMessage,
-};
+use bam_coprocessor_lib::{compute_message_hash, eip712_digest, BlobInput};
 use c_kzg::{ethereum_kzg_settings, Blob};
 use k256::ecdsa::SigningKey;
 use sha2::{Digest, Sha256};
@@ -21,7 +19,6 @@ use sp1_sdk::{
 };
 
 const BAM_READER_ELF: Elf = include_elf!("bam-reader-program");
-
 const CHAIN_ID: u64 = 11155111;
 
 // ── Key + signing helpers ──────────────────────────────────────────────────────
@@ -34,7 +31,6 @@ fn address_of(key: &SigningKey) -> [u8; 20] {
     use k256::ecdsa::VerifyingKey;
     let vk = VerifyingKey::from(key);
     let point = vk.to_encoded_point(false);
-    // keccak256 of uncompressed pubkey bytes (skip 0x04 prefix)
     let mut keccak = tiny_keccak::Keccak::v256();
     keccak.update(&point.as_bytes()[1..]);
     let mut hash = [0u8; 32];
@@ -44,8 +40,14 @@ fn address_of(key: &SigningKey) -> [u8; 20] {
     addr
 }
 
-fn sign_message(key: &SigningKey, sender: &[u8; 20], nonce: u64, contents: &[u8]) -> [u8; 65] {
-    let digest = eip712_digest(sender, nonce, contents, CHAIN_ID);
+fn sign_message(
+    key: &SigningKey,
+    sender: &[u8; 20],
+    content_tag: &[u8; 32],
+    nonce: u64,
+    contents: &[u8],
+) -> [u8; 65] {
+    let digest = eip712_digest(sender, content_tag, nonce, contents, CHAIN_ID);
     let (sig, recid) = key.sign_prehash_recoverable(&digest).expect("sign failed");
     let mut sig65 = [0u8; 65];
     sig65[..64].copy_from_slice(&sig.to_bytes());
@@ -55,30 +57,25 @@ fn sign_message(key: &SigningKey, sender: &[u8; 20], nonce: u64, contents: &[u8]
 
 // ── Blob construction ─────────────────────────────────────────────────────────
 
-/// Pack `data` into a 131072-byte EIP-4844 blob (31 usable bytes per FE).
-/// Byte 0 of each FE is always 0x00 (required by the field constraint).
 fn pack_into_blob(data: &[u8]) -> Vec<u8> {
     let mut blob = vec![0u8; 131072];
     let mut src = data;
     for fe in 0..4096usize {
         let chunk_len = src.len().min(31);
-        if chunk_len == 0 {
-            break;
-        }
+        if chunk_len == 0 { break; }
         blob[fe * 32 + 1..fe * 32 + 1 + chunk_len].copy_from_slice(&src[..chunk_len]);
         src = &src[chunk_len..];
     }
     blob
 }
 
-/// Encode one BAM batch with a single message into wire format bytes.
-fn encode_batch(sender: &[u8; 20], nonce: u64, contents: &[u8], sig: &[u8; 65]) -> Vec<u8> {
+fn encode_bam_payload(sender: &[u8; 20], nonce: u64, contents: &[u8], sig: &[u8; 65]) -> Vec<u8> {
     let payload_len = 20 + 8 + 4 + contents.len() + 65;
     let mut data = vec![0u8; 10 + payload_len];
-    data[0] = 0x02; // version
-    data[1] = 0x00; // codec: none
-    data[2..6].copy_from_slice(&1u32.to_be_bytes()); // msg_count
-    data[6..10].copy_from_slice(&(payload_len as u32).to_be_bytes()); // payload_len
+    data[0] = 0x02;
+    data[1] = 0x00;
+    data[2..6].copy_from_slice(&1u32.to_be_bytes());
+    data[6..10].copy_from_slice(&(payload_len as u32).to_be_bytes());
     let mut o = 10;
     data[o..o + 20].copy_from_slice(sender); o += 20;
     data[o..o + 8].copy_from_slice(&nonce.to_be_bytes()); o += 8;
@@ -109,38 +106,39 @@ fn kzg_from_blob(blob_bytes: &[u8]) -> (Vec<u8>, Vec<u8>, [u8; 32]) {
 // ── Test ──────────────────────────────────────────────────────────────────────
 
 #[test]
-fn circuit_executes_and_m_matches() {
+fn circuit_executes_and_message_hash_matches() {
     sp1_sdk::utils::setup_logger();
 
     let key = test_key();
     let sender = address_of(&key);
+    let content_tag = [0xf0u8; 32];
     let nonce = 1u64;
-    // contents = 32-byte content_tag (zeros) + app payload
-    let mut contents = vec![0u8; 32];
-    contents.extend_from_slice(b"hello from the circuit test");
-    let sig = sign_message(&key, &sender, nonce, &contents);
+    let contents = b"hello from the circuit test";
+    let msg_index: u32 = 0;
 
-    let batch_wire = encode_batch(&sender, nonce, &contents, &sig);
-    let blob_bytes = pack_into_blob(&batch_wire);
+    let sig = sign_message(&key, &sender, &content_tag, nonce, contents);
+    let payload = encode_bam_payload(&sender, nonce, contents, &sig);
+    let blob_bytes = pack_into_blob(&payload);
     let (commitment, opening_proof, versioned_hash) = kzg_from_blob(&blob_bytes);
 
-    let batch = ReaderBatch {
+    let blob_input = BlobInput {
         versioned_hash,
         commitment,
         opening_proof,
-        content_tag: [0u8; 32],
-        decoder: [0u8; 20],
+        content_tag,
+        decoder:      [0u8; 20],
         sig_registry: [0u8; 20],
         block_number: 1,
-        tx_index: 0,
-        start_fe: 0,
-        end_fe: 4096,
+        tx_index:     0,
+        start_fe:     0,
+        end_fe:       4096,
         blob_bytes,
     };
 
     let mut stdin = SP1Stdin::new();
     stdin.write(&CHAIN_ID);
-    stdin.write(&vec![batch]);
+    stdin.write(&blob_input);
+    stdin.write(&msg_index);
 
     let client = ProverClient::from_env();
     let (output, report) = client
@@ -148,34 +146,28 @@ fn circuit_executes_and_m_matches() {
         .run()
         .expect("SP1 execution failed");
 
-    // ── Parse public outputs ──────────────────────────────────────────────────
+    // ── Parse 152-byte public output ──────────────────────────────────────────
     let raw = output.as_slice();
-    let chain_id_out = u64::from_le_bytes(raw[0..8].try_into().unwrap());
-    let m_circuit: [u8; 32] = raw[8..40].try_into().unwrap();
-    let batch_count = u32::from_le_bytes(raw[40..44].try_into().unwrap());
+    assert_eq!(raw.len(), 152, "expected 152-byte public output");
 
-    println!("chain_id:          {}", chain_id_out);
-    println!("M (circuit):       0x{}", hex::encode(m_circuit));
-    println!("batches processed: {}", batch_count);
-    println!("total cycles:      {}", report.total_instruction_count());
+    let chain_id_out  = u64::from_le_bytes(raw[0..8].try_into().unwrap());
+    let sender_out: [u8; 20] = raw[92..112].try_into().unwrap();
+    let nonce_out     = u64::from_le_bytes(raw[112..120].try_into().unwrap());
+    let mh_circuit: [u8; 32] = raw[120..152].try_into().unwrap();
+
+    println!("chain_id:      {}", chain_id_out);
+    println!("sender:        0x{}", hex::encode(sender_out));
+    println!("nonce:         {}", nonce_out);
+    println!("message_hash:  0x{}", hex::encode(mh_circuit));
+    println!("cycles:        {}", report.total_instruction_count());
 
     assert_eq!(chain_id_out, CHAIN_ID);
-    assert_eq!(batch_count, 1);
+    assert_eq!(sender_out, sender);
+    assert_eq!(nonce_out, nonce);
 
-    // ── Recompute M independently via the shared lib ──────────────────────────
-    let expected_msg = VerifiedMessage {
-        sender,
-        nonce,
-        contents: contents.clone(),
-        block_number: 1,
-        tx_index: 0,
-        msg_index: 0,
-    };
-    let m_lib = compute_message_commitment(&[expected_msg]);
-    println!("M (lib):           0x{}", hex::encode(m_lib));
+    // ── Cross-check message_hash via the shared lib ───────────────────────────
+    let mh_lib = compute_message_hash(&sender, &content_tag, nonce, contents);
+    println!("message_hash (lib): 0x{}", hex::encode(mh_lib));
 
-    assert_eq!(
-        m_circuit, m_lib,
-        "circuit M must match lib-computed M"
-    );
+    assert_eq!(mh_circuit, mh_lib, "circuit message_hash must match lib-computed value");
 }

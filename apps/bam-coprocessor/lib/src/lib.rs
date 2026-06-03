@@ -4,14 +4,8 @@
 //! lib for each guest program running inside the SP1 zkVM.
 //!
 //! Circuit 1 pipeline (reader coprocessor):
-//!   blob bytes → extract_segment_bytes → decode_batch → verify_ecdsa (per msg)
-//!   → sort by chain order → compute_message_commitment M
-//!
-//! Circuit 2 pipeline (app coprocessor, bam-twitter):
-//!   verify π₁ → assert M matches → assert batch content_tags == TWITTER_TAG → decode_twitter_contents
-//!   → build_timeline → compute_timeline_root R
-
-use std::collections::HashSet;
+//!   blob bytes → extract_segment_bytes → decode_bam_payload → verify_ecdsa (one msg)
+//!   → compute_message_hash
 
 use k256::ecdsa::{RecoveryId, Signature as K256Sig, VerifyingKey};
 use serde::{Deserialize, Serialize};
@@ -32,7 +26,7 @@ use tiny_keccak::{Hasher, Keccak};
 /// start_fe / end_fe come from the BlobSegmentDeclared event joined to
 /// BlobBatchRegistered by (txHash, contentTag) on the host side.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ReaderBatch {
+pub struct BlobInput {
     pub versioned_hash: [u8; 32],
     /// KZG commitment C = f(τ)·G₁, compressed G1 point (48 bytes).
     pub commitment: Vec<u8>,
@@ -71,40 +65,6 @@ pub struct VerifiedMessage {
     pub tx_index: u32,
     /// Position within the decoded batch (before signature filtering).
     pub msg_index: u32,
-}
-
-/// A decoded bam-twitter message, positioned in canonical chain order.
-/// Used by Circuit 2 after filtering VerifiedMessages by TWITTER_TAG.
-#[derive(Debug, Clone)]
-pub struct IndexedTweet {
-    pub sender: [u8; 20],
-    pub nonce: u64,
-    pub block_number: u64,
-    pub tx_index: u32,
-    pub msg_index: u32,
-    pub tweet: TwitterMessage,
-}
-
-/// The app-layer content of a tweet.
-#[derive(Debug, Clone)]
-pub enum TwitterMessage {
-    Post { timestamp: u64, content: String },
-    Reply { timestamp: u64, parent_message_hash: [u8; 32], content: String },
-}
-
-impl TwitterMessage {
-    pub fn timestamp(&self) -> u64 {
-        match self {
-            TwitterMessage::Post { timestamp, .. } => *timestamp,
-            TwitterMessage::Reply { timestamp, .. } => *timestamp,
-        }
-    }
-    pub fn content(&self) -> &str {
-        match self {
-            TwitterMessage::Post { content, .. } => content,
-            TwitterMessage::Reply { content, .. } => content,
-        }
-    }
 }
 
 // ── Keccak-256 ────────────────────────────────────────────────────────────────
@@ -281,7 +241,7 @@ pub fn extract_segment_bytes(blob: &[u8], start_fe: u16, end_fe: u16) -> Vec<u8>
 ///   65 bytes:  signature (scheme 0x01 ECDSA)
 ///
 /// TypeScript ref: packages/bam-sdk/src/batch.ts
-pub fn decode_batch(data: &[u8]) -> (Vec<BamMessage>, Vec<[u8; 65]>) {
+pub fn decode_bam_payload(data: &[u8]) -> (Vec<BamMessage>, Vec<[u8; 65]>) {
     if data.len() < 10 {
         return (vec![], vec![]);
     }
@@ -379,100 +339,27 @@ pub fn compute_message_commitment(messages: &[VerifiedMessage]) -> [u8; 32] {
     hasher.finalize().into()
 }
 
-// ── bam-twitter app pipeline (Circuit 2) ─────────────────────────────────────
+// ── Per-message hash ──────────────────────────────────────────────────────────
 
-/// Parse the bam-twitter app envelope out of a message's contents bytes.
+/// Compute the ERC-8180 per-message identifier.
 ///
-/// Post-PR#59 contents layout (no contentTag prefix):
-///   byte  0:      envelope version (must be 0x01)
-///   byte  1:      kind (0x00 = post, 0x01 = reply)
+/// message_hash = keccak256(sender ‖ content_tag ‖ nonce_be8 ‖ contents)
 ///
-/// Post payload (from byte 2):
-///   bytes 2..9:   timestamp (uint64 BE, Unix seconds)
-///   bytes 10..13: content_len (uint32 BE)
-///   bytes 14..:   UTF-8 content
-///
-/// Reply payload (from byte 2):
-///   bytes 2..9:   timestamp
-///   bytes 10..41: parent_message_hash (bytes32)
-///   bytes 42..45: content_len
-///   bytes 46..:   UTF-8 content
-///
-/// TypeScript ref: apps/bam-twitter/src/lib/contents-codec.ts
-pub fn decode_twitter_contents(contents: &[u8]) -> Option<TwitterMessage> {
-    if contents.len() < 2 {
-        return None;
-    }
-    let app = contents;
-    if app[0] != 0x01 {
-        return None;
-    }
-    match app[1] {
-        0x00 => {
-            if app.len() < 14 {
-                return None;
-            }
-            let timestamp = u64::from_be_bytes(app[2..10].try_into().ok()?);
-            let content_len = u32::from_be_bytes(app[10..14].try_into().ok()?) as usize;
-            if 14 + content_len > app.len() {
-                return None;
-            }
-            let content = String::from_utf8(app[14..14 + content_len].to_vec()).ok()?;
-            Some(TwitterMessage::Post { timestamp, content })
-        }
-        0x01 => {
-            if app.len() < 46 {
-                return None;
-            }
-            let timestamp = u64::from_be_bytes(app[2..10].try_into().ok()?);
-            let parent_message_hash: [u8; 32] = app[10..42].try_into().ok()?;
-            let content_len = u32::from_be_bytes(app[42..46].try_into().ok()?) as usize;
-            if 46 + content_len > app.len() {
-                return None;
-            }
-            let content = String::from_utf8(app[46..46 + content_len].to_vec()).ok()?;
-            Some(TwitterMessage::Reply { timestamp, parent_message_hash, content })
-        }
-        _ => None,
-    }
-}
-
-/// Sort messages into canonical chain order and deduplicate by (sender, nonce).
-/// First occurrence wins — same rule as bam-store.
-///
-/// Sort key: (block_number ASC, tx_index ASC, msg_index ASC)
-pub fn build_timeline(mut messages: Vec<IndexedTweet>) -> Vec<IndexedTweet> {
-    messages.sort_by(|a, b| {
-        a.block_number
-            .cmp(&b.block_number)
-            .then(a.tx_index.cmp(&b.tx_index))
-            .then(a.msg_index.cmp(&b.msg_index))
-    });
-    let mut seen: HashSet<([u8; 20], u64)> = HashSet::new();
-    messages
-        .into_iter()
-        .filter(|t| seen.insert((t.sender, t.nonce)))
-        .collect()
-}
-
-/// Compute the timeline root R = sha256 over all tweets in canonical order.
-///
-/// Per-tweet record:
-///   uint32 BE (record length) || sender (20) || nonce BE8 (8) || timestamp BE8 (8) || content (UTF-8)
-///
-/// TypeScript ref: apps/bam-indexer/src/pipeline.ts → computeTimelineRoot
-pub fn compute_timeline_root(timeline: &[IndexedTweet]) -> [u8; 32] {
-    let mut hasher = Sha256::new();
-    for tweet in timeline {
-        let content = tweet.tweet.content().as_bytes();
-        let record_len = (20u32 + 8 + 8 + content.len() as u32).to_be_bytes();
-        hasher.update(record_len);
-        hasher.update(tweet.sender);
-        hasher.update(tweet.nonce.to_be_bytes());
-        hasher.update(tweet.tweet.timestamp().to_be_bytes());
-        hasher.update(content);
-    }
-    hasher.finalize().into()
+/// This is Circuit 1's public output — the verifier recomputes it from the
+/// message fields and checks it matches the proof's committed value.
+/// nonce is encoded as 8-byte big-endian, matching the EIP-712 struct hash.
+pub fn compute_message_hash(
+    sender: &[u8; 20],
+    content_tag: &[u8; 32],
+    nonce: u64,
+    contents: &[u8],
+) -> [u8; 32] {
+    let mut data = Vec::with_capacity(20 + 32 + 8 + contents.len());
+    data.extend_from_slice(sender);
+    data.extend_from_slice(content_tag);
+    data.extend_from_slice(&nonce.to_be_bytes());
+    data.extend_from_slice(contents);
+    keccak256(&data)
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -544,47 +431,47 @@ mod tests {
         assert_eq!(out.len(), 4096 * 31);
     }
 
-    // ── decode_batch ──────────────────────────────────────────────────────────
+    // ── decode_bam_payload ──────────────────────────────────────────────────────────
 
     #[test]
-    fn test_decode_batch_too_short() {
-        let (msgs, sigs) = decode_batch(&[0u8; 9]);
+    fn test_decode_bam_payload_too_short() {
+        let (msgs, sigs) = decode_bam_payload(&[0u8; 9]);
         assert!(msgs.is_empty() && sigs.is_empty());
     }
 
     #[test]
-    fn test_decode_batch_bad_version() {
+    fn test_decode_bam_payload_bad_version() {
         let mut d = vec![0u8; 10];
         d[0] = 0x01;
-        let (msgs, sigs) = decode_batch(&d);
+        let (msgs, sigs) = decode_bam_payload(&d);
         assert!(msgs.is_empty() && sigs.is_empty());
     }
 
     #[test]
-    fn test_decode_batch_zstd_panics() {
+    fn test_decode_bam_payload_zstd_panics() {
         let mut d = vec![0u8; 10];
         d[0] = 0x02;
         d[1] = 0x01;
-        let result = std::panic::catch_unwind(|| decode_batch(&d));
+        let result = std::panic::catch_unwind(|| decode_bam_payload(&d));
         assert!(result.is_err(), "ZSTD batch must panic");
     }
 
     #[test]
-    fn test_decode_batch_zero_messages() {
+    fn test_decode_bam_payload_zero_messages() {
         let mut d = vec![0u8; 10];
         d[0] = 0x02;
-        let (msgs, sigs) = decode_batch(&d);
+        let (msgs, sigs) = decode_bam_payload(&d);
         assert!(msgs.is_empty() && sigs.is_empty());
     }
 
     #[test]
-    fn test_decode_batch_one_message_roundtrip() {
+    fn test_decode_bam_payload_one_message_roundtrip() {
         let sender = [0x11u8; 20];
         let nonce = 42u64;
         let contents = b"hello world";
         let sig = [0xAAu8; 65];
         let data = make_batch_bytes(&sender, nonce, contents, &sig);
-        let (msgs, sigs) = decode_batch(&data);
+        let (msgs, sigs) = decode_bam_payload(&data);
         assert_eq!(msgs.len(), 1);
         assert_eq!(msgs[0].sender, sender);
         assert_eq!(msgs[0].nonce, nonce);
@@ -720,39 +607,27 @@ mod tests {
         assert!(!verify_ecdsa(&sender, &tag, nonce, b"tampered", &sig, chain_id));
     }
 
-    #[test]
-    fn test_decode_twitter_contents_no_prefix() {
-        // Post: version=0x01, kind=0x00, timestamp=1000, content="hi"
-        let mut post = vec![0u8; 16];
-        post[0] = 0x01;
-        post[1] = 0x00;
-        post[2..10].copy_from_slice(&1000u64.to_be_bytes());
-        post[10..14].copy_from_slice(&2u32.to_be_bytes());
-        post[14..16].copy_from_slice(b"hi");
-        match decode_twitter_contents(&post) {
-            Some(TwitterMessage::Post { timestamp, content }) => {
-                assert_eq!(timestamp, 1000);
-                assert_eq!(content, "hi");
-            }
-            _ => panic!("expected Post"),
-        }
+    // ── compute_message_hash ─────────────────────────────────────────────────
 
-        // Reply: version=0x01, kind=0x01, timestamp=2000, parent=[0xAB;32], content="yo"
-        let parent = [0xABu8; 32];
-        let mut reply = vec![0u8; 48];
-        reply[0] = 0x01;
-        reply[1] = 0x01;
-        reply[2..10].copy_from_slice(&2000u64.to_be_bytes());
-        reply[10..42].copy_from_slice(&parent);
-        reply[42..46].copy_from_slice(&2u32.to_be_bytes());
-        reply[46..48].copy_from_slice(b"yo");
-        match decode_twitter_contents(&reply) {
-            Some(TwitterMessage::Reply { timestamp, parent_message_hash, content }) => {
-                assert_eq!(timestamp, 2000);
-                assert_eq!(parent_message_hash, parent);
-                assert_eq!(content, "yo");
-            }
-            _ => panic!("expected Reply"),
-        }
+    #[test]
+    fn test_message_hash_deterministic() {
+        let sender = [0x11u8; 20];
+        let tag = [0xf0u8; 32];
+        assert_eq!(
+            compute_message_hash(&sender, &tag, 1, b"hello"),
+            compute_message_hash(&sender, &tag, 1, b"hello"),
+        );
+    }
+
+    #[test]
+    fn test_message_hash_differs_by_field() {
+        let sender = [0x11u8; 20];
+        let tag = [0xf0u8; 32];
+        let h1 = compute_message_hash(&sender, &tag, 1, b"hello");
+        let h2 = compute_message_hash(&sender, &tag, 2, b"hello");
+        let h3 = compute_message_hash(&sender, &tag, 1, b"world");
+        assert_ne!(h1, h2);
+        assert_ne!(h1, h3);
+        assert_ne!(h2, h3);
     }
 }

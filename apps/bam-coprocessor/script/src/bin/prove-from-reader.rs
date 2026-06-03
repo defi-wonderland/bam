@@ -24,8 +24,8 @@
 
 use std::io::Read;
 
-use bam_coprocessor_lib::{compute_message_commitment, ReaderBatch, VerifiedMessage};
-use bam_coprocessor_script::{parse_public_values, print_public_values};
+use bam_coprocessor_lib::BlobInput;
+use bam_coprocessor_script::{parse_message_public_values, print_message_public_values};
 use c_kzg::{ethereum_kzg_settings, Blob};
 use clap::Parser;
 use serde::Deserialize;
@@ -73,9 +73,9 @@ struct Args {
     #[arg(long, default_value = "1")]
     chain_id: u64,
 
-    /// Maximum number of confirmed batches to fetch.
-    #[arg(long, default_value = "1000")]
-    limit: u32,
+    /// Index of the message within the decoded batch to prove.
+    #[arg(long, default_value = "0")]
+    msg_index: u32,
 
     /// Save output to a file. In --execute mode: JSON with public values + cycle stats.
     /// In --prove mode: serialized SP1 proof (binary, loadable by show-proof).
@@ -84,23 +84,6 @@ struct Args {
 }
 
 // ── bam-reader API types ──────────────────────────────────────────────────────
-
-/// One entry from `GET /messages` — only the fields we need.
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct ApiMessage {
-    sender: String,
-    nonce: String,
-    contents: String,
-    block_number: Option<u64>,
-    tx_index: Option<u32>,
-    message_index_within_batch: Option<u32>,
-}
-
-#[derive(Deserialize)]
-struct MessagesResponse {
-    messages: Vec<ApiMessage>,
-}
 
 /// One entry from `GET /batches` — only the fields we need.
 /// bam-reader encodes Bytes32/Address as 0x-prefixed hex and bigint as decimal
@@ -127,19 +110,6 @@ fn decode_hex32(s: &str) -> [u8; 32] {
         .expect("invalid hex")
         .try_into()
         .expect("expected 32 bytes")
-}
-
-fn decode_hex20(s: &str) -> [u8; 20] {
-    let s = s.strip_prefix("0x").unwrap_or(s);
-    hex::decode(s)
-        .expect("invalid hex")
-        .try_into()
-        .expect("expected 20 bytes")
-}
-
-fn decode_hex_bytes(s: &str) -> Vec<u8> {
-    let s = s.strip_prefix("0x").unwrap_or(s);
-    hex::decode(s).expect("invalid hex")
 }
 
 /// Fetch raw blob bytes, trying bam-reader first then the beacon chain.
@@ -295,8 +265,8 @@ fn main() {
 
     // ── Step 1: fetch confirmed batch list ────────────────────────────────────
     let batches_url = format!(
-        "{}/batches?contentTag={}&status=confirmed&limit={}",
-        args.reader_url, args.content_tag, args.limit
+        "{}/batches?contentTag={}&status=confirmed&limit=1",
+        args.reader_url, args.content_tag
     );
     println!("\nFetching batches from {}…", batches_url);
 
@@ -314,76 +284,61 @@ fn main() {
         return;
     }
 
-    // Sort deterministically before processing.
+    // Use the first confirmed batch (sorted by chain order).
     api_batches.sort_by(|a, b| {
         a.block_number
             .cmp(&b.block_number)
             .then(a.tx_index.cmp(&b.tx_index))
     });
+    let ab = &api_batches[0];
 
-    // ── Step 2: fetch blobs + generate KZG proofs ─────────────────────────────
-    println!("Fetching blobs and generating KZG proofs…");
-    let total = api_batches.len();
+    // ── Step 2: fetch blob + generate KZG proof ───────────────────────────────
+    let block_number = ab.block_number.expect("confirmed batch must have block_number");
+    let tx_index = ab.tx_index.expect("confirmed batch must have tx_index");
+    let l1_vh = decode_hex32(&ab.blob_versioned_hash);
 
-    let batches: Vec<ReaderBatch> = api_batches
-        .iter()
-        .enumerate()
-        .map(|(i, ab)| {
-            let block_number = ab.block_number.expect("confirmed batch must have block_number");
-            let tx_index = ab.tx_index.expect("confirmed batch must have tx_index");
-            let l1_vh = decode_hex32(&ab.blob_versioned_hash);
+    println!("Fetching blob and generating KZG proof…");
+    println!(
+        "  block={} tx={} vh=0x{}…",
+        block_number, tx_index, &ab.blob_versioned_hash[2..10]
+    );
 
-            println!(
-                "  [{}/{}] block={} tx={} vh=0x{}…",
-                i + 1,
-                total,
-                block_number,
-                tx_index,
-                &ab.blob_versioned_hash[2..10]
-            );
+    let blob_bytes = fetch_blob_bytes(
+        &args.reader_url,
+        &ab.blob_versioned_hash,
+        &l1_vh,
+        block_number,
+        args.chain_id,
+    );
 
-            let blob_bytes = fetch_blob_bytes(
-                &args.reader_url,
-                &ab.blob_versioned_hash,
-                &l1_vh,
-                block_number,
-                args.chain_id,
-            );
+    let (commitment, opening_proof, computed_vh) = generate_kzg_proof_real(&blob_bytes);
+    assert_eq!(
+        computed_vh, l1_vh,
+        "versioned_hash mismatch (block={} tx={}) — blob may be corrupt",
+        block_number, tx_index
+    );
 
-            let (commitment, opening_proof, computed_vh) = generate_kzg_proof_real(&blob_bytes);
-
-            assert_eq!(
-                computed_vh, l1_vh,
-                "blob[{}] versioned_hash mismatch (block={} tx={}) — blob may be corrupt",
-                i, block_number, tx_index
-            );
-
-            ReaderBatch {
-                versioned_hash: l1_vh,
-                commitment,
-                opening_proof,
-                content_tag:  decode_hex32(&ab.content_tag),
-                // decoder and sig_registry are not in BatchRow; the circuit
-                // asserts both are 0x0 (see Step 0), so we supply zeros.
-                decoder:      [0u8; 20],
-                sig_registry: [0u8; 20],
-                block_number,
-                tx_index,
-                // startFE / endFE are not stored in BatchRow — default to full
-                // blob.  See the known limitation in the module doc comment.
-                start_fe: 0,
-                end_fe:   4096,
-                blob_bytes,
-            }
-        })
-        .collect();
+    let blob = BlobInput {
+        versioned_hash: l1_vh,
+        commitment,
+        opening_proof,
+        content_tag:  decode_hex32(&ab.content_tag),
+        decoder:      [0u8; 20],
+        sig_registry: [0u8; 20],
+        block_number,
+        tx_index,
+        start_fe: 0,
+        end_fe:   4096,
+        blob_bytes,
+    };
 
     println!("  Done.\n");
 
     // ── Step 3: feed to SP1 ───────────────────────────────────────────────────
     let mut stdin = SP1Stdin::new();
     stdin.write(&args.chain_id);
-    stdin.write(&batches);
+    stdin.write(&blob);
+    stdin.write(&args.msg_index);
 
     let client = ProverClient::from_env();
 
@@ -394,16 +349,9 @@ fn main() {
             .run()
             .expect("execution failed");
 
-        // Public outputs layout (matches program-reader/src/main.rs):
-        //   [0..8]    chain_id (u64 LE)
-        //   [8..40]   M (32 bytes)
-        //   [40..44]  batch_count (u32 LE)
-        //   Per batch (124 bytes): versioned_hash(32) + commitment(48) +
-        //                          content_tag(32) + block_number(8 LE) + tx_index(4 LE)
         let raw = output.as_slice();
-        let m: [u8; 32] = raw[8..40].try_into().unwrap();
-        let pv = parse_public_values(raw);
-        print_public_values(&pv);
+        let pv = parse_message_public_values(raw);
+        print_message_public_values(&pv);
 
         let total_cycles = report.total_instruction_count();
         println!("\nCycles: {}", total_cycles);
@@ -411,61 +359,11 @@ fn main() {
         if let Some(path) = &args.output {
             let json = serde_json::json!({
                 "public_values": pv,
-                "cycles": { "total": total },
+                "cycles": { "total": total_cycles },
             });
             std::fs::write(path, serde_json::to_string_pretty(&json).unwrap())
                 .unwrap_or_else(|e| eprintln!("Warning: could not write output: {}", e));
             println!("\nResults saved to {}", path);
-        }
-
-        // ── Sanity check: recompute M from bam-reader's decoded messages ──────
-        println!("\nSanity check: fetching decoded messages from bam-reader…");
-        let messages_url = format!(
-            "{}/messages?contentTag={}&status=confirmed&limit=1000",
-            args.reader_url, args.content_tag
-        );
-        let msg_resp: MessagesResponse = ureq::get(&messages_url)
-            .call()
-            .unwrap_or_else(|e| panic!("GET /messages failed: {}", e))
-            .into_json()
-            .expect("GET /messages: invalid JSON response");
-
-        println!("  {} confirmed message(s) from bam-reader", msg_resp.messages.len());
-
-        let mut reader_messages: Vec<VerifiedMessage> = msg_resp
-            .messages
-            .iter()
-            .map(|api_msg| VerifiedMessage {
-                sender: decode_hex20(&api_msg.sender),
-                nonce: api_msg.nonce.parse::<u64>().expect("nonce must be a u64 decimal string"),
-                contents: decode_hex_bytes(&api_msg.contents),
-                block_number: api_msg.block_number.expect("confirmed message must have blockNumber"),
-                tx_index: api_msg.tx_index.expect("confirmed message must have txIndex"),
-                msg_index: api_msg
-                    .message_index_within_batch
-                    .expect("confirmed message must have messageIndexWithinBatch"),
-            })
-            .collect();
-
-        reader_messages.sort_by(|a, b| {
-            a.block_number
-                .cmp(&b.block_number)
-                .then(a.tx_index.cmp(&b.tx_index))
-                .then(a.msg_index.cmp(&b.msg_index))
-        });
-
-        let m_reader = compute_message_commitment(&reader_messages);
-
-        if m == m_reader {
-            println!("  PASS: circuit M == bam-reader M (0x{})", hex::encode(m));
-        } else {
-            eprintln!("  FAIL: M mismatch!");
-            eprintln!("    circuit M:    0x{}", hex::encode(m));
-            eprintln!("    bam-reader M: 0x{}", hex::encode(m_reader));
-            eprintln!("  Likely causes:");
-            eprintln!("    - ZSTD-encoded batches (codec=0x01): bam-reader decodes them, circuit skips them");
-            eprintln!("    - Signature verification divergence between circuit and bam-reader");
-            std::process::exit(1);
         }
     } else {
         println!("Mode: prove\n");

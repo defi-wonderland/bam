@@ -19,8 +19,8 @@
 //! Usage:
 //!   cargo run --release --bin prove-reader -- --execute --cache /path/to/batches.json
 
-use bam_coprocessor_lib::ReaderBatch;
-use bam_coprocessor_script::{parse_public_values, print_public_values};
+use bam_coprocessor_lib::BlobInput;
+use bam_coprocessor_script::{parse_message_public_values, print_message_public_values};
 use c_kzg::{ethereum_kzg_settings, Blob};
 use clap::Parser;
 use serde::Deserialize;
@@ -47,10 +47,8 @@ struct Args {
 
     /// Proof format for --prove mode.
     ///
-    /// compressed (default): a STARK that Circuit 2 can recursively verify inside the SP1 zkVM.
-    /// groth16: a succinct BN254 proof verifiable by snarkjs in the browser, a Solidity contract,
-    ///   or any standard Groth16 verifier. Cannot be consumed by Circuit 2's recursive verify step.
-    ///   Use this when Circuit 1 is the final output (no Circuit 2), e.g. for client-side UX.
+    /// compressed: a STARK (default). groth16: BN254 Groth16, verifiable by snarkjs in the
+    /// browser or any standard Groth16 verifier. Use groth16 for the final deliverable.
     #[arg(long, default_value = "compressed", value_parser = ["compressed", "groth16"])]
     proof_type: String,
 
@@ -61,6 +59,10 @@ struct Args {
     /// Path to the blob batch cache file.
     #[arg(long, default_value = "../bam-indexer/cache/batches.json")]
     cache: String,
+
+    /// Index of the message within the decoded batch to prove.
+    #[arg(long, default_value = "0")]
+    msg_index: u32,
 
     /// Save output to a file. In --execute mode: JSON with public values + cycle stats.
     /// In --prove mode: serialized SP1 proof (binary, loadable by show-proof).
@@ -165,53 +167,37 @@ fn main() {
         serde_json::from_str(&json).expect("invalid cache JSON");
     println!("  Loaded {} blob batches", cached.len());
 
-    println!("Generating KZG proofs…");
-    let batches: Vec<ReaderBatch> = cached
-        .iter()
-        .map(|c| {
-            let blob_bytes = decode_hex_bytes(&c.blob_bytes_hex);
-            let (commitment, opening_proof, vh) = generate_kzg_proof(&blob_bytes);
+    println!("Generating KZG proof…");
+    let c = &cached[0];
+    let blob_bytes = decode_hex_bytes(&c.blob_bytes_hex);
+    let (commitment, opening_proof, vh) = generate_kzg_proof(&blob_bytes);
 
-            // Verify the computed versioned_hash matches what the indexer saw on L1.
-            let l1_vh = decode_hex32(&c.versioned_hash);
-            assert_eq!(
-                vh, l1_vh,
-                "versioned_hash mismatch for block={} tx={} — blob data may be corrupt",
-                c.block_number, c.tx_index
-            );
+    let l1_vh = decode_hex32(&c.versioned_hash);
+    assert_eq!(
+        vh, l1_vh,
+        "versioned_hash mismatch for block={} tx={} — blob data may be corrupt",
+        c.block_number, c.tx_index
+    );
 
-            ReaderBatch {
-                versioned_hash: vh,
-                commitment,
-                opening_proof,
-                content_tag: c
-                    .content_tag
-                    .as_deref()
-                    .map(decode_hex32)
-                    .unwrap_or([0u8; 32]),
-                decoder: c
-                    .decoder
-                    .as_deref()
-                    .map(decode_hex20)
-                    .unwrap_or([0u8; 20]),
-                sig_registry: c
-                    .sig_registry
-                    .as_deref()
-                    .map(decode_hex20)
-                    .unwrap_or([0u8; 20]),
-                block_number: c.block_number,
-                tx_index: c.tx_index,
-                start_fe: c.start_fe,
-                end_fe: c.end_fe,
-                blob_bytes,
-            }
-        })
-        .collect();
+    let blob = BlobInput {
+        versioned_hash: vh,
+        commitment,
+        opening_proof,
+        content_tag: c.content_tag.as_deref().map(decode_hex32).unwrap_or([0u8; 32]),
+        decoder:      c.decoder.as_deref().map(decode_hex20).unwrap_or([0u8; 20]),
+        sig_registry: c.sig_registry.as_deref().map(decode_hex20).unwrap_or([0u8; 20]),
+        block_number: c.block_number,
+        tx_index:     c.tx_index,
+        start_fe:     c.start_fe,
+        end_fe:       c.end_fe,
+        blob_bytes,
+    };
     println!("  Done.\n");
 
     let mut stdin = SP1Stdin::new();
     stdin.write(&args.chain_id);
-    stdin.write(&batches);
+    stdin.write(&blob);
+    stdin.write(&args.msg_index);
 
     let client = ProverClient::from_env();
 
@@ -222,8 +208,8 @@ fn main() {
             .run()
             .expect("execution failed");
 
-        let pv = parse_public_values(output.as_slice());
-        print_public_values(&pv);
+        let pv = parse_message_public_values(output.as_slice());
+        print_message_public_values(&pv);
 
         let total = report.total_instruction_count();
         println!("\nCycles:     {}", total);
