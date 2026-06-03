@@ -1,0 +1,45 @@
+# syntax=docker/dockerfile:1.7
+#
+# Self-contained image for the bam-coprocessor-service (fly app
+# `bam-coprocessor`). Independent from the Node-based Dockerfile that
+# builds bam-poster/bam-reader/bam-indexer — different toolchain, no
+# shared layers worth keeping.
+
+FROM rust:1-bookworm AS builder
+
+# c-kzg's native dep + kzg-rs need clang; the SP1 toolchain installer
+# uses curl + ca-certificates; build-essential + pkg-config + libssl-dev
+# round out the standard rustls/openssl build surface.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      build-essential pkg-config libssl-dev clang libclang-dev \
+      curl ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+
+# Install SP1's `cargo prove` so program-reader can be compiled to its
+# riscv32im-succinct-zkvm-elf target during the workspace build.
+RUN curl -L https://sp1.succinct.xyz | bash \
+ && /root/.sp1/bin/sp1up
+ENV PATH="/root/.sp1/bin:${PATH}"
+
+WORKDIR /work
+COPY apps/bam-coprocessor /work
+
+# Build only the service binary; cargo pulls in lib/program-reader/script
+# transitively. build.rs invokes sp1_build::build_program_with_args
+# against ../program-reader, which is why cargo prove must be on PATH.
+RUN cargo build --release -p bam-coprocessor-service
+
+# ───────────────────────── runtime ─────────────────────────
+FROM debian:bookworm-slim AS runtime
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates libssl3 \
+ && rm -rf /var/lib/apt/lists/* \
+ && useradd --system --no-create-home --shell /usr/sbin/nologin coproc
+
+COPY --from=builder /work/target/release/bam-coprocessor-service /usr/local/bin/bam-coprocessor-service
+
+USER coproc
+EXPOSE 8790
+CMD ["bam-coprocessor-service"]
