@@ -1,5 +1,11 @@
 //! Shared utilities for bam-coprocessor host scripts.
 
+pub mod blob_fetch;
+pub mod kzg;
+pub mod pipeline;
+pub mod reader_api;
+pub mod sp1_runner;
+
 use serde::{Deserialize, Serialize};
 
 // ── Circuit 1 public values ───────────────────────────────────────────────────

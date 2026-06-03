@@ -20,15 +20,15 @@
 //!   cargo run --release --bin prove-reader -- --execute --cache /path/to/batches.json
 
 use bam_coprocessor_lib::BlobInput;
-use bam_coprocessor_script::{parse_message_public_values, print_message_public_values};
-use c_kzg::{ethereum_kzg_settings, Blob};
+use bam_coprocessor_script::{
+    blob_fetch::{decode_hex20, decode_hex32, decode_hex_bytes},
+    kzg::generate_kzg_proof,
+    parse_message_public_values, print_message_public_values,
+    sp1_runner::{execute_c1, prove_c1},
+};
 use clap::Parser;
 use serde::Deserialize;
-use sha2::{Digest, Sha256};
-use sp1_sdk::{
-    blocking::{ProveRequest, Prover, ProverClient},
-    include_elf, Elf, ProvingKey, SP1Stdin,
-};
+use sp1_sdk::{include_elf, Elf};
 
 const BAM_READER_ELF: Elf = include_elf!("bam-reader-program");
 
@@ -47,8 +47,10 @@ struct Args {
 
     /// Proof format for --prove mode.
     ///
-    /// compressed: a STARK (default). groth16: BN254 Groth16, verifiable by snarkjs in the
-    /// browser or any standard Groth16 verifier. Use groth16 for the final deliverable.
+    /// compressed (default): a STARK that Circuit 2 can recursively verify inside the SP1 zkVM.
+    /// groth16: a succinct BN254 proof verifiable by snarkjs in the browser, a Solidity contract,
+    ///   or any standard Groth16 verifier. Cannot be consumed by Circuit 2's recursive verify step.
+    ///   Use this when Circuit 1 is the final output (no Circuit 2), e.g. for client-side UX.
     #[arg(long, default_value = "compressed", value_parser = ["compressed", "groth16"])]
     proof_type: String,
 
@@ -60,7 +62,11 @@ struct Args {
     #[arg(long, default_value = "../bam-indexer/cache/batches.json")]
     cache: String,
 
-    /// Index of the message within the decoded batch to prove.
+    /// Which cached batch to prove (0-indexed into the cache JSON array).
+    #[arg(long, default_value = "0")]
+    batch_index: usize,
+
+    /// Which message inside the batch to prove (per-message C1 redesign).
     #[arg(long, default_value = "0")]
     msg_index: u32,
 
@@ -95,53 +101,6 @@ struct ReaderCachedBatch {
     sig_registry: Option<String>,
 }
 
-fn decode_hex32(s: &str) -> [u8; 32] {
-    let s = s.strip_prefix("0x").unwrap_or(s);
-    hex::decode(s)
-        .expect("invalid hex")
-        .try_into()
-        .expect("expected 32 bytes")
-}
-
-fn decode_hex20(s: &str) -> [u8; 20] {
-    let s = s.strip_prefix("0x").unwrap_or(s);
-    hex::decode(s)
-        .expect("invalid hex")
-        .try_into()
-        .expect("expected 20 bytes")
-}
-
-fn decode_hex_bytes(s: &str) -> Vec<u8> {
-    let s = s.strip_prefix("0x").unwrap_or(s);
-    hex::decode(s).expect("invalid hex")
-}
-
-// ── KZG (c-kzg, mainnet trusted setup) ───────────────────────────────────────
-
-/// Generate a real KZG commitment and blob proof using the mainnet trusted setup.
-/// The versioned_hash is 0x01 || sha256(C)[1..], matching the L1 cache exactly.
-fn generate_kzg_proof(blob_bytes: &[u8]) -> (Vec<u8>, Vec<u8>, [u8; 32]) {
-    let settings = ethereum_kzg_settings(0);
-
-    let blob = Blob::from_bytes(blob_bytes).expect("blob must be 131072 bytes");
-    let commitment = settings
-        .blob_to_kzg_commitment(&blob)
-        .expect("commitment failed");
-    let commitment_bytes: [u8; 48] = commitment.to_bytes().into_inner();
-
-    let proof = settings
-        .compute_blob_kzg_proof(&blob, &c_kzg::Bytes48::from(commitment_bytes))
-        .expect("proof failed");
-    let proof_bytes: [u8; 48] = proof.to_bytes().into_inner();
-
-    let c_hash: [u8; 32] = Sha256::digest(commitment_bytes).into();
-    let mut versioned_hash = [0u8; 32];
-    versioned_hash[0] = 0x01;
-    versioned_hash[1..].copy_from_slice(&c_hash[1..]);
-
-    (commitment_bytes.to_vec(), proof_bytes.to_vec(), versioned_hash)
-}
-
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 fn main() {
@@ -167,11 +126,21 @@ fn main() {
         serde_json::from_str(&json).expect("invalid cache JSON");
     println!("  Loaded {} blob batches", cached.len());
 
-    println!("Generating KZG proof…");
-    let c = &cached[0];
+    if args.batch_index >= cached.len() {
+        panic!(
+            "--batch-index {} out of range (cache has {} batches)",
+            args.batch_index,
+            cached.len()
+        );
+    }
+    let c = &cached[args.batch_index];
+    println!(
+        "Proving batch[{}] block={} tx={} msg_index={}…",
+        args.batch_index, c.block_number, c.tx_index, args.msg_index
+    );
+
     let blob_bytes = decode_hex_bytes(&c.blob_bytes_hex);
     let (commitment, opening_proof, vh) = generate_kzg_proof(&blob_bytes);
-
     let l1_vh = decode_hex32(&c.versioned_hash);
     assert_eq!(
         vh, l1_vh,
@@ -179,79 +148,66 @@ fn main() {
         c.block_number, c.tx_index
     );
 
-    let blob = BlobInput {
+    let batch = BlobInput {
         versioned_hash: vh,
         commitment,
         opening_proof,
-        content_tag: c.content_tag.as_deref().map(decode_hex32).unwrap_or([0u8; 32]),
-        decoder:      c.decoder.as_deref().map(decode_hex20).unwrap_or([0u8; 20]),
-        sig_registry: c.sig_registry.as_deref().map(decode_hex20).unwrap_or([0u8; 20]),
+        content_tag: c
+            .content_tag
+            .as_deref()
+            .map(decode_hex32)
+            .unwrap_or([0u8; 32]),
+        decoder: c
+            .decoder
+            .as_deref()
+            .map(decode_hex20)
+            .unwrap_or([0u8; 20]),
+        sig_registry: c
+            .sig_registry
+            .as_deref()
+            .map(decode_hex20)
+            .unwrap_or([0u8; 20]),
         block_number: c.block_number,
-        tx_index:     c.tx_index,
-        start_fe:     c.start_fe,
-        end_fe:       c.end_fe,
+        tx_index: c.tx_index,
+        start_fe: c.start_fe,
+        end_fe: c.end_fe,
         blob_bytes,
     };
-    println!("  Done.\n");
-
-    let mut stdin = SP1Stdin::new();
-    stdin.write(&args.chain_id);
-    stdin.write(&blob);
-    stdin.write(&args.msg_index);
-
-    let client = ProverClient::from_env();
+    println!("  KZG ready.\n");
 
     if args.execute {
         println!("Mode: execute (no proof)\n");
-        let (output, report) = client
-            .execute(BAM_READER_ELF, stdin)
-            .run()
-            .expect("execution failed");
-
-        let pv = parse_message_public_values(output.as_slice());
+        let out = execute_c1(BAM_READER_ELF, args.chain_id, &batch, args.msg_index)
+            .unwrap_or_else(|e| panic!("{e}"));
+        let pv = parse_message_public_values(&out.public_values);
         print_message_public_values(&pv);
-
-        let total = report.total_instruction_count();
-        println!("\nCycles:     {}", total);
-        println!("Prover gas (PGUs): {:?}", report.gas());
+        println!("\nCycles: {}", out.total_cycles);
 
         if let Some(path) = &args.output {
             let json = serde_json::json!({
                 "public_values": pv,
-                "cycles": { "total": total },
+                "cycles": { "total": out.total_cycles },
             });
             std::fs::write(path, serde_json::to_string_pretty(&json).unwrap())
                 .unwrap_or_else(|e| eprintln!("Warning: could not write output: {}", e));
             println!("\nResults saved to {}", path);
         }
     } else {
-        println!("Mode: prove\n");
-        println!(
-            "NOTE: proof generation is slow.\n\
-             Set SP1_PROVER=network and NETWORK_PRIVATE_KEY=0x<key> for remote proving."
-        );
-
-        let pk = client.setup(BAM_READER_ELF).expect("setup failed");
-        let prove_req = client.prove(&pk, stdin);
-        let proof = if args.proof_type == "groth16" {
-            prove_req.groth16().run().expect("prove failed")
-        } else {
-            prove_req.compressed().run().expect("prove failed")
-        };
+        println!("Mode: prove ({})\n", args.proof_type);
+        let proof = prove_c1(
+            BAM_READER_ELF,
+            args.chain_id,
+            &batch,
+            args.msg_index,
+            args.proof_type == "groth16",
+        )
+        .unwrap_or_else(|e| panic!("{e}"));
         println!("Proof generated! ({})", args.proof_type);
 
-        let is_mock = std::env::var("SP1_PROVER").unwrap_or_default() == "mock";
-        if is_mock {
-            println!("(mock mode — skipping cryptographic verification)");
-        } else {
-            client
-                .verify(&proof, pk.verifying_key(), None)
-                .expect("verify failed");
-            println!("Proof verified!");
-        }
-
         if let Some(path) = &args.output {
-            proof.save(path).unwrap_or_else(|e| eprintln!("Warning: could not save proof: {}", e));
+            proof
+                .save(path)
+                .unwrap_or_else(|e| eprintln!("Warning: could not save proof: {}", e));
             println!("Proof saved to {}", path);
         }
     }
