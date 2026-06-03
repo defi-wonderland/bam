@@ -1,6 +1,0 @@
-node_modules
-dist
-
-# verifier-wasm Rust build artifacts (wasm-pack output is committed to public/verifier/)
-verifier-wasm/target/
-verifier-wasm/pkg/
