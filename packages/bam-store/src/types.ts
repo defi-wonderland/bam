@@ -349,6 +349,8 @@ export interface BatchesQuery {
   chainId?: number;
   status?: BatchStatus;
   sinceBlock?: bigint;
+  /** Inclusive lower bound on `l1IncludedAtUnixSec`; null rows are excluded when set. */
+  sinceIncludedAtUnixSec?: bigint;
   limit?: number;
 }
 
