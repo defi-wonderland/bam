@@ -14,7 +14,7 @@ FROM rust:1-bookworm AS builder
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       build-essential pkg-config libssl-dev clang libclang-dev \
-      protobuf-compiler curl ca-certificates \
+      protobuf-compiler libprotobuf-dev curl ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 
 # Install SP1's `cargo prove` so program-reader can be compiled to its
