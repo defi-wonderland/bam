@@ -487,7 +487,6 @@ pub async fn get_vk(pool: &PgPool) -> anyhow::Result<Option<VkCacheRow>> {
     Ok(row)
 }
 
-#[allow(dead_code)]
 pub async fn upsert_vk(
     pool: &PgPool,
     vk_hash: &str,

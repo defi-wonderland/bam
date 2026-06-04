@@ -175,7 +175,7 @@ async fn validate_one(
         None => return Ok(None),
     };
 
-    let pv = parse_message_public_values(&exec_output.public_values);
+    let pv = parse_message_public_values(&exec_output.public_values)?;
     let computed_hash = decode_hex32(&pv.message_hash);
     if computed_hash != c.expected_message_hash {
         anyhow::bail!(

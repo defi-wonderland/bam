@@ -14,13 +14,14 @@ use std::sync::Arc;
 
 use bam_coprocessor_script::{
     blob_fetch::decode_hex32,
-    parse_message_public_values,
+    parse_message_public_values, vk_hash_from_groth16,
     pipeline::{fetch_one_batch_reader_only, BatchSelector},
     reader_api::ReaderClient,
     sp1_runner::{execute_c1, prove_c1},
 };
 use chrono::Utc;
-use sp1_sdk::{include_elf, Elf};
+use sp1_sdk::{include_elf, Elf, SP1Proof};
+use sp1_verifier::GROTH16_VK_BYTES;
 
 use crate::db::queries::{self, ProofFullRow, Watermark};
 use crate::state::AppState;
@@ -163,7 +164,7 @@ async fn prove_one(state: &Arc<AppState>, c: &Candidate) -> anyhow::Result<bool>
     };
 
     let pv_bytes = proof.public_values.as_slice().to_vec();
-    let pv = parse_message_public_values(&pv_bytes);
+    let pv = parse_message_public_values(&pv_bytes)?;
     let computed_hash = decode_hex32(&pv.message_hash);
     if computed_hash != c.expected_message_hash {
         anyhow::bail!(
@@ -214,6 +215,31 @@ async fn prove_one(state: &Arc<AppState>, c: &Candidate) -> anyhow::Result<bool>
     };
     queries::upsert_watermark(&mut tx, "proof", state.config.chain_id as i64, &new_wm).await?;
     tx.commit().await?;
+
+    // VK cache: write on first success so `/proof/vk` can serve the
+    // bytes a snarkjs/SP1-WASM verifier needs. Stable per SP1 release —
+    // subsequent proofs re-upsert the same value. Failures here are
+    // non-fatal: the proof row is already durable, and the next tick
+    // will retry.
+    if let SP1Proof::Groth16(g16) = &proof.proof {
+        if let Some(first) = g16.public_inputs.first() {
+            match vk_hash_from_groth16(first) {
+                Ok(vk_hash) => {
+                    if let Err(e) = queries::upsert_vk(
+                        &state.pg,
+                        &vk_hash,
+                        GROTH16_VK_BYTES.as_ref(),
+                        &row.sp1_version,
+                    )
+                    .await
+                    {
+                        tracing::warn!(error = %e, "vk_cache upsert failed");
+                    }
+                }
+                Err(e) => tracing::warn!(error = %e, "vk_hash_from_groth16 failed"),
+            }
+        }
+    }
 
     tracing::info!(
         message_hash = %pv.message_hash,

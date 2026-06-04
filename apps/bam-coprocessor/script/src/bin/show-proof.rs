@@ -116,7 +116,7 @@ fn main() {
     println!("SP1 version: {}\n", proof.sp1_version);
 
     let raw = proof.public_values.as_slice();
-    let pv = parse_message_public_values(raw);
+    let pv = parse_message_public_values(raw).expect("invalid public values");
     print_message_public_values(&pv);
 
     if args.verify {

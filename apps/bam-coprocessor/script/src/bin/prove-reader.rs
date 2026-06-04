@@ -179,7 +179,7 @@ fn main() {
         println!("Mode: execute (no proof)\n");
         let out = execute_c1(BAM_READER_ELF, args.chain_id, &batch, args.msg_index)
             .unwrap_or_else(|e| panic!("{e}"));
-        let pv = parse_message_public_values(&out.public_values);
+        let pv = parse_message_public_values(&out.public_values).expect("invalid public values");
         print_message_public_values(&pv);
         println!("\nCycles: {}", out.total_cycles);
 

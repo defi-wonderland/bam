@@ -68,6 +68,7 @@ pub async fn handler(
     };
 
     let chain_id = state.config.chain_id as i64;
+    let cursor_was_present = cursor.is_some();
     let rows = queries::list_validations_page(&state.pg, chain_id, cursor, limit)
         .await
         .map_err(|e| {
@@ -75,7 +76,10 @@ pub async fn handler(
             crate::http::json::internal_error()
         })?;
 
-    if rows.is_empty() {
+    // 503 only when there are NO validations at all (i.e. caller didn't
+    // page past the end). With a cursor, an empty page is the
+    // end-of-list signal, not an outage.
+    if rows.is_empty() && !cursor_was_present {
         return Err(service_unavailable("no_validation_yet"));
     }
 

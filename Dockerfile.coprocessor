@@ -18,9 +18,16 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 # Install SP1's `cargo prove` so program-reader can be compiled to its
-# riscv32im-succinct-zkvm-elf target during the workspace build.
-RUN curl -L https://sp1.succinct.xyz | bash \
- && /root/.sp1/bin/sp1up
+# riscv32im-succinct-zkvm-elf target. The sp1up bootstrap is fetched
+# from sp1.succinct.xyz (Succinct's official redirect); the toolchain
+# version it installs is then pinned to v6.1.0 — matching the sp1-sdk
+# crate dep so the host code and the toolchain that produced the ELF
+# share a release.
+ARG SP1_VERSION=v6.1.0
+RUN curl -fL https://sp1.succinct.xyz -o /tmp/sp1up-install \
+ && bash /tmp/sp1up-install \
+ && rm /tmp/sp1up-install \
+ && /root/.sp1/bin/sp1up --version ${SP1_VERSION}
 ENV PATH="/root/.sp1/bin:${PATH}"
 
 WORKDIR /work

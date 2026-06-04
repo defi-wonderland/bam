@@ -26,8 +26,12 @@ pub struct MessagePublicValues {
     pub message_hash: String,
 }
 
-pub fn parse_message_public_values(raw: &[u8]) -> MessagePublicValues {
-    assert_eq!(raw.len(), 152, "expected 152-byte public output");
+/// Parse the raw 152-byte Circuit 1 public output. Errors on length
+/// mismatch; once length holds, every fixed-offset slice is infallible.
+pub fn parse_message_public_values(raw: &[u8]) -> anyhow::Result<MessagePublicValues> {
+    if raw.len() != 152 {
+        anyhow::bail!("expected 152-byte public output, got {}", raw.len());
+    }
     let chain_id     = u64::from_le_bytes(raw[0..8].try_into().unwrap());
     let vh: [u8; 32] = raw[8..40].try_into().unwrap();
     let ct: [u8; 32] = raw[40..72].try_into().unwrap();
@@ -40,7 +44,7 @@ pub fn parse_message_public_values(raw: &[u8]) -> MessagePublicValues {
     let nonce        = u64::from_le_bytes(raw[112..120].try_into().unwrap());
     let mh: [u8; 32] = raw[120..152].try_into().unwrap();
 
-    MessagePublicValues {
+    Ok(MessagePublicValues {
         chain_id,
         versioned_hash: format!("0x{}", hex::encode(vh)),
         content_tag:    format!("0x{}", hex::encode(ct)),
@@ -52,7 +56,19 @@ pub fn parse_message_public_values(raw: &[u8]) -> MessagePublicValues {
         sender:       format!("0x{}", hex::encode(sender)),
         nonce,
         message_hash: format!("0x{}", hex::encode(mh)),
-    }
+    })
+}
+
+/// Derive the SP1 program VK hash (bytes32 hex) from a Groth16 proof's
+/// `public_inputs[0]`. The gnark circuit stores `vk.bytes32()` as a
+/// decimal BigUint string; converting back gives the value expected by
+/// `Groth16Verifier::verify`.
+pub fn vk_hash_from_groth16(decimal_str: &str) -> anyhow::Result<String> {
+    use num_bigint::BigUint;
+    use std::str::FromStr;
+    let n = BigUint::from_str(decimal_str)
+        .map_err(|e| anyhow::anyhow!("invalid groth16 public_inputs[0]: {}", e))?;
+    Ok(format!("0x{:0>64}", n.to_str_radix(16)))
 }
 
 pub fn print_message_public_values(pv: &MessagePublicValues) {

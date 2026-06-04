@@ -31,6 +31,7 @@ sha2                = { workspace = true }
 clap                = { version = "4.0", features = ["derive"] }
 num-bigint          = "0.4"
 ureq                = { version = "2", features = ["json"] }
+anyhow              = "1"
 
 [dev-dependencies]
 k256         = { workspace = true }

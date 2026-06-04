@@ -97,11 +97,17 @@ pub fn fetch_blob_from_reader_only(
     let url = format!("{}/blobs/{}", reader_url, versioned_hash_hex);
     match ureq::get(&url).call() {
         Ok(resp) => {
-            let mut bytes = Vec::with_capacity(131_072);
+            // Cap the body read at one byte over the expected blob size.
+            // A malicious or buggy reader returning multi-GB bytes would
+            // otherwise OOM the service before we got to validate the
+            // length. EIP-4844 blobs are exactly 131072 bytes.
+            const BLOB_LEN: usize = 131_072;
+            let mut bytes = Vec::with_capacity(BLOB_LEN);
             resp.into_reader()
+                .take((BLOB_LEN as u64) + 1)
                 .read_to_end(&mut bytes)
                 .map_err(|e| e.to_string())?;
-            if bytes.len() != 131_072 {
+            if bytes.len() != BLOB_LEN {
                 return Err(format!(
                     "unexpected blob size from reader: {} bytes",
                     bytes.len()
