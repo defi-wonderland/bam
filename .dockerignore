@@ -7,6 +7,14 @@
 **/.next
 **/*.tsbuildinfo
 
+# Cargo target dirs (apps/bam-coprocessor/* and any future Rust crates).
+# Without this, `apps/bam-coprocessor/target/` ships ~10 GB to the depot builder.
+**/target
+
+# Pre-built SP1 proof binaries that ship as artifacts; not needed by the build.
+apps/bam-coprocessor/*.bin
+apps/bam-coprocessor/results.json
+
 # Foundry artifacts (bam-contracts is not built in the image)
 packages/bam-contracts/lib
 packages/bam-contracts/out
