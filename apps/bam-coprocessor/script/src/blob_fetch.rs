@@ -82,6 +82,38 @@ pub fn fetch_blob_bytes(
         .unwrap_or_else(|e| panic!("beacon fallback failed: {e}"))
 }
 
+/// Strict reader-archive lookup. Returns:
+///   - `Ok(Some(bytes))` when the archive has the blob (131072 bytes).
+///   - `Ok(None)` when the reader returns 404 (archive miss — transient).
+///   - `Err(_)` on any other failure (network, malformed body).
+///
+/// Service callers use this to avoid the beacon fallback's slot
+/// calibration — they want a strict "is the reader ready for this blob
+/// yet?" check, not a best-effort fetch.
+pub fn fetch_blob_from_reader_only(
+    reader_url: &str,
+    versioned_hash_hex: &str,
+) -> Result<Option<Vec<u8>>, String> {
+    let url = format!("{}/blobs/{}", reader_url, versioned_hash_hex);
+    match ureq::get(&url).call() {
+        Ok(resp) => {
+            let mut bytes = Vec::with_capacity(131_072);
+            resp.into_reader()
+                .read_to_end(&mut bytes)
+                .map_err(|e| e.to_string())?;
+            if bytes.len() != 131_072 {
+                return Err(format!(
+                    "unexpected blob size from reader: {} bytes",
+                    bytes.len()
+                ));
+            }
+            Ok(Some(bytes))
+        }
+        Err(ureq::Error::Status(404, _)) => Ok(None),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
 // ── Beacon slot search ──────────────────────────────────────────────────────
 
 pub fn estimate_beacon_slot(exec_block: u64) -> u64 {

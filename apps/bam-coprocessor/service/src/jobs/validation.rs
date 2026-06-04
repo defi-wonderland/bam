@@ -11,7 +11,7 @@ use std::sync::Arc;
 use bam_coprocessor_script::{
     blob_fetch::decode_hex32,
     parse_message_public_values,
-    pipeline::{fetch_one_batch, BatchSelector},
+    pipeline::{fetch_one_batch_reader_only, BatchSelector},
     reader_api::ReaderClient,
     sp1_runner::execute_c1,
 };
@@ -52,7 +52,19 @@ pub async fn run_validation(state: Arc<AppState>) -> anyhow::Result<()> {
     let mut new_wm = watermark.clone();
     for c in candidates {
         match validate_one(&state, &c).await {
-            Ok(advanced) => new_wm = advanced,
+            Ok(Some(advanced)) => new_wm = advanced,
+            Ok(None) => {
+                // Reader hasn't archived this batch yet (poster-vs-reader
+                // race). Stop — chain order means later candidates are
+                // also unprocessable until this one lands.
+                tracing::info!(
+                    block = c.block_number,
+                    tx = c.tx_index,
+                    msg = c.msg_index,
+                    "V tick: reader archive not ready yet, retrying next tick"
+                );
+                break;
+            }
             Err(e) => {
                 tracing::error!(
                     error = %e,
@@ -66,9 +78,6 @@ pub async fn run_validation(state: Arc<AppState>) -> anyhow::Result<()> {
         }
     }
 
-    // Persist the final watermark even if some entries failed midway — the
-    // succeeded prefix is durable, so we should not re-process them next
-    // tick. validate_one bumps watermark per-message in its own txn.
     let _ = new_wm;
     Ok(())
 }
@@ -136,21 +145,35 @@ async fn fetch_unvalidated_messages(
     Ok(candidates)
 }
 
-async fn validate_one(state: &Arc<AppState>, c: &Candidate) -> anyhow::Result<Watermark> {
+async fn validate_one(
+    state: &Arc<AppState>,
+    c: &Candidate,
+) -> anyhow::Result<Option<Watermark>> {
     let reader_url = state.reader_url.clone();
     let tx_hash = c.batch_ref.clone();
     let chain_id = state.config.chain_id;
     let msg_index = c.msg_index as u32;
 
-    let exec_output = tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
+    let exec_output = tokio::task::spawn_blocking(move || -> anyhow::Result<Option<_>> {
         let client = ReaderClient::new(reader_url);
         let (_api, reader_batch) =
-            fetch_one_batch(&client, BatchSelector::TxHash(&tx_hash), chain_id)
-                .map_err(anyhow::Error::msg)?;
-        execute_c1(BAM_READER_ELF, chain_id, &reader_batch, msg_index)
-            .map_err(anyhow::Error::msg)
+            match fetch_one_batch_reader_only(&client, BatchSelector::TxHash(&tx_hash))
+                .map_err(anyhow::Error::msg)?
+            {
+                Some(pair) => pair,
+                None => return Ok(None),
+            };
+        Ok(Some(
+            execute_c1(BAM_READER_ELF, chain_id, &reader_batch, msg_index)
+                .map_err(anyhow::Error::msg)?,
+        ))
     })
     .await??;
+
+    let exec_output = match exec_output {
+        Some(o) => o,
+        None => return Ok(None),
+    };
 
     let pv = parse_message_public_values(&exec_output.public_values);
     let computed_hash = decode_hex32(&pv.message_hash);
@@ -199,5 +222,5 @@ async fn validate_one(state: &Arc<AppState>, c: &Candidate) -> anyhow::Result<Wa
         cycles = exec_output.total_cycles,
         "V tick: validated"
     );
-    Ok(new_wm)
+    Ok(Some(new_wm))
 }

@@ -4,7 +4,7 @@
 
 use bam_coprocessor_lib::BlobInput;
 
-use crate::blob_fetch::{decode_hex32, fetch_blob_bytes};
+use crate::blob_fetch::{decode_hex32, fetch_blob_bytes, fetch_blob_from_reader_only};
 use crate::kzg::generate_kzg_proof;
 use crate::reader_api::{ApiBatch, ReaderClient};
 
@@ -97,4 +97,63 @@ pub fn fetch_one_batch(
         blob_bytes,
     };
     Ok((api, reader_batch))
+}
+
+/// Strict reader-archive variant of `fetch_one_batch`. Returns
+/// `Ok(None)` when (a) the reader hasn't processed the L1 event yet
+/// (`l1_included_at_unix_sec` is null), or (b) the reader's archive
+/// hasn't written the blob yet (`/blobs/:vh` returns 404). Either case
+/// is transient — the caller should skip this candidate and retry on
+/// the next tick.
+///
+/// Avoids the beacon-API fallback so the service never depends on the
+/// slot calibration (which drifts). For long-tail blobs (archive
+/// permanently missing), the caller should fall back to a different
+/// flow or surface the gap.
+pub fn fetch_one_batch_reader_only(
+    client: &ReaderClient,
+    selector: BatchSelector<'_>,
+) -> Result<Option<(ApiBatch, BlobInput)>, String> {
+    let api = resolve_batch(client, selector)?;
+    let block_number = api
+        .block_number
+        .ok_or_else(|| "confirmed batch missing block_number".to_string())?;
+    let tx_index = api
+        .tx_index
+        .ok_or_else(|| "confirmed batch missing tx_index".to_string())?;
+
+    // l1_included_at_unix_sec is set only when the reader has processed
+    // the L1 event itself. The poster's eager confirm write leaves it
+    // null, so this catches the poster-vs-reader race window.
+    if api.l1_included_at_unix_sec.is_none() {
+        return Ok(None);
+    }
+
+    let blob_bytes = match fetch_blob_from_reader_only(client.base_url(), &api.blob_versioned_hash)? {
+        Some(b) => b,
+        None => return Ok(None),
+    };
+
+    let l1_vh = decode_hex32(&api.blob_versioned_hash);
+    let (commitment, opening_proof, computed_vh) = generate_kzg_proof(&blob_bytes);
+    if computed_vh != l1_vh {
+        return Err(format!(
+            "blob versioned_hash mismatch (block={block_number} tx={tx_index})"
+        ));
+    }
+
+    let reader_batch = BlobInput {
+        versioned_hash: l1_vh,
+        commitment,
+        opening_proof,
+        content_tag: decode_hex32(&api.content_tag),
+        decoder: [0u8; 20],
+        sig_registry: [0u8; 20],
+        block_number,
+        tx_index,
+        start_fe: DEFAULT_START_FE,
+        end_fe: DEFAULT_END_FE,
+        blob_bytes,
+    };
+    Ok(Some((api, reader_batch)))
 }

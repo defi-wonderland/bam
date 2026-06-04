@@ -15,9 +15,9 @@ use std::sync::Arc;
 use bam_coprocessor_script::{
     blob_fetch::decode_hex32,
     parse_message_public_values,
-    pipeline::{fetch_one_batch, BatchSelector},
+    pipeline::{fetch_one_batch_reader_only, BatchSelector},
     reader_api::ReaderClient,
-    sp1_runner::prove_c1,
+    sp1_runner::{execute_c1, prove_c1},
 };
 use chrono::Utc;
 use sp1_sdk::{include_elf, Elf};
@@ -42,15 +42,27 @@ pub async fn run_proof(state: Arc<AppState>) -> anyhow::Result<()> {
     tracing::info!(count = candidates.len(), "P tick: candidates");
 
     for c in candidates {
-        if let Err(e) = prove_one(&state, &c).await {
-            tracing::error!(
-                error = %e,
-                block = c.block_number,
-                tx = c.tx_index,
-                msg = c.msg_index,
-                "P tick: prove_one failed, stopping this tick"
-            );
-            break;
+        match prove_one(&state, &c).await {
+            Ok(true) => {}
+            Ok(false) => {
+                tracing::info!(
+                    block = c.block_number,
+                    tx = c.tx_index,
+                    msg = c.msg_index,
+                    "P tick: reader archive not ready yet, retrying next tick"
+                );
+                break;
+            }
+            Err(e) => {
+                tracing::error!(
+                    error = %e,
+                    block = c.block_number,
+                    tx = c.tx_index,
+                    msg = c.msg_index,
+                    "P tick: prove_one failed, stopping this tick"
+                );
+                break;
+            }
         }
     }
     Ok(())
@@ -111,21 +123,44 @@ async fn fetch_unproven_messages(
     Ok(candidates)
 }
 
-async fn prove_one(state: &Arc<AppState>, c: &Candidate) -> anyhow::Result<()> {
+/// Returns `Ok(true)` on persisted proof, `Ok(false)` when the reader's
+/// archive isn't ready yet (transient — caller stops the tick), `Err` on
+/// hard failure.
+async fn prove_one(state: &Arc<AppState>, c: &Candidate) -> anyhow::Result<bool> {
     let reader_url = state.reader_url.clone();
     let tx_hash = c.batch_ref.clone();
     let chain_id = state.config.chain_id;
     let msg_index = c.msg_index as u32;
 
-    let proof = tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
-        let client = ReaderClient::new(reader_url);
-        let (_api, reader_batch) =
-            fetch_one_batch(&client, BatchSelector::TxHash(&tx_hash), chain_id)
+    // Single blocking handoff: fetch batch, capture cycles via execute,
+    // then prove. Cycles aren't returned by the network prove path in
+    // sp1-sdk 6.x, so the pre-execute is the cleanest way to populate
+    // the proof row's `cycles` field. ~3 s additional wall time per
+    // proof; trivial next to the network prove latency.
+    let outcome = tokio::task::spawn_blocking(
+        move || -> anyhow::Result<Option<(u64, sp1_sdk::SP1ProofWithPublicValues)>> {
+            let client = ReaderClient::new(reader_url);
+            let (_api, reader_batch) =
+                match fetch_one_batch_reader_only(&client, BatchSelector::TxHash(&tx_hash))
+                    .map_err(anyhow::Error::msg)?
+                {
+                    Some(pair) => pair,
+                    None => return Ok(None),
+                };
+            let exec = execute_c1(BAM_READER_ELF, chain_id, &reader_batch, msg_index)
                 .map_err(anyhow::Error::msg)?;
-        prove_c1(BAM_READER_ELF, chain_id, &reader_batch, msg_index, /*groth16=*/ true)
-            .map_err(anyhow::Error::msg)
-    })
+            let proof =
+                prove_c1(BAM_READER_ELF, chain_id, &reader_batch, msg_index, /*groth16=*/ true)
+                    .map_err(anyhow::Error::msg)?;
+            Ok(Some((exec.total_cycles, proof)))
+        },
+    )
     .await??;
+
+    let (cycles, proof) = match outcome {
+        Some(pair) => pair,
+        None => return Ok(false),
+    };
 
     let pv_bytes = proof.public_values.as_slice().to_vec();
     let pv = parse_message_public_values(&pv_bytes);
@@ -159,7 +194,7 @@ async fn prove_one(state: &Arc<AppState>, c: &Candidate) -> anyhow::Result<()> {
         msg_index: pv.msg_index as i32,
         sender: sender_bytes,
         nonce: pv.nonce as i64,
-        cycles: 0,
+        cycles: cycles as i64,
         proof_size: proof_bytes.len() as i32,
         proof_bytes: proof_bytes.clone(),
         public_values: pv_bytes,
@@ -183,7 +218,8 @@ async fn prove_one(state: &Arc<AppState>, c: &Candidate) -> anyhow::Result<()> {
     tracing::info!(
         message_hash = %pv.message_hash,
         proof_size = row.proof_size,
+        cycles = cycles,
         "P tick: proof persisted"
     );
-    Ok(())
+    Ok(true)
 }
