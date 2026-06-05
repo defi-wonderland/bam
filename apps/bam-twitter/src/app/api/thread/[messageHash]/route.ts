@@ -15,6 +15,12 @@ import {
 
 const HEX_BYTES32_RE = /^0x[0-9a-fA-F]{64}$/;
 
+class ReaderHttpError extends Error {
+  constructor(public readonly readerStatus: number) {
+    super(`Reader returned ${readerStatus}`);
+  }
+}
+
 function fromIndexerRow(row: TwitterPostRow): ConfirmedRow {
   return {
     message_id: row.message_hash,
@@ -44,8 +50,8 @@ async function tryIndexer(
     const postRow = (postRes.body as { post?: TwitterPostRow }).post;
     if (!postRow) return null;
     if (repliesRes.status !== 200) {
-      console.warn(`[bam-twitter] /api/thread: replies fetch returned ${repliesRes.status}, falling back to Reader`);
-      return null;
+      console.warn(`[bam-twitter] /api/thread: replies fetch returned ${repliesRes.status}, returning post without replies`);
+      return { post: fromIndexerRow(postRow), replies: [] };
     }
     const replies = (repliesRes.body as { replies?: TwitterPostRow[] }).replies ?? [];
     return { post: fromIndexerRow(postRow), replies: replies.map(fromIndexerRow) };
@@ -77,8 +83,7 @@ async function fromReader(
 ): Promise<{ post: ConfirmedRow; replies: ConfirmedRow[] } | null> {
   const res = await listConfirmedMessages({ contentTag: TWITTER_TAG, status: 'confirmed', limit: 1000 });
   if (res.status !== 200) {
-    const err = new Error(`Reader returned ${res.status}`);
-    throw err;
+    throw new ReaderHttpError(res.status);
   }
   const rows = (res.body as { messages?: ReaderMessageRow[] }).messages ?? [];
 
@@ -146,6 +151,9 @@ export async function GET(
     if (!result) return NextResponse.json({ error: 'not_found' }, { status: 404 });
     return NextResponse.json(result);
   } catch (err) {
+    if (err instanceof ReaderHttpError) {
+      return NextResponse.json({ error: 'reader_error', status: err.readerStatus }, { status: 502 });
+    }
     const mapped = readerErrorToResponse(err);
     if (mapped) return mapped;
     throw err;
