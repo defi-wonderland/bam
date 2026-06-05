@@ -36,7 +36,7 @@ COPY apps/bam-coprocessor /work
 # Build only the service binary; cargo pulls in lib/program-reader/script
 # transitively. build.rs invokes sp1_build::build_program_with_args
 # against ../program-reader, which is why cargo prove must be on PATH.
-RUN cargo build --release -p bam-coprocessor-service
+RUN cargo build --release --locked -p bam-coprocessor-service
 
 # ───────────────────────── runtime ─────────────────────────
 FROM debian:bookworm-slim AS runtime

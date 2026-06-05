@@ -133,6 +133,8 @@ async fn prove_one(state: &Arc<AppState>, c: &Candidate) -> anyhow::Result<bool>
     let tx_hash = c.batch_ref.clone();
     let chain_id = state.config.chain_id;
     let msg_index = c.msg_index as u32;
+    let candidate_block = c.block_number as u64;
+    let candidate_tx_index = c.tx_index as u32;
 
     // Single blocking handoff: fetch batch, capture cycles via execute,
     // then prove. Cycles aren't returned by the network prove path in
@@ -142,13 +144,27 @@ async fn prove_one(state: &Arc<AppState>, c: &Candidate) -> anyhow::Result<bool>
     let outcome = tokio::task::spawn_blocking(
         move || -> anyhow::Result<Option<(u64, sp1_sdk::SP1ProofWithPublicValues)>> {
             let client = ReaderClient::new(reader_url);
-            let (_api, reader_batch) =
+            // TODO: BatchSelector::TxHash can't disambiguate when one L1 tx
+            // carries multiple BAM batches with different contentTags. The
+            // assert below catches any mismatch loudly; the real fix is a
+            // (block, txIndex, logIndex) selector once the reader exposes
+            // logIndex.
+            let (api, reader_batch) =
                 match fetch_one_batch_reader_only(&client, BatchSelector::TxHash(&tx_hash))
                     .map_err(anyhow::Error::msg)?
                 {
                     Some(pair) => pair,
                     None => return Ok(None),
                 };
+            anyhow::ensure!(
+                api.block_number == Some(candidate_block)
+                    && api.tx_index == Some(candidate_tx_index),
+                "reader returned batch (block={:?}, tx={:?}) but candidate was (block={}, tx={}) — multi-batch tx?",
+                api.block_number,
+                api.tx_index,
+                candidate_block,
+                candidate_tx_index,
+            );
             let exec = execute_c1(BAM_READER_ELF, chain_id, &reader_batch, msg_index)
                 .map_err(anyhow::Error::msg)?;
             let proof =
