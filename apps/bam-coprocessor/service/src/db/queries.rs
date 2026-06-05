@@ -324,11 +324,14 @@ pub async fn last_proof(
     .bind(chain_id)
     .fetch_optional(pool)
     .await?;
-    Ok(row.map(|r| {
-        let at: DateTime<Utc> = r.try_get("proven_at").expect("schema mismatch");
-        let h: Vec<u8> = r.try_get("message_hash").expect("schema mismatch");
-        (at, h)
-    }))
+    match row {
+        None => Ok(None),
+        Some(r) => {
+            let at: DateTime<Utc> = r.try_get("proven_at")?;
+            let h: Vec<u8> = r.try_get("message_hash")?;
+            Ok(Some((at, h)))
+        }
+    }
 }
 
 pub async fn list_proofs_page(
