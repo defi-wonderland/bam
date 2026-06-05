@@ -5,7 +5,13 @@
 //!   - GET /batches?contentTag=…    (list, filterable by status / since)
 //!   - GET /messages?contentTag=…   (list, filterable by batchRef)
 
+use std::time::Duration;
+
 use serde::{Deserialize, Serialize};
+
+/// Per-request timeout on the reader API. A hung reader must not stall
+/// the worker thread.
+const READER_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Subset of a `/batches` row we consume. bam-reader emits Bytes32/Address
 /// as `0x`-prefixed hex; `blockNumber` / `txIndex` come as JSON numbers.
@@ -54,12 +60,17 @@ pub struct MessagesResponse {
 
 pub struct ReaderClient {
     base_url: String,
+    agent: ureq::Agent,
 }
 
 impl ReaderClient {
     pub fn new(base_url: impl Into<String>) -> Self {
+        let agent = ureq::AgentBuilder::new()
+            .timeout(READER_TIMEOUT)
+            .build();
         Self {
             base_url: base_url.into().trim_end_matches('/').to_string(),
+            agent,
         }
     }
 
@@ -69,7 +80,7 @@ impl ReaderClient {
 
     pub fn get_batch(&self, tx_hash: &str) -> Result<ApiBatch, String> {
         let url = format!("{}/batches/{}", self.base_url, tx_hash);
-        let resp = ureq::get(&url).call().map_err(|e| e.to_string())?;
+        let resp = self.agent.get(&url).call().map_err(|e| e.to_string())?;
         let env: BatchEnvelope = resp.into_json().map_err(|e| e.to_string())?;
         Ok(env.batch)
     }
@@ -95,7 +106,7 @@ impl ReaderClient {
         if let Some(t) = since_unix_sec {
             url.push_str(&format!("&since={t}"));
         }
-        let resp = ureq::get(&url).call().map_err(|e| e.to_string())?;
+        let resp = self.agent.get(&url).call().map_err(|e| e.to_string())?;
         let body: BatchesResponse = resp.into_json().map_err(|e| e.to_string())?;
         Ok(body.batches)
     }
@@ -117,7 +128,7 @@ impl ReaderClient {
         if let Some(b) = batch_ref {
             url.push_str(&format!("&batchRef={b}"));
         }
-        let resp = ureq::get(&url).call().map_err(|e| e.to_string())?;
+        let resp = self.agent.get(&url).call().map_err(|e| e.to_string())?;
         let body: MessagesResponse = resp.into_json().map_err(|e| e.to_string())?;
         Ok(body.messages)
     }

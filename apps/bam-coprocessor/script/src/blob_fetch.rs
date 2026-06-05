@@ -56,8 +56,14 @@ pub fn fetch_blob_bytes(
     let url = format!("{}/blobs/{}", reader_url, versioned_hash_hex);
     match ureq::get(&url).call() {
         Ok(resp) => {
+            // Cap the read at one extra byte over the canonical blob length
+            // so a misbehaving reader can't blow up host memory.
             let mut bytes = Vec::with_capacity(131_072);
-            match resp.into_reader().read_to_end(&mut bytes) {
+            match resp
+                .into_reader()
+                .take(131_073)
+                .read_to_end(&mut bytes)
+            {
                 Ok(_) if bytes.len() == 131_072 => return bytes,
                 Ok(_) => eprintln!(
                     "  bam-reader blob: got {} bytes (expected 131072), trying beacon chain…",
