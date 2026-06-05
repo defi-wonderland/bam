@@ -1351,6 +1351,7 @@ dependencies = [
 name = "bam-coprocessor-script"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "bam-coprocessor-lib",
  "c-kzg",
  "clap",
@@ -1384,6 +1385,7 @@ dependencies = [
  "serde_json",
  "sp1-build",
  "sp1-sdk",
+ "sp1-verifier",
  "sqlx",
  "thiserror 1.0.69",
  "tokio",

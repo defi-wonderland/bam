@@ -8,9 +8,12 @@ use crate::blob_fetch::{decode_hex32, fetch_blob_bytes, fetch_blob_from_reader_o
 use crate::kzg::generate_kzg_proof;
 use crate::reader_api::{ApiBatch, ReaderClient};
 
-/// `start_fe`/`end_fe` are not stored in bam-store's BatchRow yet; the
-/// C1 circuit asserts them into public outputs so a verifier sees the
-/// segment the host actually processed. Default to the full blob.
+/// bam-store does not yet persist `start_fe`/`end_fe` from the
+/// BlobSegmentDeclared event, so the coprocessor cannot read the actual
+/// segment bounds from the Reader.  For the demo all messages use the
+/// full blob (poster does not split segments), so clamping to [0, 4096]
+/// is correct in practice.  Before enabling on-chain verification these
+/// constants must be replaced with values read from bam-store/bam-reader.
 pub const DEFAULT_START_FE: u16 = 0;
 pub const DEFAULT_END_FE: u16 = 4096;
 
