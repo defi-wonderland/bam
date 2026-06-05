@@ -139,11 +139,8 @@ export function computeTimelineRoot(timeline: IndexedTweet[]): string {
   const hash = createHash('sha256');
 
   for (const tweet of timeline) {
-    const contentBytes = encoder.encode(
-      tweet.app.kind === 'post' ? tweet.app.content : tweet.app.content
-    );
-    const timestamp =
-      tweet.app.kind === 'post' ? tweet.app.timestamp : tweet.app.timestamp;
+    const contentBytes = encoder.encode(tweet.app.content);
+    const timestamp = tweet.app.timestamp;
 
     // record = sender(20) || nonce_be8(8) || timestamp_be8(8) || content
     const record = new Uint8Array(20 + 8 + 8 + contentBytes.length);
