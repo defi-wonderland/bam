@@ -21,26 +21,45 @@ const PROBE_BLOCK_DEPTH: i64 = 64;
 const BRACKET_WINDOWS: &[i64] = &[200, 1000, 5000, 20_000, 100_000];
 
 // ── Hex helpers (used by callers + by the binary tests) ─────────────────────
+//
+// `decode_hex32`/`decode_hex20`/`decode_hex_bytes` panic on malformed input
+// and remain available for the CLI binaries where the input is fixture data.
+// Service-layer code (which feeds reader-API strings into these) MUST use
+// the `_checked` variants so one malformed reader row can't panic the worker.
 
 pub fn decode_hex32(s: &str) -> [u8; 32] {
-    let s = s.strip_prefix("0x").unwrap_or(s);
-    hex::decode(s)
-        .expect("invalid hex")
-        .try_into()
-        .expect("expected 32 bytes")
+    decode_hex32_checked(s).expect("invalid hex (decode_hex32)")
 }
 
 pub fn decode_hex20(s: &str) -> [u8; 20] {
-    let s = s.strip_prefix("0x").unwrap_or(s);
-    hex::decode(s)
-        .expect("invalid hex")
-        .try_into()
-        .expect("expected 20 bytes")
+    decode_hex20_checked(s).expect("invalid hex (decode_hex20)")
 }
 
 pub fn decode_hex_bytes(s: &str) -> Vec<u8> {
+    decode_hex_bytes_checked(s).expect("invalid hex (decode_hex_bytes)")
+}
+
+pub fn decode_hex32_checked(s: &str) -> anyhow::Result<[u8; 32]> {
     let s = s.strip_prefix("0x").unwrap_or(s);
-    hex::decode(s).expect("invalid hex")
+    let bytes = hex::decode(s)
+        .map_err(|e| anyhow::anyhow!("decode_hex32: invalid hex ({e})"))?;
+    bytes
+        .try_into()
+        .map_err(|v: Vec<u8>| anyhow::anyhow!("decode_hex32: expected 32 bytes, got {}", v.len()))
+}
+
+pub fn decode_hex20_checked(s: &str) -> anyhow::Result<[u8; 20]> {
+    let s = s.strip_prefix("0x").unwrap_or(s);
+    let bytes = hex::decode(s)
+        .map_err(|e| anyhow::anyhow!("decode_hex20: invalid hex ({e})"))?;
+    bytes
+        .try_into()
+        .map_err(|v: Vec<u8>| anyhow::anyhow!("decode_hex20: expected 20 bytes, got {}", v.len()))
+}
+
+pub fn decode_hex_bytes_checked(s: &str) -> anyhow::Result<Vec<u8>> {
+    let s = s.strip_prefix("0x").unwrap_or(s);
+    hex::decode(s).map_err(|e| anyhow::anyhow!("decode_hex_bytes: invalid hex ({e})"))
 }
 
 // ── Blob retrieval ──────────────────────────────────────────────────────────

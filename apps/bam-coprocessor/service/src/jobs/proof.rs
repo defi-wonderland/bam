@@ -14,7 +14,7 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use bam_coprocessor_script::{
-    blob_fetch::decode_hex32,
+    blob_fetch::decode_hex32_checked,
     parse_message_public_values, vk_hash_from_groth16,
     pipeline::{fetch_one_batch_reader_only, BatchSelector},
     reader_api::ReaderClient,
@@ -97,12 +97,29 @@ async fn fetch_unproven_messages(
         let mut rows: Vec<Candidate> = api
             .into_iter()
             .filter_map(|m| {
+                let block = m.block_number? as i64;
+                let tx = m.tx_index? as i32;
+                let msg = m.message_index_within_batch? as i32;
+                let batch_ref = m.batch_ref?;
+                let mh = match decode_hex32_checked(&m.message_hash) {
+                    Ok(h) => h,
+                    Err(e) => {
+                        tracing::warn!(
+                            error = %e,
+                            block,
+                            tx,
+                            msg,
+                            "skipping reader row with malformed message_hash"
+                        );
+                        return None;
+                    }
+                };
                 Some(Candidate {
-                    block_number: m.block_number? as i64,
-                    tx_index: m.tx_index? as i32,
-                    msg_index: m.message_index_within_batch? as i32,
-                    batch_ref: m.batch_ref?,
-                    expected_message_hash: decode_hex32(&m.message_hash),
+                    block_number: block,
+                    tx_index: tx,
+                    msg_index: msg,
+                    batch_ref,
+                    expected_message_hash: mh,
                 })
             })
             .filter(|c| {
@@ -182,7 +199,8 @@ async fn prove_one(state: &Arc<AppState>, c: &Candidate) -> anyhow::Result<bool>
 
     let pv_bytes = proof.public_values.as_slice().to_vec();
     let pv = parse_message_public_values(&pv_bytes)?;
-    let computed_hash = decode_hex32(&pv.message_hash);
+    let computed_hash = decode_hex32_checked(&pv.message_hash)
+        .context("guest emitted malformed message_hash")?;
     if computed_hash != c.expected_message_hash {
         anyhow::bail!(
             "messageHash mismatch on prove: C1={} reader={}",

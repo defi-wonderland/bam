@@ -4,7 +4,9 @@
 
 use bam_coprocessor_lib::BlobInput;
 
-use crate::blob_fetch::{decode_hex32, fetch_blob_bytes, fetch_blob_from_reader_only};
+use crate::blob_fetch::{
+    decode_hex32_checked, fetch_blob_bytes, fetch_blob_from_reader_only,
+};
 use crate::kzg::generate_kzg_proof;
 use crate::reader_api::{ApiBatch, ReaderClient};
 
@@ -70,7 +72,8 @@ pub fn fetch_one_batch(
     let tx_index = api
         .tx_index
         .ok_or_else(|| "confirmed batch missing tx_index".to_string())?;
-    let l1_vh = decode_hex32(&api.blob_versioned_hash);
+    let l1_vh =
+        decode_hex32_checked(&api.blob_versioned_hash).map_err(|e| e.to_string())?;
 
     let blob_bytes = fetch_blob_bytes(
         client.base_url(),
@@ -79,7 +82,8 @@ pub fn fetch_one_batch(
         block_number,
         chain_id,
     );
-    let (commitment, opening_proof, computed_vh) = generate_kzg_proof(&blob_bytes);
+    let (commitment, opening_proof, computed_vh) =
+        generate_kzg_proof(&blob_bytes).map_err(|e| e.to_string())?;
     if computed_vh != l1_vh {
         return Err(format!(
             "blob versioned_hash mismatch (block={block_number} tx={tx_index})"
@@ -90,7 +94,7 @@ pub fn fetch_one_batch(
         versioned_hash: l1_vh,
         commitment,
         opening_proof,
-        content_tag: decode_hex32(&api.content_tag),
+        content_tag: decode_hex32_checked(&api.content_tag).map_err(|e| e.to_string())?,
         decoder: [0u8; 20],
         sig_registry: [0u8; 20],
         block_number,
@@ -137,8 +141,10 @@ pub fn fetch_one_batch_reader_only(
         None => return Ok(None),
     };
 
-    let l1_vh = decode_hex32(&api.blob_versioned_hash);
-    let (commitment, opening_proof, computed_vh) = generate_kzg_proof(&blob_bytes);
+    let l1_vh =
+        decode_hex32_checked(&api.blob_versioned_hash).map_err(|e| e.to_string())?;
+    let (commitment, opening_proof, computed_vh) =
+        generate_kzg_proof(&blob_bytes).map_err(|e| e.to_string())?;
     if computed_vh != l1_vh {
         return Err(format!(
             "blob versioned_hash mismatch (block={block_number} tx={tx_index})"
@@ -149,7 +155,7 @@ pub fn fetch_one_batch_reader_only(
         versioned_hash: l1_vh,
         commitment,
         opening_proof,
-        content_tag: decode_hex32(&api.content_tag),
+        content_tag: decode_hex32_checked(&api.content_tag).map_err(|e| e.to_string())?,
         decoder: [0u8; 20],
         sig_registry: [0u8; 20],
         block_number,

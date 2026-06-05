@@ -140,7 +140,8 @@ fn main() {
     );
 
     let blob_bytes = decode_hex_bytes(&c.blob_bytes_hex);
-    let (commitment, opening_proof, vh) = generate_kzg_proof(&blob_bytes);
+    let (commitment, opening_proof, vh) =
+        generate_kzg_proof(&blob_bytes).expect("kzg proof generation failed");
     let l1_vh = decode_hex32(&c.versioned_hash);
     assert_eq!(
         vh, l1_vh,

@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use bam_coprocessor_script::{
-    blob_fetch::decode_hex32,
+    blob_fetch::decode_hex32_checked,
     parse_message_public_values,
     pipeline::{fetch_one_batch_reader_only, BatchSelector},
     reader_api::ReaderClient,
@@ -117,7 +117,21 @@ async fn fetch_unvalidated_messages(
                 let tx = m.tx_index? as i32;
                 let msg = m.message_index_within_batch? as i32;
                 let batch_ref = m.batch_ref?;
-                let mh = decode_hex32(&m.message_hash);
+                // A malformed message_hash from the reader drops the row
+                // instead of panicking the tick.
+                let mh = match decode_hex32_checked(&m.message_hash) {
+                    Ok(h) => h,
+                    Err(e) => {
+                        tracing::warn!(
+                            error = %e,
+                            block,
+                            tx,
+                            msg,
+                            "skipping reader row with malformed message_hash"
+                        );
+                        return None;
+                    }
+                };
                 Some(Candidate {
                     block_number: block,
                     tx_index: tx,
@@ -177,7 +191,8 @@ async fn validate_one(
     };
 
     let pv = parse_message_public_values(&exec_output.public_values)?;
-    let computed_hash = decode_hex32(&pv.message_hash);
+    let computed_hash = decode_hex32_checked(&pv.message_hash)
+        .context("guest emitted malformed message_hash")?;
     if computed_hash != c.expected_message_hash {
         anyhow::bail!(
             "messageHash mismatch: C1={} reader={}",
