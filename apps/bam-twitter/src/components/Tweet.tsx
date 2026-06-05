@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import type { Bytes32 } from 'bam-sdk/browser';
 
 import { AddressLink } from '@/components/AddressLink';
@@ -30,7 +31,13 @@ export function Tweet({ tweet, replies = [] }: TweetProps) {
       <div className="flex items-center justify-between mb-1">
         <AddressLink address={tweet.sender} ensName={tweet.senderEns} className="text-sm" />
         <div className="flex items-center gap-2">
-          <span className="text-xs text-slate-400">{time}</span>
+          {tweet.status === 'posted' ? (
+            <Link href={`/status/${tweet.id}`} className="text-xs text-slate-400 hover:text-bird-600">
+              {time}
+            </Link>
+          ) : (
+            <span className="text-xs text-slate-400">{time}</span>
+          )}
           <span
             className={`text-xs px-2 py-0.5 rounded-full ${
               tweet.status === 'pending'
