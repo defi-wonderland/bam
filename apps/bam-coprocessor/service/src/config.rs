@@ -14,7 +14,7 @@ pub struct Config {
     pub forum_tag: String,
 
     /// Cron expression for Job V. Format follows tokio-cron-scheduler's
-    /// 6-field cron (`sec min hour day month weekday`). Default: every 90 s.
+    /// 6-field cron (`sec min hour day month weekday`). Default: every 2 min.
     pub validation_cron: String,
     /// Cron expression for Job P. Default: every hour at :00.
     pub proof_cron: String,
@@ -63,8 +63,10 @@ impl Config {
                 "COPROCESSOR_FORUM_TAG",
                 "0x01bc15204a4c7779a37fd0d7988fe89a9cc4a148e7db926f4815f4c93ea879d1",
             ),
-            // Every 90 s. Cron syntax: `sec min hour day month weekday`.
-            validation_cron: env_str_or("COPROCESSOR_VALIDATION_CRON", "*/90 * * * * *"),
+            // Every 2 min. Cron syntax: `sec min hour day month weekday`.
+            // (`*/90` doesn't represent 90s in 6-field cron — it parses as
+            // "second 0 of every minute", i.e. 60s.)
+            validation_cron: env_str_or("COPROCESSOR_VALIDATION_CRON", "0 */2 * * * *"),
             // Top of every hour.
             proof_cron: env_str_or("COPROCESSOR_PROOF_CRON", "0 0 * * * *"),
             validation_batch_limit: env_parse("COPROCESSOR_VALIDATION_BATCH_LIMIT", 50u32)?,
