@@ -92,10 +92,15 @@ pub fn main() {
     assert!(is_valid, "KZG proof invalid");
 
     // ── Step 3: extract usable bytes from the blob segment ────────────────────
-    let segment = extract_segment_bytes(&blob.blob_bytes, blob.start_fe, blob.end_fe);
+    // Inside the guest, decode failures must panic — that translates to an
+    // invalid proof, which is the desired security model. Any malformed
+    // input committed by a (malicious or buggy) host therefore can't be
+    // attested.
+    let segment = extract_segment_bytes(&blob.blob_bytes, blob.start_fe, blob.end_fe)
+        .expect("extract_segment_bytes");
 
     // ── Step 4: decode BAM wire format (full blob — validates trailing bytes) ─
-    let (messages, sigs) = decode_bam_payload(&segment);
+    let (messages, sigs) = decode_bam_payload(&segment).expect("decode_bam_payload");
 
     // ── Step 5: assert ECDSA signature at msg_index ────────────────────────────
     assert!(

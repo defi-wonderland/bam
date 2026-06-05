@@ -45,7 +45,7 @@ pub struct BlobInput {
 }
 
 /// One decoded BAM message before app-layer parsing, carrying its raw signature.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BamMessage {
     pub sender: [u8; 20],
     pub nonce: u64,
@@ -205,19 +205,55 @@ pub fn verify_ecdsa(
 
 // ── Blob extraction ───────────────────────────────────────────────────────────
 
+/// Bounds-check failures while extracting bytes from a blob segment.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SegmentError {
+    /// `end_fe` is not strictly after `start_fe`.
+    EmptyOrInvertedRange { start_fe: u16, end_fe: u16 },
+    /// `end_fe * 32` would read past `blob.len()`.
+    ShortBlob { blob_len: usize, end_fe: u16 },
+}
+
+impl core::fmt::Display for SegmentError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::EmptyOrInvertedRange { start_fe, end_fe } => {
+                write!(f, "empty or inverted fe range: [{start_fe}, {end_fe})")
+            }
+            Self::ShortBlob { blob_len, end_fe } => {
+                write!(f, "blob too short ({blob_len} bytes) for end_fe={end_fe}")
+            }
+        }
+    }
+}
+
 /// Strip the 0x00 padding byte (byte 0) from each field element in [start_fe, end_fe)
 /// and concatenate the remaining 31 usable bytes per FE.
 ///
 /// EIP-4844: 4096 FEs × 32 bytes = 131072 bytes per blob.
 /// Byte 0 of each FE is forced to 0x00 by the KZG field constraint → 31 usable
 /// bytes per FE → 126976 usable bytes per blob.
-pub fn extract_segment_bytes(blob: &[u8], start_fe: u16, end_fe: u16) -> Vec<u8> {
+pub fn extract_segment_bytes(
+    blob: &[u8],
+    start_fe: u16,
+    end_fe: u16,
+) -> Result<Vec<u8>, SegmentError> {
+    if end_fe <= start_fe {
+        return Err(SegmentError::EmptyOrInvertedRange { start_fe, end_fe });
+    }
+    let end_byte = end_fe as usize * 32;
+    if blob.len() < end_byte {
+        return Err(SegmentError::ShortBlob {
+            blob_len: blob.len(),
+            end_fe,
+        });
+    }
     let mut result = Vec::with_capacity((end_fe - start_fe) as usize * 31);
     for fe in start_fe..end_fe {
         let offset = fe as usize * 32 + 1;
         result.extend_from_slice(&blob[offset..offset + 31]);
     }
-    result
+    Ok(result)
 }
 
 // ── Batch decoding ────────────────────────────────────────────────────────────
@@ -241,63 +277,129 @@ pub fn extract_segment_bytes(blob: &[u8], start_fe: u16, end_fe: u16) -> Vec<u8>
 ///   65 bytes:  signature (scheme 0x01 ECDSA)
 ///
 /// TypeScript ref: packages/bam-sdk/src/batch.ts
-pub fn decode_bam_payload(data: &[u8]) -> (Vec<BamMessage>, Vec<[u8; 65]>) {
+pub fn decode_bam_payload(
+    data: &[u8],
+) -> Result<(Vec<BamMessage>, Vec<[u8; 65]>), DecodeError> {
     if data.len() < 10 {
-        return (vec![], vec![]);
+        return Err(DecodeError::TooShort);
     }
     if data[0] != 0x02 {
-        return (vec![], vec![]);
+        return Err(DecodeError::BadVersion(data[0]));
     }
-    assert_eq!(
-        data[1], 0x00,
-        "zstd codec (0x01) is not supported in Circuit 1 — add ruzstd decompression"
-    );
+    if data[1] != 0x00 {
+        return Err(DecodeError::UnsupportedCodec(data[1]));
+    }
 
     let msg_count = u32::from_be_bytes([data[2], data[3], data[4], data[5]]) as usize;
     let payload_len = u32::from_be_bytes([data[6], data[7], data[8], data[9]]) as usize;
 
     if 10 + payload_len > data.len() {
-        return (vec![], vec![]);
+        return Err(DecodeError::TruncatedRecord);
     }
 
     let payload = &data[10..10 + payload_len];
+
+    // Bound `Vec::with_capacity` against an attacker-controlled msg_count.
+    // Smallest possible record is 20 + 8 + 4 + 0 + 65 = 97 bytes, so the
+    // header's `msg_count` cannot exceed `payload_len / 97`.
+    const MIN_RECORD_SIZE: usize = 97;
+    let max_records = payload.len() / MIN_RECORD_SIZE;
+    if msg_count > max_records {
+        return Err(DecodeError::MsgCountTooLarge {
+            declared: msg_count,
+            payload_len: payload.len(),
+        });
+    }
     let mut messages = Vec::with_capacity(msg_count);
     let mut signatures: Vec<[u8; 65]> = Vec::with_capacity(msg_count);
     let mut o = 0;
 
     for _ in 0..msg_count {
         if o + 20 + 8 + 4 > payload.len() {
-            // Truncated record header — matches TypeScript throwing RangeError,
-            // which bam-reader classifies as skippedDecode (0 messages).
-            return (vec![], vec![]);
+            return Err(DecodeError::TruncatedRecord);
         }
-        let sender: [u8; 20] = payload[o..o + 20].try_into().unwrap();
+        let sender: [u8; 20] = payload[o..o + 20]
+            .try_into()
+            .map_err(|_| DecodeError::TruncatedRecord)?;
         o += 20;
-        let nonce = u64::from_be_bytes(payload[o..o + 8].try_into().unwrap());
+        let nonce = u64::from_be_bytes(
+            payload[o..o + 8]
+                .try_into()
+                .map_err(|_| DecodeError::TruncatedRecord)?,
+        );
         o += 8;
-        let contents_len = u32::from_be_bytes(payload[o..o + 4].try_into().unwrap()) as usize;
+        let contents_len = u32::from_be_bytes(
+            payload[o..o + 4]
+                .try_into()
+                .map_err(|_| DecodeError::TruncatedRecord)?,
+        ) as usize;
         o += 4;
 
         if o + contents_len + 65 > payload.len() {
-            // Truncated record body — same.
-            return (vec![], vec![]);
+            return Err(DecodeError::TruncatedRecord);
         }
         let contents = payload[o..o + contents_len].to_vec();
         o += contents_len;
-        let sig: [u8; 65] = payload[o..o + 65].try_into().unwrap();
+        let sig: [u8; 65] = payload[o..o + 65]
+            .try_into()
+            .map_err(|_| DecodeError::TruncatedRecord)?;
         o += 65;
 
         messages.push(BamMessage { sender, nonce, contents });
         signatures.push(sig);
     }
 
-    // Trailing bytes after all records: TypeScript throws RangeError →
-    // bam-reader classifies as skippedDecode (0 messages).
     if o != payload.len() {
-        return (vec![], vec![]);
+        return Err(DecodeError::TrailingBytes {
+            consumed: o,
+            payload_len: payload.len(),
+        });
     }
 
-    (messages, signatures)
+    Ok((messages, signatures))
+}
+
+/// Failure modes for [`decode_bam_payload`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DecodeError {
+    /// Wire data is shorter than the 10-byte header.
+    TooShort,
+    /// Header byte 0 is not the supported version (`0x02`).
+    BadVersion(u8),
+    /// Header byte 1 declares a codec we don't support (e.g. zstd = 0x01).
+    UnsupportedCodec(u8),
+    /// A per-message record runs off the end of the payload.
+    TruncatedRecord,
+    /// Records consumed fewer bytes than the declared `payload_len`.
+    TrailingBytes { consumed: usize, payload_len: usize },
+    /// Declared `msg_count` is too large to fit inside `payload_len`
+    /// at the minimum record size — refuse to pre-allocate.
+    MsgCountTooLarge { declared: usize, payload_len: usize },
+}
+
+impl core::fmt::Display for DecodeError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::TooShort => write!(f, "wire data shorter than the 10-byte header"),
+            Self::BadVersion(b) => write!(f, "unsupported version byte: 0x{b:02x}"),
+            Self::UnsupportedCodec(b) => write!(f, "unsupported codec byte: 0x{b:02x}"),
+            Self::TruncatedRecord => write!(f, "record runs off end of payload"),
+            Self::TrailingBytes {
+                consumed,
+                payload_len,
+            } => write!(
+                f,
+                "trailing bytes after records: consumed {consumed} of {payload_len}"
+            ),
+            Self::MsgCountTooLarge {
+                declared,
+                payload_len,
+            } => write!(
+                f,
+                "declared msg_count={declared} exceeds payload capacity ({payload_len} bytes)"
+            ),
+        }
+    }
 }
 
 // ── Message set commitment ────────────────────────────────────────────────────
@@ -418,7 +520,7 @@ mod tests {
         for i in 0..31usize {
             blob[1 + i] = (i + 1) as u8;
         }
-        let out = extract_segment_bytes(&blob, 0, 1);
+        let out = extract_segment_bytes(&blob, 0, 1).expect("ok");
         assert_eq!(out.len(), 31);
         assert_eq!(out[0], 1);
         assert_eq!(out[30], 31);
@@ -427,40 +529,53 @@ mod tests {
     #[test]
     fn test_extract_segment_bytes_full_blob_length() {
         let blob = vec![0u8; 131072];
-        let out = extract_segment_bytes(&blob, 0, 4096);
+        let out = extract_segment_bytes(&blob, 0, 4096).expect("ok");
         assert_eq!(out.len(), 4096 * 31);
+    }
+
+    #[test]
+    fn test_extract_segment_bytes_short_blob_errors() {
+        // Blob is one byte short of what end_fe=2 demands.
+        let blob = vec![0u8; 63];
+        assert_eq!(
+            extract_segment_bytes(&blob, 0, 2),
+            Err(SegmentError::ShortBlob {
+                blob_len: 63,
+                end_fe: 2,
+            })
+        );
     }
 
     // ── decode_bam_payload ──────────────────────────────────────────────────────────
 
     #[test]
     fn test_decode_bam_payload_too_short() {
-        let (msgs, sigs) = decode_bam_payload(&[0u8; 9]);
-        assert!(msgs.is_empty() && sigs.is_empty());
+        assert_eq!(decode_bam_payload(&[0u8; 9]), Err(DecodeError::TooShort));
     }
 
     #[test]
     fn test_decode_bam_payload_bad_version() {
         let mut d = vec![0u8; 10];
         d[0] = 0x01;
-        let (msgs, sigs) = decode_bam_payload(&d);
-        assert!(msgs.is_empty() && sigs.is_empty());
+        assert_eq!(decode_bam_payload(&d), Err(DecodeError::BadVersion(0x01)));
     }
 
     #[test]
-    fn test_decode_bam_payload_zstd_panics() {
+    fn test_decode_bam_payload_zstd_errors() {
         let mut d = vec![0u8; 10];
         d[0] = 0x02;
         d[1] = 0x01;
-        let result = std::panic::catch_unwind(|| decode_bam_payload(&d));
-        assert!(result.is_err(), "ZSTD batch must panic");
+        assert_eq!(
+            decode_bam_payload(&d),
+            Err(DecodeError::UnsupportedCodec(0x01))
+        );
     }
 
     #[test]
     fn test_decode_bam_payload_zero_messages() {
         let mut d = vec![0u8; 10];
         d[0] = 0x02;
-        let (msgs, sigs) = decode_bam_payload(&d);
+        let (msgs, sigs) = decode_bam_payload(&d).expect("ok");
         assert!(msgs.is_empty() && sigs.is_empty());
     }
 
@@ -471,12 +586,30 @@ mod tests {
         let contents = b"hello world";
         let sig = [0xAAu8; 65];
         let data = make_batch_bytes(&sender, nonce, contents, &sig);
-        let (msgs, sigs) = decode_bam_payload(&data);
+        let (msgs, sigs) = decode_bam_payload(&data).expect("ok");
         assert_eq!(msgs.len(), 1);
         assert_eq!(msgs[0].sender, sender);
         assert_eq!(msgs[0].nonce, nonce);
         assert_eq!(msgs[0].contents, contents);
         assert_eq!(sigs[0], sig);
+    }
+
+    #[test]
+    fn test_decode_bam_payload_msg_count_too_large() {
+        // 10-byte header with declared msg_count = 1_000_000 but payload_len = 0
+        // — declared messages can't fit, must error rather than over-allocate.
+        let mut d = vec![0u8; 10];
+        d[0] = 0x02; // version
+        d[1] = 0x00; // codec
+        d[2..6].copy_from_slice(&1_000_000u32.to_be_bytes()); // msg_count
+        d[6..10].copy_from_slice(&0u32.to_be_bytes()); // payload_len
+        assert_eq!(
+            decode_bam_payload(&d),
+            Err(DecodeError::MsgCountTooLarge {
+                declared: 1_000_000,
+                payload_len: 0,
+            })
+        );
     }
 
     // ── compute_message_commitment ────────────────────────────────────────────
