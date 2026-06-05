@@ -32,7 +32,9 @@ CONTENT_TAG    = "0xf0fea94ffd2ae32ed878c57e3427bbffab46d333d09837bc640d95279509
 # reference points to estimate the slot for any exec block.
 REF_EXEC_A, REF_SLOT_A = 10926101, 10338743
 REF_EXEC_B, REF_SLOT_B = 10933021, 10345720
-SEARCH_RADIUS = 50  # ±50 slots to handle remaining drift
+# Bracket + binary search progresses through these radii so a drift larger
+# than the previous ±50 linear cap still terminates in O(log radius).
+BRACKET_WINDOWS = (200, 1000, 5000, 20_000, 100_000)
 
 
 def versioned_hash_from_commitment(commitment_hex: str) -> str:
@@ -41,15 +43,17 @@ def versioned_hash_from_commitment(commitment_hex: str) -> str:
 
 
 def get_exec_block_at_slot(slot: int):
-    """Return the execution block number at a beacon slot, or None if slot missed."""
-    try:
-        resp = requests.get(f"{BEACON_URL}/eth/v2/beacon/blocks/{slot}", timeout=10)
-        if resp.status_code == 404:
-            return None
-        resp.raise_for_status()
-        return int(resp.json()["data"]["message"]["body"]["execution_payload"]["block_number"])
-    except Exception:
+    """Return execution block at a beacon slot.
+
+    Returns `None` only on a documented 404 (slot was missed). Any other
+    HTTP/network/JSON failure is re-raised so the caller can't silently
+    treat infra hiccups as missing slots.
+    """
+    resp = requests.get(f"{BEACON_URL}/eth/v2/beacon/blocks/{slot}", timeout=10)
+    if resp.status_code == 404:
         return None
+    resp.raise_for_status()
+    return int(resp.json()["data"]["message"]["body"]["execution_payload"]["block_number"])
 
 
 def estimate_slot(exec_block: int) -> int:
@@ -58,18 +62,48 @@ def estimate_slot(exec_block: int) -> int:
     return round(REF_SLOT_A + slope * (exec_block - REF_EXEC_A))
 
 
+def _block_at_slot_or_skip(slot: int) -> int:
+    """Walk forward from `slot` until we find a non-missed slot, then return its exec block."""
+    cursor = slot
+    while True:
+        bn = get_exec_block_at_slot(cursor)
+        if bn is not None:
+            return bn
+        cursor += 1
+
+
 def find_slot_for_exec_block(exec_block: int) -> int:
-    """Find the beacon slot that contains the given execution block number."""
+    """Bracket + binary search for the beacon slot containing `exec_block`."""
     approx = estimate_slot(exec_block)
-    for delta in range(SEARCH_RADIUS + 1):
-        for candidate in ([approx + delta] if delta == 0 else [approx - delta, approx + delta]):
-            bn = get_exec_block_at_slot(candidate)
-            if bn == exec_block:
-                return candidate
-    raise RuntimeError(
-        f"Could not find beacon slot for exec block {exec_block} "
-        f"(searched slots {approx - SEARCH_RADIUS}..{approx + SEARCH_RADIUS})"
-    )
+
+    # Phase 1 — bracket: expand symmetric windows until lo and hi straddle the target.
+    for radius in BRACKET_WINDOWS:
+        lo = approx - radius
+        hi = approx + radius
+        lo_block = _block_at_slot_or_skip(lo)
+        hi_block = _block_at_slot_or_skip(hi)
+        if lo_block <= exec_block <= hi_block:
+            break
+    else:
+        raise RuntimeError(
+            f"could not bracket exec block {exec_block} within ±{BRACKET_WINDOWS[-1]} slots of {approx}"
+        )
+
+    # Phase 2 — binary search inside [lo, hi].
+    while lo <= hi:
+        mid = (lo + hi) // 2
+        bn = get_exec_block_at_slot(mid)
+        if bn is None:
+            # Missed slot — bias toward the higher half.
+            lo = mid + 1
+            continue
+        if bn == exec_block:
+            return mid
+        if bn < exec_block:
+            lo = mid + 1
+        else:
+            hi = mid - 1
+    raise RuntimeError(f"binary search did not find slot for exec block {exec_block}")
 
 
 def fetch_blob_at_slot(slot: int, want_vh: str) -> str:
@@ -103,7 +137,9 @@ def main():
 
     print(f"Fetching batches from {args.reader_url}…")
     url = f"{args.reader_url}/batches?contentTag={args.content_tag}&status=confirmed&limit={args.limit}"
-    batches = requests.get(url, timeout=30).json().get("batches", [])
+    resp = requests.get(url, timeout=30)
+    resp.raise_for_status()
+    batches = resp.json().get("batches", [])
     print(f"  {len(batches)} confirmed batch(es)\n")
 
     if not batches:
