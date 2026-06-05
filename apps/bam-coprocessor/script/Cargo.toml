@@ -20,7 +20,7 @@ name = "print-vk"
 path = "src/bin/print-vk.rs"
 
 [dependencies]
-sp1-sdk             = { version = "6.0.1", features = ["blocking", "network"] }
+sp1-sdk             = { version = "6.1.0", features = ["blocking", "network"] }
 sp1-verifier        = { version = "=6.1.0", default-features = false }
 bam-coprocessor-lib = { path = "../lib" }
 serde               = { workspace = true }
@@ -38,4 +38,4 @@ k256         = { workspace = true }
 tiny-keccak  = { workspace = true }
 
 [build-dependencies]
-sp1-build = { version = "6.0.1" }
+sp1-build = { version = "6.1.0" }
