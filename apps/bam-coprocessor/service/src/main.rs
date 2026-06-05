@@ -93,8 +93,32 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!(addr = %bind, "HTTP listening");
 
     let shutdown = async {
-        tokio::signal::ctrl_c().await.ok();
-        tracing::info!("ctrl-c received, shutting down");
+        #[cfg(unix)]
+        {
+            use tokio::signal::unix::{signal, SignalKind};
+            let mut sigterm = match signal(SignalKind::terminate()) {
+                Ok(s) => s,
+                Err(e) => {
+                    tracing::warn!(error = %e, "failed to install SIGTERM handler; falling back to ctrl-c only");
+                    tokio::signal::ctrl_c().await.ok();
+                    tracing::info!("ctrl-c received, shutting down");
+                    return;
+                }
+            };
+            tokio::select! {
+                _ = tokio::signal::ctrl_c() => {
+                    tracing::info!("ctrl-c received, shutting down");
+                }
+                _ = sigterm.recv() => {
+                    tracing::info!("SIGTERM received, shutting down");
+                }
+            }
+        }
+        #[cfg(not(unix))]
+        {
+            tokio::signal::ctrl_c().await.ok();
+            tracing::info!("ctrl-c received, shutting down");
+        }
     };
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown)
