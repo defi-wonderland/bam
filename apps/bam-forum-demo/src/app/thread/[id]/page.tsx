@@ -1,80 +1,119 @@
 'use client';
 
+import { useMemo, useState } from 'react';
 import Link from 'next/link';
+import { notFound, useParams } from 'next/navigation';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
+import { useAccount } from 'wagmi';
 
-const THREAD = {
-  tag: 'Protocol',
-  author: '0xdead…beef',
-  age: '2 hours ago',
-  title: 'How does BAM handle message ordering across blobs?',
-  body: `Each sender maintains a monotonically increasing nonce. The Reader reconstructs order from (sender, nonce) pairs, so batches can land out of order without losing thread coherence.\n\nDoes this mean two senders can interleave freely as long as their own nonces are in order? Or is there a global sequence enforced by the Poster?`,
-};
-
-const REPLIES = [
-  {
-    author: '0xc0ff…ee42',
-    age: '1 hour ago',
-    body: 'Yes — ordering is per-sender only. The Poster enforces nonce monotonicity per sender before accepting a message into the pending queue, but it makes no promise about interleaving between different senders. The Reader sorts by block number first, then (sender, nonce) as a tiebreaker.',
-  },
-  {
-    author: '0xdead…beef',
-    age: '45 minutes ago',
-    body: 'That makes sense. So a reply that references a parent by messageHash is always stable even if the batch lands before the parent\'s batch is finalised?',
-  },
-  {
-    author: '0xface…1234',
-    age: '30 minutes ago',
-    body: 'Exactly — messageHash is keccak256(sender ‖ nonce ‖ contents), computable before the batch hits the chain. The Reader parks orphan replies until the parent confirms.',
-  },
-];
+import { ProofDrawer } from '@/components/ProofDrawer';
+import { ReplyComposer } from '@/components/ReplyComposer';
+import { ReplyItem } from '@/components/ReplyItem';
+import { ThreadHeader } from '@/components/ThreadHeader';
+import type { ForumMessage } from '@/lib/forum-row';
+import { useConfirmed, usePending } from '@/lib/queries';
+import { getThread, indexLikesBySender } from '@/lib/threading';
 
 export default function ThreadPage() {
+  const params = useParams<{ id: string }>();
+  const rawId = params?.id ?? '';
+  const messageHash = rawId.startsWith('0x') ? rawId.toLowerCase() : `0x${rawId.toLowerCase()}`;
+
+  const { address } = useAccount();
+  const me = address?.toLowerCase() ?? null;
+  const { data: confirmed, isLoading: confirmedLoading } = useConfirmed();
+  const { data: pending } = usePending(me ?? undefined);
+
+  const [proofHash, setProofHash] = useState<string | null>(null);
+
+  const { thread, likesByTarget } = useMemo(() => {
+    const rows: ForumMessage[] = [
+      ...((pending?.messages ?? []) as ForumMessage[]),
+      ...((confirmed?.messages ?? []) as ForumMessage[]),
+    ];
+    // Dedup by messageHash — pending and confirmed overlap during handoff.
+    const seen = new Set<string>();
+    const deduped: ForumMessage[] = [];
+    for (const m of rows) {
+      const key = m.messageHash.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      deduped.push(m);
+    }
+    return {
+      thread: getThread(deduped, messageHash as `0x${string}`),
+      likesByTarget: indexLikesBySender(deduped),
+    };
+  }, [confirmed, pending, messageHash]);
+
+  const likeCountFor = (hash: string) =>
+    likesByTarget.get(hash.toLowerCase())?.size ?? 0;
+  const alreadyLikedByMeFor = (hash: string) => {
+    if (!me) return false;
+    return likesByTarget.get(hash.toLowerCase())?.has(me) ?? false;
+  };
+
+  if (confirmedLoading && !thread) {
+    return (
+      <div className="mx-auto max-w-2xl px-4 py-8">
+        <header className="mb-6 flex items-baseline justify-between border-b border-slate-200 pb-4 dark:border-slate-700">
+          <span className="text-lg font-bold">BAM Forum</span>
+          <ConnectButton />
+        </header>
+        <p className="py-8 text-center text-sm text-slate-500">Loading thread…</p>
+      </div>
+    );
+  }
+
+  if (!thread) {
+    notFound();
+  }
+
   return (
-    <div className="max-w-2xl mx-auto px-4 py-8">
-      <header className="flex items-baseline justify-between pb-4 mb-6 border-b border-slate-200 dark:border-slate-700">
-        <span className="font-bold text-lg">BAM Forum</span>
+    <div className="mx-auto max-w-2xl px-4 py-8">
+      <header className="mb-6 flex items-baseline justify-between border-b border-slate-200 pb-4 dark:border-slate-700">
+        <span className="text-lg font-bold">BAM Forum</span>
         <ConnectButton />
       </header>
 
-      <div className="text-sm text-slate-500 mb-4">
-        <Link href="/" className="text-blue-600 dark:text-blue-400 hover:underline">
+      <div className="mb-4 text-sm text-slate-500">
+        <Link href="/" className="text-blue-600 hover:underline dark:text-blue-400">
           General Discussion
         </Link>
         <span className="mx-2">›</span>
         <span>Thread</span>
       </div>
 
-      <div className="pb-6 mb-6 border-b border-slate-200 dark:border-slate-700">
-        <div className="flex items-center gap-2 text-xs text-slate-500 mb-2">
-          <span className="bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300 font-semibold px-2 py-0.5 rounded-full">
-            {THREAD.tag}
-          </span>
-          <span>·</span>
-          <span>{THREAD.author}</span>
-          <span>·</span>
-          <span>{THREAD.age}</span>
-        </div>
-        <h1 className="text-xl font-bold mb-4">{THREAD.title}</h1>
-        {THREAD.body.split('\n\n').map((p, i) => (
-          <p key={i} className="text-slate-700 dark:text-slate-300 mb-3 last:mb-0">
-            {p}
-          </p>
-        ))}
+      <ThreadHeader
+        post={thread.post}
+        likeCount={thread.likeCount}
+        alreadyLikedByMe={me ? thread.alreadyLikedBy(me) : false}
+        onOpenProof={setProofHash}
+      />
+
+      <div className="mb-5">
+        <ReplyComposer parentMessageHash={thread.post.messageHash} />
       </div>
 
-      <ol className="space-y-5">
-        {REPLIES.map((r, i) => (
-          <li key={i} className="border-l-2 border-slate-200 dark:border-slate-700 pl-4">
-            <div className="flex items-center gap-2 text-xs text-slate-500 mb-2">
-              <span className="font-medium">{r.author}</span>
-              <span>·</span>
-              <span>{r.age}</span>
-            </div>
-            <p className="text-sm text-slate-700 dark:text-slate-300">{r.body}</p>
-          </li>
-        ))}
-      </ol>
+      {thread.replies.length === 0 ? (
+        <p className="py-6 text-center text-sm text-slate-400">
+          No replies yet. Be the first.
+        </p>
+      ) : (
+        <ol className="space-y-5">
+          {thread.replies.map((r) => (
+            <ReplyItem
+              key={r.messageHash}
+              reply={r}
+              likeCount={likeCountFor(r.messageHash)}
+              alreadyLikedByMe={alreadyLikedByMeFor(r.messageHash)}
+              onOpenProof={setProofHash}
+            />
+          ))}
+        </ol>
+      )}
+
+      <ProofDrawer messageHash={proofHash} onClose={() => setProofHash(null)} />
     </div>
   );
 }
