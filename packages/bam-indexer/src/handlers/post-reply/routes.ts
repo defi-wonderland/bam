@@ -117,7 +117,8 @@ export function buildPostReplyRoutes(
 ): BoundHandlerRoute[] {
   const { schema, routePrefix, handlerName } = opts;
   const s = quoteIdent(schema);
-  const POST_BY_ID_PREFIX = `${routePrefix}/posts/`;
+  const POST_BY_ID_PREFIX = `${routePrefix}/posts/id/`;
+  const POST_BY_HASH_PREFIX = `${routePrefix}/posts/hash/`;
   const PROFILE_PREFIX = `${routePrefix}/profile/`;
 
   /**
@@ -206,8 +207,8 @@ export function buildPostReplyRoutes(
   };
 
   /**
-   * GET <routePrefix>/posts/:messageId — single post lookup in the
-   * resolved generation. Returns 404 when the row hasn't been
+   * GET <routePrefix>/posts/id/:id — single post lookup by `message_id`
+   * in the resolved generation. Returns 404 when the row hasn't been
    * projected (malformed, missing, reorged out, or in a different
    * generation).
    */
@@ -219,7 +220,7 @@ export function buildPostReplyRoutes(
     const url = new URL(req.url ?? '/', 'http://local');
     if (!url.pathname.startsWith(POST_BY_ID_PREFIX)) return badRequest(res, 'path');
     const id = url.pathname.slice(POST_BY_ID_PREFIX.length);
-    if (!HEX_BYTES32_RE.test(id)) return badRequest(res, 'messageId');
+    if (!HEX_BYTES32_RE.test(id)) return badRequest(res, 'id');
 
     const resolved = await resolveVersionId(db, url.searchParams.get('version'));
     if (resolved.kind === 'invalid') return badRequest(res, 'version');
@@ -233,6 +234,39 @@ export function buildPostReplyRoutes(
          FROM ${s}.posts
         WHERE version_id = $1 AND message_id = $2`,
       [versionId, id.toLowerCase()],
+    );
+    if (result.rowCount === 0) return notFound(res);
+    jsonResponse(res, 200, { version_id: versionId, post: mapRow(result.rows[0]) });
+  };
+
+  /**
+   * GET <routePrefix>/posts/hash/:hash — single post lookup by
+   * `message_hash`. Replies bind to their parent via `parent_message_hash`
+   * which is the parent's `message_hash`, so this is the right axis
+   * for building a thread view.
+   */
+  const postByHashHandler = async (
+    req: IncomingMessage,
+    res: ServerResponse,
+    db: PoolClient,
+  ): Promise<void> => {
+    const url = new URL(req.url ?? '/', 'http://local');
+    if (!url.pathname.startsWith(POST_BY_HASH_PREFIX)) return badRequest(res, 'path');
+    const hash = url.pathname.slice(POST_BY_HASH_PREFIX.length);
+    if (!HEX_BYTES32_RE.test(hash)) return badRequest(res, 'hash');
+
+    const resolved = await resolveVersionId(db, url.searchParams.get('version'));
+    if (resolved.kind === 'invalid') return badRequest(res, 'version');
+    if (resolved.kind === 'missing-current') return notFound(res);
+    const versionId = resolved.versionId;
+
+    const result = await db.query<PostRow>(
+      `SELECT message_id, message_hash, sender, nonce, kind, timestamp, content,
+              parent_message_hash, batch_ref, block_number, tx_index,
+              message_index_within_batch
+         FROM ${s}.posts
+        WHERE version_id = $1 AND message_hash = $2`,
+      [versionId, hash.toLowerCase()],
     );
     if (result.rowCount === 0) return notFound(res);
     jsonResponse(res, 200, { version_id: versionId, post: mapRow(result.rows[0]) });
@@ -346,7 +380,8 @@ export function buildPostReplyRoutes(
 
   return [
     { method: 'GET', path: `${routePrefix}/posts`, handler: postsHandler },
-    { method: 'GET', path: `${routePrefix}/posts/:messageId`, handler: postByIdHandler },
+    { method: 'GET', path: `${routePrefix}/posts/id/:id`, handler: postByIdHandler },
+    { method: 'GET', path: `${routePrefix}/posts/hash/:hash`, handler: postByHashHandler },
     { method: 'GET', path: `${routePrefix}/replies`, handler: repliesHandler },
     { method: 'GET', path: `${routePrefix}/profile/:sender`, handler: profileHandler },
     { method: 'GET', path: `${routePrefix}/versions`, handler: versionsHandler },
