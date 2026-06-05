@@ -5,9 +5,10 @@
 CREATE SCHEMA IF NOT EXISTS coprocessor;
 
 -- Per-message validation rows. Filled by Job V (--execute, no proof).
+-- PK is composite to support a shared Postgres across chains.
 CREATE TABLE IF NOT EXISTS coprocessor.validations (
-  message_hash      BYTEA PRIMARY KEY,
   chain_id          BIGINT NOT NULL,
+  message_hash      BYTEA NOT NULL,
   versioned_hash    BYTEA NOT NULL,
   content_tag       BYTEA NOT NULL,
   start_fe          INTEGER NOT NULL,
@@ -18,7 +19,8 @@ CREATE TABLE IF NOT EXISTS coprocessor.validations (
   sender            BYTEA NOT NULL,
   nonce             BIGINT NOT NULL,
   cycles            BIGINT NOT NULL,
-  validated_at      TIMESTAMPTZ NOT NULL
+  validated_at      TIMESTAMPTZ NOT NULL,
+  PRIMARY KEY (chain_id, message_hash)
 );
 CREATE INDEX IF NOT EXISTS validations_by_chain_coord
   ON coprocessor.validations(chain_id, block_number, tx_index, msg_index);
@@ -26,9 +28,10 @@ CREATE INDEX IF NOT EXISTS validations_by_validated_at
   ON coprocessor.validations(validated_at DESC, message_hash DESC);
 
 -- Per-message Groth16 proofs.
+-- PK is composite to support a shared Postgres across chains.
 CREATE TABLE IF NOT EXISTS coprocessor.proofs (
-  message_hash      BYTEA PRIMARY KEY,
   chain_id          BIGINT NOT NULL,
+  message_hash      BYTEA NOT NULL,
   versioned_hash    BYTEA NOT NULL,
   content_tag       BYTEA NOT NULL,
   start_fe          INTEGER NOT NULL,
@@ -46,7 +49,8 @@ CREATE TABLE IF NOT EXISTS coprocessor.proofs (
   tx_hash           BYTEA,
   proof_type        TEXT NOT NULL DEFAULT 'groth16',
   sp1_version       TEXT NOT NULL,
-  proven_at         TIMESTAMPTZ NOT NULL
+  proven_at         TIMESTAMPTZ NOT NULL,
+  PRIMARY KEY (chain_id, message_hash)
 );
 CREATE INDEX IF NOT EXISTS proofs_by_chain_coord
   ON coprocessor.proofs(chain_id, block_number, tx_index, msg_index);
@@ -67,14 +71,16 @@ CREATE TABLE IF NOT EXISTS coprocessor.watermarks (
 );
 
 -- Crash-recovery hook for in-flight Groth16 requests.
+-- PK is composite to support a shared Postgres across chains.
 CREATE TABLE IF NOT EXISTS coprocessor.proof_in_flight (
-  request_id     BYTEA PRIMARY KEY,
-  message_hash   BYTEA NOT NULL,
   chain_id       BIGINT NOT NULL,
+  request_id     BYTEA NOT NULL,
+  message_hash   BYTEA NOT NULL,
   block_number   BIGINT NOT NULL,
   tx_index       INTEGER NOT NULL,
   msg_index      INTEGER NOT NULL,
-  started_at     TIMESTAMPTZ NOT NULL
+  started_at     TIMESTAMPTZ NOT NULL,
+  PRIMARY KEY (chain_id, request_id)
 );
 
 -- VK material captured on first proof; served from /proof/vk.

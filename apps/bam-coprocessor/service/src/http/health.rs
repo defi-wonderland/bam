@@ -69,7 +69,7 @@ pub async fn handler(
     let last_p = queries::last_proof(pool, chain_id)
         .await
         .map_err(|e| db_unhealthy("last_proof", e))?;
-    let in_flight = queries::in_flight_count(pool)
+    let in_flight = queries::in_flight_count(pool, chain_id)
         .await
         .map_err(|e| db_unhealthy("in_flight_count", e))?;
 

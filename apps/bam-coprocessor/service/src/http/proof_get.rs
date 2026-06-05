@@ -48,7 +48,7 @@ pub async fn by_message_hash(
     Path(message_hash): Path<String>,
 ) -> Result<Json<MessageProofBundle>, (StatusCode, Json<Value>)> {
     let mh = normalise_hash(&message_hash).ok_or_else(|| bad_request("messageHash"))?;
-    let row = queries::get_proof_by_hash(&state.pg, &mh)
+    let row = queries::get_proof_by_hash(&state.pg, state.config.chain_id as i64, &mh)
         .await
         .map_err(|e| {
             tracing::error!(error = %e, "get_proof_by_hash failed");
@@ -65,7 +65,7 @@ pub async fn by_versioned_hash(
     Path(versioned_hash): Path<String>,
 ) -> Result<Json<ByBlobResponse>, (StatusCode, Json<Value>)> {
     let vh = normalise_hash(&versioned_hash).ok_or_else(|| bad_request("versionedHash"))?;
-    let rows = queries::get_proofs_by_versioned_hash(&state.pg, &vh)
+    let rows = queries::get_proofs_by_versioned_hash(&state.pg, state.config.chain_id as i64, &vh)
         .await
         .map_err(|e| {
             tracing::error!(error = %e, "get_proofs_by_versioned_hash failed");

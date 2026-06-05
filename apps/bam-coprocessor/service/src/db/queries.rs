@@ -176,7 +176,7 @@ pub async fn insert_validation(
             start_fe, end_fe, block_number, tx_index, msg_index,
             sender, nonce, cycles, validated_at)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12, now())
-         ON CONFLICT (message_hash) DO NOTHING",
+         ON CONFLICT (chain_id, message_hash) DO NOTHING",
     )
     .bind(message_hash)
     .bind(chain_id)
@@ -275,7 +275,7 @@ pub async fn insert_proof(
             request_id, tx_hash, proof_type, sp1_version, proven_at)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
                  $11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
-         ON CONFLICT (message_hash) DO NOTHING",
+         ON CONFLICT (chain_id, message_hash) DO NOTHING",
     )
     .bind(&row.message_hash)
     .bind(row.chain_id)
@@ -382,6 +382,7 @@ pub async fn list_proofs_page(
 
 pub async fn get_proof_by_hash(
     pool: &PgPool,
+    chain_id: i64,
     message_hash: &[u8],
 ) -> anyhow::Result<Option<ProofFullRow>> {
     let row = sqlx::query_as::<_, ProofFullRow>(
@@ -390,8 +391,9 @@ pub async fn get_proof_by_hash(
                 sender, nonce, cycles, proof_size, proof_bytes, public_values,
                 request_id, tx_hash, proof_type, sp1_version, proven_at
            FROM coprocessor.proofs
-          WHERE message_hash = $1",
+          WHERE chain_id = $1 AND message_hash = $2",
     )
+    .bind(chain_id)
     .bind(message_hash)
     .fetch_optional(pool)
     .await?;
@@ -400,6 +402,7 @@ pub async fn get_proof_by_hash(
 
 pub async fn get_proofs_by_versioned_hash(
     pool: &PgPool,
+    chain_id: i64,
     versioned_hash: &[u8],
 ) -> anyhow::Result<Vec<ProofSummaryRow>> {
     let rows = sqlx::query_as::<_, ProofSummaryRow>(
@@ -408,9 +411,10 @@ pub async fn get_proofs_by_versioned_hash(
                 sender, nonce, cycles, proof_size,
                 request_id, tx_hash, proof_type, sp1_version, proven_at
            FROM coprocessor.proofs
-          WHERE versioned_hash = $1
+          WHERE chain_id = $1 AND versioned_hash = $2
           ORDER BY msg_index ASC",
     )
+    .bind(chain_id)
     .bind(versioned_hash)
     .fetch_all(pool)
     .await?;
@@ -433,7 +437,7 @@ pub async fn insert_in_flight(
         "INSERT INTO coprocessor.proof_in_flight
            (request_id, message_hash, chain_id, block_number, tx_index, msg_index, started_at)
          VALUES ($1,$2,$3,$4,$5,$6, now())
-         ON CONFLICT (request_id) DO NOTHING",
+         ON CONFLICT (chain_id, request_id) DO NOTHING",
     )
     .bind(request_id)
     .bind(message_hash)
@@ -470,10 +474,13 @@ pub async fn list_in_flight(pool: &PgPool) -> anyhow::Result<Vec<InFlightRow>> {
     Ok(rows)
 }
 
-pub async fn in_flight_count(pool: &PgPool) -> anyhow::Result<i64> {
-    let row = sqlx::query("SELECT COUNT(*)::bigint FROM coprocessor.proof_in_flight")
-        .fetch_one(pool)
-        .await?;
+pub async fn in_flight_count(pool: &PgPool, chain_id: i64) -> anyhow::Result<i64> {
+    let row = sqlx::query(
+        "SELECT COUNT(*)::bigint FROM coprocessor.proof_in_flight WHERE chain_id = $1",
+    )
+    .bind(chain_id)
+    .fetch_one(pool)
+    .await?;
     Ok(row.try_get::<i64, _>(0)?)
 }
 
