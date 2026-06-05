@@ -3,6 +3,9 @@ name = "bam-coprocessor-service"
 version = "0.1.0"
 edition = "2021"
 
+[lints.rust]
+unsafe_code = "forbid"
+
 [[bin]]
 name = "bam-coprocessor-service"
 path = "src/main.rs"

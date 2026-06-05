@@ -3,6 +3,9 @@ name = "bam-coprocessor-lib"
 version = "0.1.0"
 edition = "2021"
 
+[lints.rust]
+unsafe_code = "forbid"
+
 [dependencies]
 serde      = { workspace = true }
 sha2       = { workspace = true }
