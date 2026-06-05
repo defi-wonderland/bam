@@ -97,11 +97,14 @@ cargo run --release --bin prove-reader -- \
   --msg-index 0
 
 # From a live bam-reader instance (fetches blob via /blobs/:versionedHash,
-# falls back to beacon chain if that returns non-200)
+# falls back to beacon chain if that returns non-200).
+# A batch selector is required — pass either --tx-hash, or
+# --block-number + --tx-index.
 cargo run --release --bin prove-from-reader -- \
   --execute --chain-id 11155111 \
   --reader-url https://bam-reader.fly.dev \
   --content-tag 0xf0fea94ffd2ae32ed878c57e3427bbffab46d333d09837bc640d952795090718 \
+  --tx-hash 0x<batch-tx-hash> \
   --msg-index 0
 ```
 
@@ -130,9 +133,9 @@ cargo run --release --bin show-proof -- c1_proof_groth16.bin
 # Cryptographic verification (runs BN254 pairing check — same as browser verifier)
 cargo run --release --bin show-proof -- c1_proof_groth16.bin --verify-groth16
 
-# Dump a browser-ready JSON artifact
+# Dump a browser-ready JSON artifact (printed to stdout — redirect to capture)
 # Outputs: { proof (hex), public_inputs (hex), vk_hash (bytes32) }
-cargo run --release --bin show-proof -- c1_proof_groth16.bin --dump-components --output proof.json
+cargo run --release --bin show-proof -- c1_proof_groth16.bin --dump-components > proof.json
 ```
 
 The `--dump-components` JSON is what the demo frontend consumes. `vk_hash` is auto-derived from `public_inputs[0]` (gnark encoding → bytes32) — no manual copy-paste needed.
