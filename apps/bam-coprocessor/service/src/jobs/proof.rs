@@ -241,6 +241,23 @@ async fn prove_one(state: &Arc<AppState>, c: &Candidate) -> anyhow::Result<bool>
         proven_at: Utc::now(),
     };
 
+    // Derive the vk_hash before opening the tx so we never start a write
+    // we can't finish. `vk_hash_from_groth16` is pure-data; failure means
+    // the proof bytes are malformed (would have failed verification too).
+    let vk_cache_pair: Option<(String, String)> = match &proof.proof {
+        SP1Proof::Groth16(g16) => match g16.public_inputs.first() {
+            Some(first) => match vk_hash_from_groth16(first) {
+                Ok(vk_hash) => Some((vk_hash, row.sp1_version.clone())),
+                Err(e) => {
+                    tracing::warn!(error = %e, "vk_hash_from_groth16 failed; skipping vk_cache write");
+                    None
+                }
+            },
+            None => None,
+        },
+        _ => None,
+    };
+
     let mut tx = state.pg.begin().await?;
     queries::insert_proof(&mut tx, &row).await?;
     let new_wm = Watermark {
@@ -249,32 +266,14 @@ async fn prove_one(state: &Arc<AppState>, c: &Candidate) -> anyhow::Result<bool>
         msg_index: pv.msg_index as i32,
     };
     queries::upsert_watermark(&mut tx, "proof", state.config.chain_id as i64, &new_wm).await?;
-    tx.commit().await?;
-
-    // VK cache: write on first success so `/proof/vk` can serve the
-    // bytes a snarkjs/SP1-WASM verifier needs. Stable per SP1 release —
-    // subsequent proofs re-upsert the same value. Failures here are
-    // non-fatal: the proof row is already durable, and the next tick
-    // will retry.
-    if let SP1Proof::Groth16(g16) = &proof.proof {
-        if let Some(first) = g16.public_inputs.first() {
-            match vk_hash_from_groth16(first) {
-                Ok(vk_hash) => {
-                    if let Err(e) = queries::upsert_vk(
-                        &state.pg,
-                        &vk_hash,
-                        GROTH16_VK_BYTES.as_ref(),
-                        &row.sp1_version,
-                    )
-                    .await
-                    {
-                        tracing::warn!(error = %e, "vk_cache upsert failed");
-                    }
-                }
-                Err(e) => tracing::warn!(error = %e, "vk_hash_from_groth16 failed"),
-            }
-        }
+    // vk_cache write happens inside the same tx so `/proof/vk` is durably
+    // populated alongside every successful proof. If the write fails the
+    // tx rolls back; the next tick retries the whole prove-and-persist
+    // sequence (Succinct cost) but vk_cache stays consistent with proofs.
+    if let Some((vk_hash, sp1_version)) = vk_cache_pair {
+        queries::upsert_vk(&mut tx, &vk_hash, GROTH16_VK_BYTES.as_ref(), &sp1_version).await?;
     }
+    tx.commit().await?;
 
     tracing::info!(
         message_hash = %pv.message_hash,

@@ -498,7 +498,7 @@ pub async fn get_vk(pool: &PgPool) -> anyhow::Result<Option<VkCacheRow>> {
 }
 
 pub async fn upsert_vk(
-    pool: &PgPool,
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     vk_hash: &str,
     groth16_vk: &[u8],
     sp1_version: &str,
@@ -515,7 +515,7 @@ pub async fn upsert_vk(
     .bind(vk_hash)
     .bind(groth16_vk)
     .bind(sp1_version)
-    .execute(pool)
+    .execute(&mut **tx)
     .await?;
     Ok(())
 }
