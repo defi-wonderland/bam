@@ -2,7 +2,10 @@
 //! cursor encoding for keyset pagination, JSON error responses.
 
 use axum::{http::StatusCode, Json};
-use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
+use base64::{
+    engine::general_purpose::{STANDARD as BASE64, URL_SAFE_NO_PAD as BASE64_URL},
+    Engine,
+};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -22,15 +25,17 @@ pub struct Cursor {
 }
 
 pub fn encode_cursor(at: DateTime<Utc>, message_hash: &[u8]) -> String {
+    // URL-safe + no-pad — cursors are carried in query strings, where `+`
+    // is silently decoded as space.
     let c = Cursor {
         at,
         message_hash: hex_prefixed(message_hash),
     };
-    BASE64.encode(serde_json::to_vec(&c).unwrap())
+    BASE64_URL.encode(serde_json::to_vec(&c).unwrap())
 }
 
 pub fn decode_cursor(raw: &str) -> Option<(DateTime<Utc>, Vec<u8>)> {
-    let bytes = BASE64.decode(raw).ok()?;
+    let bytes = BASE64_URL.decode(raw).ok()?;
     let c: Cursor = serde_json::from_slice(&bytes).ok()?;
     let hash = c.message_hash.strip_prefix("0x").unwrap_or(&c.message_hash);
     let hash = hex::decode(hash).ok()?;
