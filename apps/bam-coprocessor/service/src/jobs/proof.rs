@@ -12,6 +12,7 @@
 
 use std::sync::Arc;
 
+use anyhow::Context;
 use bam_coprocessor_script::{
     blob_fetch::decode_hex32,
     parse_message_public_values, vk_hash_from_groth16,
@@ -194,8 +195,8 @@ async fn prove_one(state: &Arc<AppState>, c: &Candidate) -> anyhow::Result<bool>
         tx_index: pv.tx_index as i32,
         msg_index: pv.msg_index as i32,
         sender: sender_bytes,
-        nonce: pv.nonce as i64,
-        cycles: cycles as i64,
+        nonce: i64::try_from(pv.nonce).context("nonce overflows i64")?,
+        cycles: i64::try_from(cycles).context("cycles overflow i64")?,
         proof_size: proof_bytes.len() as i32,
         proof_bytes: proof_bytes.clone(),
         public_values: pv_bytes,

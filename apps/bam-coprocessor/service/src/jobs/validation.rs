@@ -8,6 +8,7 @@
 
 use std::sync::Arc;
 
+use anyhow::Context;
 use bam_coprocessor_script::{
     blob_fetch::decode_hex32,
     parse_message_public_values,
@@ -205,8 +206,8 @@ async fn validate_one(
         pv.tx_index as i32,
         pv.msg_index as i32,
         &sender_bytes,
-        pv.nonce as i64,
-        exec_output.total_cycles as i64,
+        i64::try_from(pv.nonce).context("nonce overflows i64")?,
+        i64::try_from(exec_output.total_cycles).context("cycles overflow i64")?,
     )
     .await?;
     let new_wm = Watermark {
