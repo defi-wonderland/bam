@@ -1,7 +1,7 @@
 /**
  * Decoder for bam-twitter's app-specific message contents.
  *
- * Layout inside contents[32:] (appBytes):
+ * Wire layout (same as bam-sdk/post-reply — no 32-byte contentTag prefix):
  *   byte  0       version (0x01)
  *   byte  1       kind    (0x00 = post, 0x01 = reply)
  *
@@ -18,8 +18,8 @@
  */
 
 import { TextDecoder } from 'node:util';
-import { splitContents } from 'bam-sdk';
 import type { Bytes32 } from 'bam-sdk';
+import { TWITTER_TAG } from './constants.js';
 
 const ENVELOPE_VERSION = 0x01;
 const KIND_POST = 0x00;
@@ -35,30 +35,28 @@ export function decodeTwitterContents(contents: Uint8Array): {
   contentTag: Bytes32;
   app: TwitterMessage;
 } {
-  const { contentTag, appBytes } = splitContents(contents);
-
-  if (appBytes.length < 2) throw new RangeError('twitter contents too short for envelope header');
-  const version = appBytes[0];
-  const kind = appBytes[1];
+  if (contents.length < 2) throw new RangeError('twitter contents too short for envelope header');
+  const version = contents[0];
+  const kind = contents[1];
   if (version !== ENVELOPE_VERSION) throw new RangeError(`unsupported envelope version: ${version}`);
 
   if (kind === KIND_POST) {
-    if (appBytes.length < 14) throw new RangeError('post payload too short');
-    const timestamp = Number(readU64BE(appBytes, 2));
-    const contentLen = readU32BE(appBytes, 10);
-    if (14 + contentLen > appBytes.length) throw new RangeError('post: content overruns buffer');
-    const content = textDecoder.decode(appBytes.slice(14, 14 + contentLen));
-    return { contentTag, app: { kind: 'post', timestamp, content } };
+    if (contents.length < 14) throw new RangeError('post payload too short');
+    const timestamp = Number(readU64BE(contents, 2));
+    const contentLen = readU32BE(contents, 10);
+    if (14 + contentLen > contents.length) throw new RangeError('post: content overruns buffer');
+    const content = textDecoder.decode(contents.slice(14, 14 + contentLen));
+    return { contentTag: TWITTER_TAG, app: { kind: 'post', timestamp, content } };
   }
 
   if (kind === KIND_REPLY) {
-    if (appBytes.length < 46) throw new RangeError('reply payload too short');
-    const timestamp = Number(readU64BE(appBytes, 2));
-    const parentMessageHash = bytesToHex(appBytes.slice(10, 42)) as Bytes32;
-    const contentLen = readU32BE(appBytes, 42);
-    if (46 + contentLen > appBytes.length) throw new RangeError('reply: content overruns buffer');
-    const content = textDecoder.decode(appBytes.slice(46, 46 + contentLen));
-    return { contentTag, app: { kind: 'reply', timestamp, parentMessageHash, content } };
+    if (contents.length < 46) throw new RangeError('reply payload too short');
+    const timestamp = Number(readU64BE(contents, 2));
+    const parentMessageHash = bytesToHex(contents.slice(10, 42)) as Bytes32;
+    const contentLen = readU32BE(contents, 42);
+    if (46 + contentLen > contents.length) throw new RangeError('reply: content overruns buffer');
+    const content = textDecoder.decode(contents.slice(46, 46 + contentLen));
+    return { contentTag: TWITTER_TAG, app: { kind: 'reply', timestamp, parentMessageHash, content } };
   }
 
   throw new RangeError(`unknown twitter kind: ${kind}`);
