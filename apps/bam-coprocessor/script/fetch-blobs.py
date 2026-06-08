@@ -62,14 +62,21 @@ def estimate_slot(exec_block: int) -> int:
     return round(REF_SLOT_A + slope * (exec_block - REF_EXEC_A))
 
 
-def _block_at_slot_or_skip(slot: int) -> int:
-    """Walk forward from `slot` until we find a non-missed slot, then return its exec block."""
-    cursor = slot
-    while True:
+def _block_at_or_after(slot: int, max_steps: int = 64):
+    """Return `(block_number, landed_slot)` for the first non-missed slot at or
+    after `slot`, or `None` if `max_steps` slots in a row are all missed.
+
+    The bounded walk prevents an unbounded loop at the chain head and lets
+    callers know the actual slot that satisfied the query (so a bracket
+    built off this helper reflects reality even when many slots are missed
+    in a row).
+    """
+    for offset in range(max_steps):
+        cursor = slot + offset
         bn = get_exec_block_at_slot(cursor)
         if bn is not None:
-            return bn
-        cursor += 1
+            return (bn, cursor)
+    return None
 
 
 def find_slot_for_exec_block(exec_block: int) -> int:
@@ -77,30 +84,40 @@ def find_slot_for_exec_block(exec_block: int) -> int:
     approx = estimate_slot(exec_block)
 
     # Phase 1 — bracket: expand symmetric windows until lo and hi straddle the target.
+    # Use the actual landed slots returned by the skip helper so the bracket
+    # really contains the target, even if many adjacent slots are missed.
+    lo = hi = None
     for radius in BRACKET_WINDOWS:
-        lo = approx - radius
-        hi = approx + radius
-        lo_block = _block_at_slot_or_skip(lo)
-        hi_block = _block_at_slot_or_skip(hi)
+        lo_pair = _block_at_or_after(approx - radius)
+        hi_pair = _block_at_or_after(approx + radius)
+        if lo_pair is None or hi_pair is None:
+            continue
+        lo_block, lo_slot = lo_pair
+        hi_block, hi_slot = hi_pair
         if lo_block <= exec_block <= hi_block:
+            lo, hi = lo_slot, hi_slot
             break
-    else:
+    if lo is None or hi is None:
         raise RuntimeError(
             f"could not bracket exec block {exec_block} within ±{BRACKET_WINDOWS[-1]} slots of {approx}"
         )
 
-    # Phase 2 — binary search inside [lo, hi].
+    # Phase 2 — binary search inside [lo, hi]. When mid lands on a missed
+    # slot, walk forward to the next non-missed slot inside the remaining
+    # window and compare from there. If the entire remaining window is
+    # missed, the target must live below `mid`.
     while lo <= hi:
         mid = (lo + hi) // 2
-        bn = get_exec_block_at_slot(mid)
-        if bn is None:
-            # Missed slot — bias toward the higher half.
-            lo = mid + 1
+        remaining = hi - mid + 1
+        pair = _block_at_or_after(mid, max_steps=remaining)
+        if pair is None:
+            hi = mid - 1
             continue
+        bn, mid_slot = pair
         if bn == exec_block:
-            return mid
+            return mid_slot
         if bn < exec_block:
-            lo = mid + 1
+            lo = mid_slot + 1
         else:
             hi = mid - 1
     raise RuntimeError(f"binary search did not find slot for exec block {exec_block}")

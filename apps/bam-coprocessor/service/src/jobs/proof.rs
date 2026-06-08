@@ -94,39 +94,35 @@ async fn fetch_unproven_messages(
         let api = client
             .list_messages(&forum_tag, Some("confirmed"), None, 1000)
             .map_err(anyhow::Error::msg)?;
-        let mut rows: Vec<Candidate> = api
-            .into_iter()
-            .filter_map(|m| {
-                let block = m.block_number? as i64;
-                let tx = m.tx_index? as i32;
-                let msg = m.message_index_within_batch? as i32;
-                let batch_ref = m.batch_ref?;
-                let mh = match decode_hex32_checked(&m.message_hash) {
-                    Ok(h) => h,
-                    Err(e) => {
-                        tracing::warn!(
-                            error = %e,
-                            block,
-                            tx,
-                            msg,
-                            "skipping reader row with malformed message_hash"
-                        );
-                        return None;
-                    }
-                };
-                Some(Candidate {
-                    block_number: block,
-                    tx_index: tx,
-                    msg_index: msg,
-                    batch_ref,
-                    expected_message_hash: mh,
-                })
-            })
-            .filter(|c| {
-                (c.block_number, c.tx_index, c.msg_index)
-                    > (watermark.block_number, watermark.tx_index, watermark.msg_index)
-            })
-            .collect();
+        // Manual loop instead of filter_map so a malformed message_hash
+        // BAILS the tick (preserving pre-Result-ification semantics) rather
+        // than silently dropping the row — which would let the watermark
+        // advance past it on the next valid candidate and create a
+        // permanent proof gap. Missing Option coords stay a `continue`
+        // (legitimate for not-yet-confirmed reader rows).
+        let mut rows: Vec<Candidate> = Vec::new();
+        for m in api {
+            let block = match m.block_number { Some(b) => b as i64, None => continue };
+            let tx = match m.tx_index { Some(t) => t as i32, None => continue };
+            let msg = match m.message_index_within_batch { Some(i) => i as i32, None => continue };
+            let batch_ref = match m.batch_ref { Some(r) => r, None => continue };
+            let mh = decode_hex32_checked(&m.message_hash).with_context(|| {
+                format!(
+                    "reader emitted malformed message_hash at block={block} tx={tx} msg={msg}"
+                )
+            })?;
+            rows.push(Candidate {
+                block_number: block,
+                tx_index: tx,
+                msg_index: msg,
+                batch_ref,
+                expected_message_hash: mh,
+            });
+        }
+        rows.retain(|c| {
+            (c.block_number, c.tx_index, c.msg_index)
+                > (watermark.block_number, watermark.tx_index, watermark.msg_index)
+        });
         rows.sort_by(|a, b| {
             (a.block_number, a.tx_index, a.msg_index).cmp(&(
                 b.block_number,

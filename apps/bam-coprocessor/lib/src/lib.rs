@@ -207,6 +207,7 @@ pub fn verify_ecdsa(
 
 /// Bounds-check failures while extracting bytes from a blob segment.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum SegmentError {
     /// `end_fe` is not strictly after `start_fe`.
     EmptyOrInvertedRange { start_fe: u16, end_fe: u16 },
@@ -361,6 +362,7 @@ pub fn decode_bam_payload(
 
 /// Failure modes for [`decode_bam_payload`].
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum DecodeError {
     /// Wire data is shorter than the 10-byte header.
     TooShort,

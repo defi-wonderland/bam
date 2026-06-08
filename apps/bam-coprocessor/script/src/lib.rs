@@ -32,17 +32,21 @@ pub fn parse_message_public_values(raw: &[u8]) -> anyhow::Result<MessagePublicVa
     if raw.len() != 152 {
         anyhow::bail!("expected 152-byte public output, got {}", raw.len());
     }
-    let chain_id     = u64::from_le_bytes(raw[0..8].try_into().unwrap());
-    let vh: [u8; 32] = raw[8..40].try_into().unwrap();
-    let ct: [u8; 32] = raw[40..72].try_into().unwrap();
-    let start_fe     = u16::from_le_bytes(raw[72..74].try_into().unwrap());
-    let end_fe       = u16::from_le_bytes(raw[74..76].try_into().unwrap());
-    let block_number = u64::from_le_bytes(raw[76..84].try_into().unwrap());
-    let tx_index     = u32::from_le_bytes(raw[84..88].try_into().unwrap());
-    let msg_index    = u32::from_le_bytes(raw[88..92].try_into().unwrap());
-    let sender: [u8; 20] = raw[92..112].try_into().unwrap();
-    let nonce        = u64::from_le_bytes(raw[112..120].try_into().unwrap());
-    let mh: [u8; 32] = raw[120..152].try_into().unwrap();
+    // Below `try_into` calls operate on fixed-width slices over a length-152
+    // buffer — unreachable in practice, but bubble a typed error instead of
+    // panicking if the invariant is ever broken.
+    let bad_len = || anyhow::anyhow!("slice cast failed inside 152-byte parse");
+    let chain_id     = u64::from_le_bytes(raw[0..8].try_into().map_err(|_| bad_len())?);
+    let vh: [u8; 32] = raw[8..40].try_into().map_err(|_| bad_len())?;
+    let ct: [u8; 32] = raw[40..72].try_into().map_err(|_| bad_len())?;
+    let start_fe     = u16::from_le_bytes(raw[72..74].try_into().map_err(|_| bad_len())?);
+    let end_fe       = u16::from_le_bytes(raw[74..76].try_into().map_err(|_| bad_len())?);
+    let block_number = u64::from_le_bytes(raw[76..84].try_into().map_err(|_| bad_len())?);
+    let tx_index     = u32::from_le_bytes(raw[84..88].try_into().map_err(|_| bad_len())?);
+    let msg_index    = u32::from_le_bytes(raw[88..92].try_into().map_err(|_| bad_len())?);
+    let sender: [u8; 20] = raw[92..112].try_into().map_err(|_| bad_len())?;
+    let nonce        = u64::from_le_bytes(raw[112..120].try_into().map_err(|_| bad_len())?);
+    let mh: [u8; 32] = raw[120..152].try_into().map_err(|_| bad_len())?;
 
     Ok(MessagePublicValues {
         chain_id,
