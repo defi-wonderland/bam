@@ -113,12 +113,19 @@ async fn fetch_unvalidated_messages(
         // Manual loop instead of filter_map: a malformed message_hash bails
         // the tick so the watermark never walks past the dropped row.
         // Missing Option coords stay a `continue` — those are legitimate
-        // for not-yet-confirmed reader rows.
+        // for not-yet-confirmed reader rows. The watermark filter runs
+        // INSIDE the loop BEFORE hash decoding, so a malformed historical
+        // row already past the watermark stays a silent skip instead of
+        // aborting every future tick.
+        let wm_coord = (watermark.block_number, watermark.tx_index, watermark.msg_index);
         let mut rows: Vec<Candidate> = Vec::new();
         for m in api {
             let block = match m.block_number { Some(b) => b as i64, None => continue };
             let tx = match m.tx_index { Some(t) => t as i32, None => continue };
             let msg = match m.message_index_within_batch { Some(i) => i as i32, None => continue };
+            if (block, tx, msg) <= wm_coord {
+                continue;
+            }
             let batch_ref = match m.batch_ref { Some(r) => r, None => continue };
             let mh = decode_hex32_checked(&m.message_hash).with_context(|| {
                 format!(
@@ -133,10 +140,6 @@ async fn fetch_unvalidated_messages(
                 expected_message_hash: mh,
             });
         }
-        rows.retain(|c| {
-            (c.block_number, c.tx_index, c.msg_index)
-                > (watermark.block_number, watermark.tx_index, watermark.msg_index)
-        });
         rows.sort_by(|a, b| {
             (a.block_number, a.tx_index, a.msg_index).cmp(&(
                 b.block_number,

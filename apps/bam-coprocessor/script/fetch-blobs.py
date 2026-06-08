@@ -79,17 +79,37 @@ def _block_at_or_after(slot: int, max_steps: int = 64):
     return None
 
 
+def _block_at_or_before(slot: int, max_steps: int = 64):
+    """Return `(block_number, landed_slot)` for the latest non-missed slot at
+    or before `slot`, or `None` if no non-missed slot is found within
+    `max_steps` slots walking backwards.
+
+    Used for the upper bracket when `slot` may be past the current chain
+    head — walking forward from a future slot returns no data, but walking
+    backward lands on the head itself.
+    """
+    for offset in range(max_steps):
+        cursor = slot - offset
+        if cursor < 0:
+            return None
+        bn = get_exec_block_at_slot(cursor)
+        if bn is not None:
+            return (bn, cursor)
+    return None
+
+
 def find_slot_for_exec_block(exec_block: int) -> int:
     """Bracket + binary search for the beacon slot containing `exec_block`."""
     approx = estimate_slot(exec_block)
 
     # Phase 1 — bracket: expand symmetric windows until lo and hi straddle the target.
-    # Use the actual landed slots returned by the skip helper so the bracket
-    # really contains the target, even if many adjacent slots are missed.
+    # `lo` walks forward (handles missed-slot runs above the lower bound);
+    # `hi` walks backward (handles the chain-head case where `approx +
+    # radius` is in the future and therefore unindexed).
     lo = hi = None
     for radius in BRACKET_WINDOWS:
         lo_pair = _block_at_or_after(approx - radius)
-        hi_pair = _block_at_or_after(approx + radius)
+        hi_pair = _block_at_or_before(approx + radius)
         if lo_pair is None or hi_pair is None:
             continue
         lo_block, lo_slot = lo_pair

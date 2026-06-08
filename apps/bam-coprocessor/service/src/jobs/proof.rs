@@ -99,12 +99,19 @@ async fn fetch_unproven_messages(
         // than silently dropping the row — which would let the watermark
         // advance past it on the next valid candidate and create a
         // permanent proof gap. Missing Option coords stay a `continue`
-        // (legitimate for not-yet-confirmed reader rows).
+        // (legitimate for not-yet-confirmed reader rows). Crucially, the
+        // watermark filter runs INSIDE the loop BEFORE hash decoding, so a
+        // malformed historical row already past the watermark stays a
+        // silent skip instead of aborting every future tick.
+        let wm_coord = (watermark.block_number, watermark.tx_index, watermark.msg_index);
         let mut rows: Vec<Candidate> = Vec::new();
         for m in api {
             let block = match m.block_number { Some(b) => b as i64, None => continue };
             let tx = match m.tx_index { Some(t) => t as i32, None => continue };
             let msg = match m.message_index_within_batch { Some(i) => i as i32, None => continue };
+            if (block, tx, msg) <= wm_coord {
+                continue;
+            }
             let batch_ref = match m.batch_ref { Some(r) => r, None => continue };
             let mh = decode_hex32_checked(&m.message_hash).with_context(|| {
                 format!(
@@ -119,10 +126,6 @@ async fn fetch_unproven_messages(
                 expected_message_hash: mh,
             });
         }
-        rows.retain(|c| {
-            (c.block_number, c.tx_index, c.msg_index)
-                > (watermark.block_number, watermark.tx_index, watermark.msg_index)
-        });
         rows.sort_by(|a, b| {
             (a.block_number, a.tx_index, a.msg_index).cmp(&(
                 b.block_number,
