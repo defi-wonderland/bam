@@ -1,0 +1,47 @@
+# bam-coprocessor — drives Circuit 1 against confirmed bam-forum messages
+# on two cadences and serves /validation/latest + /proof endpoints.
+
+app = "bam-coprocessor"
+primary_region = "ams"
+
+[build]
+  dockerfile = "Dockerfile.coprocessor"
+
+[env]
+  COPROCESSOR_HTTP_BIND = "0.0.0.0"
+  COPROCESSOR_HTTP_PORT = "8790"
+  COPROCESSOR_READER_URL = "https://bam-reader.fly.dev"
+  COPROCESSOR_CHAIN_ID = "11155111"
+  COPROCESSOR_FORUM_TAG = "0x01bc15204a4c7779a37fd0d7988fe89a9cc4a148e7db926f4815f4c93ea879d1"
+  COPROCESSOR_VALIDATION_CRON = "0 */2 * * * *"
+  COPROCESSOR_PROOF_CRON = "0 0 * * * *"
+  COPROCESSOR_VALIDATION_BATCH_LIMIT = "50"
+  COPROCESSOR_PROOF_BATCH_LIMIT = "1"
+  SP1_PROVER = "network"
+  RUST_LOG = "info,bam_coprocessor_service=debug"
+
+[http_service]
+  internal_port = 8790
+  force_https = true
+  # The two cron jobs must keep ticking between HTTP reads. Fly's
+  # auto_stop watches incoming proxy traffic only, not internal CPU —
+  # same posture as poster/reader/indexer.
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["app"]
+
+  [[http_service.checks]]
+    interval = "15s"
+    timeout = "5s"
+    # Longer than reader's 10s grace: first boot runs the idempotent
+    # DDL + sp1-sdk client setup (a few seconds), and the first cron
+    # tick may try to acquire a Postgres connection right as the check
+    # arrives.
+    grace_period = "30s"
+    method = "GET"
+    path = "/health"
+
+[[vm]]
+  size = "performance-2x"
+  memory = "4gb"

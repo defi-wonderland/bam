@@ -109,6 +109,7 @@ interface ParsedListQuery {
   limit?: number;
   batchRef?: Bytes32;
   sender?: Address;
+  sinceIncludedAtUnixSec?: bigint;
 }
 
 function parseLimit(raw: string): number | { error: string } {
@@ -120,10 +121,19 @@ function parseLimit(raw: string): number | { error: string } {
   return n;
 }
 
+function parseSince(raw: string): bigint | { error: string } {
+  if (!/^\d+$/.test(raw)) return { error: 'since' };
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n > Number.MAX_SAFE_INTEGER) {
+    return { error: 'since' };
+  }
+  return BigInt(raw);
+}
+
 function parseListQuery(
   url: URL,
   validStatuses: ReadonlySet<string>,
-  options?: { allowBatchRef?: boolean; allowSender?: boolean }
+  options?: { allowBatchRef?: boolean; allowSender?: boolean; allowSince?: boolean }
 ): ParsedListQuery | { error: string } {
   const contentTag = url.searchParams.get('contentTag');
   if (contentTag === null) return { error: 'contentTag' };
@@ -164,6 +174,16 @@ function parseListQuery(
     }
   }
 
+  if (options?.allowSince) {
+    const since = url.searchParams.get('since');
+    // Empty (`?since=`) is treated as absent, matching other optional params.
+    if (since !== null && since !== '') {
+      const parsed = parseSince(since);
+      if (typeof parsed !== 'bigint') return parsed;
+      out.sinceIncludedAtUnixSec = parsed;
+    }
+  }
+
   return out;
 }
 
@@ -198,7 +218,7 @@ export const messagesHandler: Handler = async (_req, res, ctx, extras) => {
 };
 
 export const batchesHandler: Handler = async (_req, res, ctx, extras) => {
-  const parsed = parseListQuery(extras.url, BATCH_STATUSES);
+  const parsed = parseListQuery(extras.url, BATCH_STATUSES, { allowSince: true });
   if ('error' in parsed) {
     badRequest(res, parsed.error);
     return;
@@ -207,6 +227,9 @@ export const batchesHandler: Handler = async (_req, res, ctx, extras) => {
     contentTag: parsed.contentTag,
     ...(parsed.status !== undefined && { status: parsed.status as BatchStatus }),
     ...(parsed.limit !== undefined && { limit: parsed.limit }),
+    ...(parsed.sinceIncludedAtUnixSec !== undefined && {
+      sinceIncludedAtUnixSec: parsed.sinceIncludedAtUnixSec,
+    }),
   };
   try {
     const batches = await ctx.reader.listBatches(query);

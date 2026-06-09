@@ -10,6 +10,22 @@ A separate reorg-watcher loop reconciles in-window confirmed batches
 against the canonical chain. Two operating modes: `serve` (live-tail
 daemon) and `backfill --from N --to M` (one-shot historical run).
 
+### HTTP read API
+
+```
+GET /batches?contentTag=<bytes32>[&status=<batchStatus>][&limit=<n>][&since=<unixSec>]
+```
+
+Query params:
+
+```
+?contentTag=<bytes32>  Required. Filters batches to a single tag.
+?status=<batchStatus>  Optional. One of `pending_tx`, `confirmed`, `reorged`.
+?limit=<n>             Optional. 1..1000 (default unbounded up to the store cap).
+?since=<unixSec>       Inclusive lower bound on l1IncludedAtUnixSec. Batches with a
+                       NULL inclusion time (pre-Reader-fill artifacts) are excluded.
+```
+
 ### Blob archive (optional)
 
 When `READER_BLOB_ARCHIVE_DIR` is set, the multi-source fetcher reads

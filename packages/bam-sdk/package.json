@@ -19,6 +19,10 @@
     "./post-reply": {
       "import": "./dist/esm/post-reply/index.js",
       "types": "./dist/types/post-reply/index.d.ts"
+    },
+    "./forum": {
+      "import": "./dist/esm/forum/index.js",
+      "types": "./dist/types/forum/index.d.ts"
     }
   },
   "files": [

@@ -740,6 +740,12 @@ function makeTxn(tx: DrizzleDb): StoreTxn {
         query.sinceBlock !== undefined
           ? and(isNotNull(batchesT.blockNumber), gte(batchesT.blockNumber, Number(query.sinceBlock)))
           : undefined,
+        query.sinceIncludedAtUnixSec !== undefined
+          ? and(
+              isNotNull(batchesT.l1IncludedAtUnixSec),
+              gte(batchesT.l1IncludedAtUnixSec, Number(query.sinceIncludedAtUnixSec))
+            )
+          : undefined,
       ];
       const where = and(...conds);
       let q = tx
