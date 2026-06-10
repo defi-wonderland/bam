@@ -40,12 +40,8 @@ export function ThreadCard({ post, replyCount, likeCount, onOpenProof }: ThreadC
           <AddressDisplay address={post.sender} ensName={post.senderEns} />
           <span>·</span>
           <span>{relativeTime(post.timestamp)}</span>
-          {likeCount > 0 && (
-            <>
-              <span>·</span>
-              <span>♥ {likeCount}</span>
-            </>
-          )}
+          <span>·</span>
+          <span>♥ {likeCount}</span>
         </div>
       </td>
       <td className="w-20 px-4 py-3 text-center">
