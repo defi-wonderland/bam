@@ -7,17 +7,11 @@ export function ProofPanel() {
   const { data } = useConfirmed();
   const counts = data?.proofCounts;
 
-  if (!counts) {
-    return (
-      <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-500">
-        ⛓ Coprocessor: loading…
-      </div>
-    );
-  }
+  if (!counts) return null;
 
   return (
-    <div className="flex items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
-      <span className="font-mono">⛓ Coprocessor</span>
+    <div className="mb-4 flex items-center gap-3 rounded-md border border-slate-200 bg-white px-3 py-2 text-xs text-slate-500">
+      <span className="font-medium text-slate-600">⛓ Coprocessor</span>
       <span>
         <span className="font-semibold text-teal-700">{counts.validated}</span> validated
       </span>

@@ -22,16 +22,15 @@ export default function ThreadPage() {
   const { address } = useAccount();
   const me = address?.toLowerCase() ?? null;
   const { data: confirmed, isLoading: confirmedLoading } = useConfirmed();
-  const { data: pending } = usePending(me ?? undefined);
+  const { data: pending, isLoading: pendingLoading } = usePending(me ?? undefined);
 
   const [proofHash, setProofHash] = useState<string | null>(null);
 
   const { thread, likesByTarget } = useMemo(() => {
     const rows: ForumMessage[] = [
-      ...((pending?.messages ?? []) as ForumMessage[]),
       ...((confirmed?.messages ?? []) as ForumMessage[]),
+      ...((pending?.messages ?? []) as ForumMessage[]),
     ];
-    // Dedup by messageHash — pending and confirmed overlap during handoff.
     const seen = new Set<string>();
     const deduped: ForumMessage[] = [];
     for (const m of rows) {
@@ -53,14 +52,18 @@ export default function ThreadPage() {
     return likesByTarget.get(hash.toLowerCase())?.has(me) ?? false;
   };
 
-  if (confirmedLoading && !thread) {
+  if ((confirmedLoading || (!!me && pendingLoading)) && !thread) {
     return (
-      <div className="mx-auto max-w-2xl px-4 py-8">
-        <header className="mb-6 flex items-baseline justify-between border-b border-slate-200 pb-4 dark:border-slate-700">
-          <span className="text-lg font-bold">BAM Forum</span>
-          <ConnectButton />
-        </header>
-        <p className="py-8 text-center text-sm text-slate-500">Loading thread…</p>
+      <div className="min-h-screen bg-slate-100">
+        <nav className="border-b border-slate-200 bg-white shadow-sm">
+          <div className="mx-auto flex max-w-4xl items-center justify-between px-4 py-3">
+            <span className="text-base font-bold text-slate-900">BAM Forum</span>
+            <ConnectButton />
+          </div>
+        </nav>
+        <div className="mx-auto max-w-4xl px-4 py-8 text-center text-sm text-slate-400">
+          Loading thread…
+        </div>
       </div>
     );
   }
@@ -70,48 +73,52 @@ export default function ThreadPage() {
   }
 
   return (
-    <div className="mx-auto max-w-2xl px-4 py-8">
-      <header className="mb-6 flex items-baseline justify-between border-b border-slate-200 pb-4 dark:border-slate-700">
-        <span className="text-lg font-bold">BAM Forum</span>
-        <ConnectButton />
-      </header>
+    <div className="min-h-screen bg-slate-100">
+      <nav className="border-b border-slate-200 bg-white shadow-sm">
+        <div className="mx-auto flex max-w-4xl items-center justify-between px-4 py-3">
+          <span className="text-base font-bold text-slate-900">BAM Forum</span>
+          <ConnectButton />
+        </div>
+      </nav>
 
-      <div className="mb-4 text-sm text-slate-500">
-        <Link href="/" className="text-blue-600 hover:underline dark:text-blue-400">
-          General Discussion
-        </Link>
-        <span className="mx-2">›</span>
-        <span>Thread</span>
+      <div className="mx-auto max-w-4xl px-4 py-6">
+        <nav className="mb-4 text-sm text-slate-500">
+          <Link href="/" className="text-blue-600 hover:underline">
+            General Discussion
+          </Link>
+          <span className="mx-2">›</span>
+          <span className="truncate text-slate-700">{thread.post.title}</span>
+        </nav>
+
+        <ThreadHeader
+          post={thread.post}
+          likeCount={thread.likeCount}
+          alreadyLikedByMe={me ? thread.alreadyLikedBy(me) : false}
+          onOpenProof={setProofHash}
+        />
+
+        <div className="mb-4">
+          <ReplyComposer parentMessageHash={thread.post.messageHash} />
+        </div>
+
+        {thread.replies.length === 0 ? (
+          <p className="py-6 text-center text-sm text-slate-400">
+            No replies yet. Be the first.
+          </p>
+        ) : (
+          <ol className="space-y-3">
+            {thread.replies.map((r) => (
+              <ReplyItem
+                key={r.messageHash}
+                reply={r}
+                likeCount={likeCountFor(r.messageHash)}
+                alreadyLikedByMe={alreadyLikedByMeFor(r.messageHash)}
+                onOpenProof={setProofHash}
+              />
+            ))}
+          </ol>
+        )}
       </div>
-
-      <ThreadHeader
-        post={thread.post}
-        likeCount={thread.likeCount}
-        alreadyLikedByMe={me ? thread.alreadyLikedBy(me) : false}
-        onOpenProof={setProofHash}
-      />
-
-      <div className="mb-5">
-        <ReplyComposer parentMessageHash={thread.post.messageHash} />
-      </div>
-
-      {thread.replies.length === 0 ? (
-        <p className="py-6 text-center text-sm text-slate-400">
-          No replies yet. Be the first.
-        </p>
-      ) : (
-        <ol className="space-y-5">
-          {thread.replies.map((r) => (
-            <ReplyItem
-              key={r.messageHash}
-              reply={r}
-              likeCount={likeCountFor(r.messageHash)}
-              alreadyLikedByMe={alreadyLikedByMeFor(r.messageHash)}
-              onOpenProof={setProofHash}
-            />
-          ))}
-        </ol>
-      )}
 
       <ProofDrawer messageHash={proofHash} onClose={() => setProofHash(null)} />
     </div>

@@ -22,11 +22,9 @@ export default function Home() {
 
   const threads = useMemo(() => {
     const all: ForumMessage[] = [
-      ...((pending?.messages ?? []) as ForumMessage[]),
       ...((confirmed?.messages ?? []) as ForumMessage[]),
+      ...((pending?.messages ?? []) as ForumMessage[]),
     ];
-    // Dedup by messageHash — a row briefly appears in both feeds during
-    // the poster→reader handoff.
     const seen = new Set<string>();
     const deduped: ForumMessage[] = [];
     for (const m of all) {
@@ -41,60 +39,77 @@ export default function Home() {
   }, [confirmed, pending]);
 
   return (
-    <div className="mx-auto max-w-2xl px-4 py-8">
-      <header className="mb-6 flex items-baseline justify-between border-b border-slate-200 pb-4 dark:border-slate-700">
-        <span className="text-lg font-bold">BAM Forum</span>
-        <ConnectButton />
-      </header>
-
-      <div className="mb-6 flex items-end justify-between gap-3">
-        <div>
-          <h1 className="mb-1 text-2xl font-bold">General Discussion</h1>
-          <p className="text-sm text-slate-500">
-            Decentralised threads, backed by blobs.
-          </p>
+    <div className="min-h-screen bg-slate-100">
+      <nav className="border-b border-slate-200 bg-white shadow-sm">
+        <div className="mx-auto flex max-w-4xl items-center justify-between px-4 py-3">
+          <span className="text-base font-bold text-slate-900">BAM Forum</span>
+          <ConnectButton />
         </div>
-        <button
-          type="button"
-          onClick={() => setComposerOpen(true)}
-          disabled={!address}
-          title={address ? 'Compose a new thread' : 'Connect wallet to compose'}
-          className="rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-        >
-          New thread
-        </button>
-      </div>
+      </nav>
 
-      <div className="mb-4">
+      <div className="mx-auto max-w-4xl px-4 py-6">
+        <div className="mb-4 flex items-end justify-between">
+          <div>
+            <h1 className="text-2xl font-bold text-slate-900">General Discussion</h1>
+            <p className="mt-0.5 text-sm text-slate-500">Decentralised threads, backed by blobs.</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setComposerOpen(true)}
+            disabled={!address}
+            title={address ? 'Compose a new thread' : 'Connect wallet to compose'}
+            className="rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+          >
+            New thread
+          </button>
+        </div>
+
         <ProofPanel />
-      </div>
 
-      {confirmedLoading && (
-        <p className="py-8 text-center text-sm text-slate-500">Loading threads…</p>
-      )}
-      {confirmedError && (
-        <div className="rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-          Couldn&apos;t load confirmed messages —{' '}
-          {confirmedError instanceof Error ? confirmedError.message : 'unknown error'}.
+        {confirmedError && (
+          <div className="mb-4 rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+            Couldn&apos;t load confirmed messages —{' '}
+            {confirmedError instanceof Error ? confirmedError.message : 'unknown error'}.
+          </div>
+        )}
+
+        <div className="overflow-hidden rounded-md border border-slate-200 bg-white">
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-slate-200 bg-slate-50 text-xs font-medium uppercase tracking-wide text-slate-400">
+                <th className="px-4 py-2.5 text-left">Topic</th>
+                <th className="w-20 px-4 py-2.5 text-center">Replies</th>
+                <th className="w-28 px-4 py-2.5 text-right">Activity</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {confirmedLoading && threads.length === 0 && (
+                <tr>
+                  <td colSpan={3} className="px-4 py-8 text-center text-sm text-slate-400">
+                    Loading threads…
+                  </td>
+                </tr>
+              )}
+              {!confirmedLoading && !confirmedError && threads.length === 0 && (
+                <tr>
+                  <td colSpan={3} className="px-4 py-8 text-center text-sm text-slate-400">
+                    No threads yet. Be the first to post.
+                  </td>
+                </tr>
+              )}
+              {threads.map((t) => (
+                <ThreadCard
+                  key={t.post.messageHash}
+                  post={t.post}
+                  replyCount={t.replies.length}
+                  likeCount={t.likeCount}
+                  onOpenProof={setProofHash}
+                />
+              ))}
+            </tbody>
+          </table>
         </div>
-      )}
-      {!confirmedLoading && !confirmedError && threads.length === 0 && (
-        <p className="py-8 text-center text-sm text-slate-500">
-          No threads yet. Be the first to post.
-        </p>
-      )}
-
-      <ul className="divide-y divide-slate-200 dark:divide-slate-700">
-        {threads.map((t) => (
-          <ThreadCard
-            key={t.post.messageHash}
-            post={t.post}
-            replyCount={t.replies.length}
-            likeCount={t.likeCount}
-            onOpenProof={setProofHash}
-          />
-        ))}
-      </ul>
+      </div>
 
       <Composer open={composerOpen} onClose={() => setComposerOpen(false)} />
       <ProofDrawer messageHash={proofHash} onClose={() => setProofHash(null)} />
