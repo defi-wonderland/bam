@@ -15,45 +15,41 @@ interface ThreadCardProps {
   onOpenProof: (messageHash: string) => void;
 }
 
-export function ThreadCard({
-  post,
-  replyCount,
-  likeCount,
-  onOpenProof,
-}: ThreadCardProps) {
+export function ThreadCard({ post, replyCount, likeCount, onOpenProof }: ThreadCardProps) {
   return (
-    <li className="border-b border-slate-200 py-5 last:border-b-0">
-      <div className="mb-1 flex items-center gap-2 text-xs text-slate-500">
-        {post.tag.length > 0 && (
-          <span className="rounded-full bg-blue-50 px-2 py-0.5 font-semibold text-blue-700 dark:bg-blue-950 dark:text-blue-300">
-            {post.tag}
-          </span>
-        )}
-        <AddressDisplay address={post.sender} ensName={post.senderEns} />
-        <span>·</span>
-        <span>{relativeTime(post.timestamp)}</span>
-        <span className="ml-auto">
+    <tr className="group hover:bg-slate-50">
+      <td className="px-4 py-3">
+        <div className="mb-1 flex flex-wrap items-center gap-1.5">
+          {post.tag.length > 0 && (
+            <span className="rounded bg-blue-50 px-1.5 py-0.5 text-[11px] font-semibold text-blue-700">
+              {post.tag}
+            </span>
+          )}
           <StatusBadge
             status={post.status}
-            onClick={
-              post.status === 'proven'
-                ? () => onOpenProof(post.messageHash)
-                : undefined
-            }
+            onClick={post.status === 'proven' ? () => onOpenProof(post.messageHash) : undefined}
           />
-        </span>
-      </div>
-      <Link
-        href={`/thread/${post.messageHash}`}
-        className="block font-semibold text-slate-900 hover:text-blue-600 dark:text-slate-100 dark:hover:text-blue-400"
-      >
-        {post.title}
-      </Link>
-      <p className="mt-1 mb-2 line-clamp-2 text-sm text-slate-500">{post.body}</p>
-      <div className="text-xs text-slate-400">
-        💬 {replyCount} {replyCount === 1 ? 'reply' : 'replies'} · ♡ {likeCount}{' '}
-        <span className="text-[10px]">(reader-counted)</span>
-      </div>
-    </li>
+        </div>
+        <Link
+          href={`/thread/${post.messageHash}`}
+          className="font-semibold text-slate-900 hover:text-blue-600"
+        >
+          {post.title}
+        </Link>
+        <div className="mt-0.5 flex items-center gap-1 text-xs text-slate-400">
+          <AddressDisplay address={post.sender} ensName={post.senderEns} />
+          <span>·</span>
+          <span>{relativeTime(post.timestamp)}</span>
+          <span>·</span>
+          <span>♥ {likeCount}</span>
+        </div>
+      </td>
+      <td className="w-20 px-4 py-3 text-center">
+        <span className="text-sm font-medium text-slate-600">{replyCount}</span>
+      </td>
+      <td className="w-28 px-4 py-3 text-right text-xs text-slate-400">
+        {relativeTime(post.timestamp)}
+      </td>
+    </tr>
   );
 }
