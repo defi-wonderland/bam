@@ -114,8 +114,10 @@ const client = new BAMClient({
 
 // Register a calldata batch (ERC-BAM). Pair the decoder with its matching
 // signature registry: ABIDecoder is the reference scheme-0x01 (ECDSA) decoder,
-// so it pairs with ECDSARegistry. (For BLS-aggregate batches, use a BPE/BLS
-// decoder with BLSRegistry instead.)
+// so it pairs with ECDSARegistry. (For BLS-signed batches, use a BPE/BLS decoder
+// with BLSRegistry — scheme 0x02. Aggregate-signature verification is done
+// off-chain via the SDK's verifyAggregateBLS; the on-chain BLSRegistry does not
+// implement verifyAggregated.)
 const contentTag = '0x...'; // keccak256("<protocol>.v<n>") — your protocol/content tag
 const decoder = deployment.contracts.ABIDecoder!.address;
 const signatureRegistry = deployment.contracts.ECDSARegistry!.address;
