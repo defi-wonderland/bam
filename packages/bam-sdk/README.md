@@ -107,16 +107,24 @@ const deployment = getDeployment(sepolia.id)!;
 const client = new BAMClient({
   chain: sepolia,
   rpcUrl: 'https://rpc.sepolia.org',
-  coreAddress: deployment.contracts.SocialBlobsCore!.address,
-  blsExposerAddress: deployment.contracts.BLSExposer!.address,
+  bamCoreAddress: deployment.contracts.BlobAuthenticatedMessagingCore!.address,
+  // blsExposerAddress: '0x...', // required for expose(); BLSExposer redeploy pending
   account: privateKeyToAccount('0x...'),
 });
 
-// Register a calldata batch
-const result = await client.registerCalldata(batch.data);
+// Register a calldata batch (ERC-BAM). Pair the decoder with its matching
+// signature registry: ABIDecoder is the reference scheme-0x01 (ECDSA) decoder,
+// so it pairs with ECDSARegistry. (For BLS-signed batches, use a BPE/BLS decoder
+// with BLSRegistry — scheme 0x02. Aggregate-signature verification is done
+// off-chain via the SDK's verifyAggregateBLS; the on-chain BLSRegistry does not
+// implement verifyAggregated.)
+const contentTag = '0x...'; // keccak256("<protocol>.v<n>") — your protocol/content tag
+const decoder = deployment.contracts.ABIDecoder!.address;
+const signatureRegistry = deployment.contracts.ECDSARegistry!.address;
+const result = await client.registerCalldataBatch(batch.data, contentTag, decoder, signatureRegistry);
 
-// Expose a message on-chain
-const exposure = await client.expose(exposureParams);
+// Expose a message on-chain (needs blsExposerAddress set above, once redeployed)
+// const exposure = await client.expose(exposureParams);
 ```
 
 ## Browser Usage
@@ -208,7 +216,7 @@ prefix), so extracted bytes match exactly what the BLSExposer contract verifies.
 
 **Full exposure flow:**
 ```
-encodeExposureBatch() → createBlob() → registerBlob()
+encodeExposureBatch() → createBlob() → registerBlobBatch()
                                      → parseBlob() → buildExposureParams() → BLSExposer.expose()
 ```
 

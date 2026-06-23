@@ -2,18 +2,16 @@
   "chainId": 11155111,
   "name": "sepolia",
   "timestamp": "2026-05-24T00:00:00.000Z",
+  "_removed": {
+    "BLSExposer": "REDEPLOY PENDING — the old deployment (0x443029b4b96fbf2d8feba77d828a394d19615a48) is ABI-incompatible after the registration-verifier removal and is intentionally NOT published as a resolvable address. Re-add BLSExposer under `contracts` once redeployed, then run scripts/sync-deployments.ts."
+  },
   "contracts": {
     "SocialBlobsCore": {
-      "address": "0x11a825a0774d0471292eab4706743bffcdd5d137"
-    },
-    "SimpleBoolVerifier": {
-      "address": "0xdec5faa3e32d6296e53bae7e359e059b58a482f4"
+      "address": "0x11a825a0774d0471292eab4706743bffcdd5d137",
+      "notes": "LEGACY (retired) — pre-amendment dumb-inbox core, kept only for historical log inspection. New registrations target BlobAuthenticatedMessagingCore. No SDK support."
     },
     "BLSRegistry": {
       "address": "0x15866bf5a8724f2aa9fe75e262d8f00ba2818e25"
-    },
-    "BLSExposer": {
-      "address": "0x443029b4b96fbf2d8feba77d828a394d19615a48"
     },
     "BlobAuthenticatedMessagingCore": {
       "address": "0xC572A7F6dba1f3cB666b14d357671903685BeDdb",

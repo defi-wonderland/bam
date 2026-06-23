@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.3.0 — Remove `SocialBlobsCore` and the on-chain registration gate
+
+**Breaking change.** Retires the legacy `SocialBlobsCore` "dumb inbox" and the
+`SimpleBoolVerifier` / `IRegistrationHook` registration gate. The ERC-8180
+`BlobAuthenticatedMessagingCore` is now the only core; batch registration is
+proven off-chain from the `BlobBatchRegistered` / `CalldataBatchRegistered`
+event log rather than re-checked on-chain.
+
+### Breaking
+
+- **Removed legacy client methods:** `registerBlob`, `registerCalldata`,
+  `registerBlobWithVerifier`, `registerCalldataWithVerifier`,
+  `registerWithVerifier`, and `estimateRegisterCalldataGas`. Use the ERC-BAM
+  paths `registerBlobBatch` / `registerCalldataBatch` instead.
+- **`ContractClientOptions` drops `coreAddress` and `verifierAddress`.** Pass
+  `bamCoreAddress` (and `blsExposerAddress` for exposure).
+- **`ExposureParams` / `CalldataExposureParams` drop `registrationProof`.** The
+  exposer no longer takes or checks a registration proof; the KZG proof (blob
+  membership) plus the BLS signature (authorship) are the verification.
+- **`BLSExposer` constructor drops the registration-verifier argument** — now
+  `constructor(address core, address blsRegistry, address exposureRecord)`. The
+  on-chain `BLSExposer` deployment must be redeployed.
+
+### Removed
+
+- Contracts: `SocialBlobsCore`, `SimpleBoolVerifier`, and the
+  `ISocialBlobsCore` / `IRegistrationVerifier` / `IRegistrationHook` interfaces.
+- The `SOCIAL_BLOBS_CORE_ABI` / `SIMPLE_BOOL_VERIFIER_ABI` exports.
+
 ## 0.2.0 — BAM core `contentTag` uniformity
 
 **Breaking change.** Implements the ERC-8180 amendment that carries `contentTag`

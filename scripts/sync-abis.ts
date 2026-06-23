@@ -21,11 +21,9 @@ const outputFile = join(root, 'packages', 'bam-sdk', 'src', 'contracts', 'abis.t
 
 /** Map of export name → Forge artifact path (relative to out/) */
 const ABI_MAP: Record<string, string> = {
-  SOCIAL_BLOBS_CORE_ABI: 'SocialBlobsCore.sol/SocialBlobsCore.json',
   BAM_CORE_ABI: 'BlobAuthenticatedMessagingCore.sol/BlobAuthenticatedMessagingCore.json',
   BAM_DECODER_ABI: 'ABIDecoder.sol/ABIDecoder.json',
   BLS_EXPOSER_ABI: 'BLSExposer.sol/BLSExposer.json',
-  SIMPLE_BOOL_VERIFIER_ABI: 'SimpleBoolVerifier.sol/SimpleBoolVerifier.json',
   BLS_REGISTRY_ABI: 'BLSRegistry.sol/BLSRegistry.json',
   ECDSA_REGISTRY_ABI: 'ECDSARegistry.sol/ECDSARegistry.json',
   SIGNATURE_REGISTRY_DISPATCHER_ABI:

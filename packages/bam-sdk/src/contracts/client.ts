@@ -2,9 +2,9 @@
  * Contract Client for BAM (Blob Authenticated Messaging)
  * @module bam-sdk/contracts/client
  *
- * Viem-based client for interacting with SocialBlobsCore, SimpleBoolVerifier,
- * and BLSExposer contracts. Stateless Core architecture where Core handles
- * registration (events only) and BLSExposer handles exposure.
+ * Viem-based client for interacting with the BAM core, BLSExposer, and signature
+ * registry contracts. The core is events-only (ERC-8180); BLSExposer handles
+ * on-chain exposure.
  */
 
 import {
@@ -32,10 +32,8 @@ import type { VersionedHash } from '../kzg/types.js';
 
 // ABIs — auto-generated from Foundry build output by scripts/sync-abis.ts
 import {
-  SOCIAL_BLOBS_CORE_ABI,
   BAM_CORE_ABI,
   BLS_EXPOSER_ABI,
-  SIMPLE_BOOL_VERIFIER_ABI,
   BLS_REGISTRY_ABI,
   ECDSA_REGISTRY_ABI,
 } from './abis.js';
@@ -59,14 +57,10 @@ export interface ContractClientOptions {
   chain: Chain;
   /** RPC transport URL */
   rpcUrl: string;
-  /** SocialBlobsCore contract address (legacy) */
-  coreAddress: Address;
   /** BlobAuthenticatedMessagingCore contract address (ERC-BAM compliant) */
   bamCoreAddress?: Address;
   /** BLSExposer contract address (required for exposure operations) */
   blsExposerAddress?: Address;
-  /** SimpleBoolVerifier contract address (required for registration with verifier) */
-  verifierAddress?: Address;
   /** Account for write operations (private key or local account) */
   account?: Account;
 }
@@ -76,17 +70,14 @@ export interface ContractClientOptions {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 /**
- * Contract client for BAM protocol
- * Stateless Core architecture: Core emits events only,
- * SimpleBoolVerifier tracks registrations, BLSExposer handles exposure.
+ * Contract client for the BAM protocol.
+ * The core emits events only (ERC-8180); BLSExposer handles on-chain exposure.
  */
 export class BAMClient {
   readonly publicClient: PublicClient<Transport, Chain>;
   private walletClient?: WalletClient<Transport, Chain, Account>;
-  private readonly coreAddress: Address;
   private readonly bamCoreAddress?: Address;
   private readonly blsExposerAddress?: Address;
-  private readonly verifierAddress?: Address;
   private blsRegistryAddress?: Address;
 
   constructor(options: ContractClientOptions) {
@@ -103,10 +94,8 @@ export class BAMClient {
       });
     }
 
-    this.coreAddress = options.coreAddress;
     this.bamCoreAddress = options.bamCoreAddress;
     this.blsExposerAddress = options.blsExposerAddress;
-    this.verifierAddress = options.verifierAddress;
   }
 
   private requireWallet(): WalletClient<Transport, Chain, Account> {
@@ -133,160 +122,6 @@ export class BAMClient {
       }) as Address;
     }
     return this.blsRegistryAddress;
-  }
-
-  // ═══════════════════════════════════════════════════════════════════════════════
-  // BLOB OPERATIONS
-  // ═══════════════════════════════════════════════════════════════════════════════
-
-  /**
-   * Register a blob on-chain (legacy)
-   * @param blobIndex Index of the blob in the transaction (0-5)
-   */
-  async registerBlob(blobIndex: number): Promise<BlobRegistrationResult> {
-    const wallet = this.requireWallet();
-
-    const hash = await wallet.writeContract({
-      address: this.coreAddress as `0x${string}`,
-      abi: SOCIAL_BLOBS_CORE_ABI,
-      functionName: 'registerBlob',
-      args: [BigInt(blobIndex)],
-    });
-
-    const receipt = await this.publicClient.waitForTransactionReceipt({ hash });
-
-    const event = this.findEvent(receipt.logs, SOCIAL_BLOBS_CORE_ABI, 'BlobRegistered');
-    if (!event) throw new Error('BlobRegistered event not found');
-
-    return {
-      txHash: receipt.transactionHash as Bytes32,
-      versionedHash: event.args.versionedHash as VersionedHash,
-      blockNumber: Number(receipt.blockNumber),
-    };
-  }
-
-  /**
-   * Register a blob on the legacy SocialBlobsCore. Since the verifier is now a
-   * registration hook wired atomically through the core, there is no second wallet-side
-   * verifier call to make — the verifier is populated inside the same transaction. This
-   * method asserts that happened by reading `verifier.isRegistered(contentHash)` and
-   * throws if the hook did not fire (e.g. the core was deployed without the verifier
-   * wired in).
-   */
-  async registerBlobWithVerifier(blobIndex: number): Promise<BlobRegistrationResult> {
-    const result = await this.registerBlob(blobIndex);
-    await this.assertVerifierRegistered(result.versionedHash, BigInt(result.blockNumber));
-    return result;
-  }
-
-  // ═══════════════════════════════════════════════════════════════════════════════
-  // CALLDATA OPERATIONS
-  // ═══════════════════════════════════════════════════════════════════════════════
-
-  /**
-   * Register a batch via calldata (self-publication)
-   */
-  async registerCalldata(batchData: Uint8Array): Promise<CalldataRegistrationResult> {
-    const wallet = this.requireWallet();
-
-    const hash = await wallet.writeContract({
-      address: this.coreAddress as `0x${string}`,
-      abi: SOCIAL_BLOBS_CORE_ABI,
-      functionName: 'registerCalldata',
-      args: [`0x${Buffer.from(batchData).toString('hex')}` as `0x${string}`],
-    });
-
-    const receipt = await this.publicClient.waitForTransactionReceipt({ hash });
-
-    const event = this.findEvent(receipt.logs, SOCIAL_BLOBS_CORE_ABI, 'CalldataRegistered');
-    if (!event) throw new Error('CalldataRegistered event not found');
-
-    return {
-      txHash: receipt.transactionHash as Bytes32,
-      contentHash: event.args.contentHash as Bytes32,
-      blockNumber: Number(receipt.blockNumber),
-      gasUsed: receipt.gasUsed,
-    };
-  }
-
-  /**
-   * Register a calldata batch on the legacy SocialBlobsCore. See
-   * {@link registerBlobWithVerifier} for why this is an assertion rather than a second
-   * transaction.
-   */
-  async registerCalldataWithVerifier(batchData: Uint8Array): Promise<CalldataRegistrationResult> {
-    const result = await this.registerCalldata(batchData);
-    await this.assertVerifierRegistered(result.contentHash, BigInt(result.blockNumber));
-    return result;
-  }
-
-  /**
-   * Read-only check that `SimpleBoolVerifier.isRegistered(registrationHash)` returns true
-   * — i.e., the core contract's hook fired and populated the verifier during the
-   * registration transaction. Throws if the verifier was not updated, which usually
-   * means the configured core was not deployed with the verifier wired as its hook.
-   *
-   * `registrationHash` is whichever identifier the core used — the EIP-4844 versioned
-   * hash for blob registrations, or `keccak256(batchData)` for calldata. The verifier
-   * doesn't distinguish; both land in the same `_registered` mapping.
-   *
-   * The read is pinned to `blockNumber` (typically the receipt's block) so load-balanced
-   * RPC backends don't return a stale "latest" that predates the registration tx.
-   */
-  private async assertVerifierRegistered(
-    registrationHash: Bytes32,
-    blockNumber: bigint
-  ): Promise<void> {
-    if (!this.verifierAddress) {
-      throw new Error('Verifier address required. Provide verifierAddress in client options.');
-    }
-    const isRegistered = await this.publicClient.readContract({
-      address: this.verifierAddress as `0x${string}`,
-      abi: SIMPLE_BOOL_VERIFIER_ABI,
-      functionName: 'isRegistered',
-      args: [registrationHash as `0x${string}`],
-      blockNumber,
-    });
-    if (!isRegistered) {
-      throw new Error(
-        `Verifier at ${this.verifierAddress} did not record registration hash ` +
-          `${registrationHash} at block ${blockNumber}. This usually means the core ` +
-          'contract is not wired with the verifier as its registration hook. Deploy a ' +
-          'core that accepts the verifier in its constructor and calls `onRegistered` ' +
-          'inside `registerBlob` / `registerCalldata`.'
-      );
-    }
-  }
-
-  /**
-   * @deprecated SimpleBoolVerifier is a registration hook invoked atomically by the core
-   *   contract. Direct wallet calls to `onRegistered` revert with `OnlyCore`.
-   *
-   *   If the configured core already has the verifier wired as its hook, call
-   *   `registerBlob` / `registerCalldata` and the verifier will be populated inside the
-   *   same transaction — no separate `registerWithVerifier` step needed.
-   *
-   *   Retained as a synchronous throw so existing call sites surface the new model at
-   *   lint/test time instead of paying gas for a guaranteed revert.
-   */
-  async registerWithVerifier(_contentHash: Bytes32): Promise<void> {
-    throw new Error(
-      'registerWithVerifier is no longer callable: SimpleBoolVerifier.onRegistered is a ' +
-        'core-only hook (reverts with OnlyCore for wallet senders). Call registerBlob / ' +
-        'registerCalldata on a core whose hook is wired to the verifier instead.'
-    );
-  }
-
-  /**
-   * Estimate gas for calldata registration
-   */
-  async estimateRegisterCalldataGas(batchData: Uint8Array): Promise<bigint> {
-    return this.publicClient.estimateContractGas({
-      address: this.coreAddress as `0x${string}`,
-      abi: SOCIAL_BLOBS_CORE_ABI,
-      functionName: 'registerCalldata',
-      args: [`0x${Buffer.from(batchData).toString('hex')}` as `0x${string}`],
-    });
   }
 
   // ═══════════════════════════════════════════════════════════════════════════════
@@ -419,7 +254,6 @@ export class BAMClient {
       byteLength: BigInt(params.byteLength),
       messageBytes: toHex(params.messageBytes),
       blsSignature: toHex(params.blsSignature),
-      registrationProof: toHex(params.registrationProof),
       contentTag: params.contentTag as `0x${string}`,
     };
 
@@ -455,7 +289,6 @@ export class BAMClient {
       messageOffset: BigInt(params.messageOffset),
       messageBytes: toHex(params.messageBytes),
       signature: toHex(params.signature),
-      registrationProof: toHex(params.registrationProof),
       contentTag: params.contentTag as `0x${string}`,
     };
 
@@ -509,7 +342,6 @@ export class BAMClient {
       byteLength: BigInt(params.byteLength),
       messageBytes: toHex(params.messageBytes),
       blsSignature: toHex(params.blsSignature),
-      registrationProof: toHex(params.registrationProof),
       contentTag: params.contentTag as `0x${string}`,
     };
 
@@ -531,7 +363,6 @@ export class BAMClient {
       messageOffset: BigInt(params.messageOffset),
       messageBytes: toHex(params.messageBytes),
       signature: toHex(params.signature),
-      registrationProof: toHex(params.registrationProof),
       contentTag: params.contentTag as `0x${string}`,
     };
 

@@ -6,7 +6,8 @@ import { SocialBlobsTypes } from "../libraries/SocialBlobsTypes.sol";
 /// @title IBLSExposer
 /// @notice Interface for exposing tweets with BLS signature verification
 /// @dev Application-layer contract that handles exposure logic for BLS-signed messages.
-///      Uses IRegistrationVerifier for pluggable registration verification.
+///      Verifies KZG proofs and BLS signatures; batch registration is proven off-chain
+///      from the BAM core's event log (the core is events-only per ERC-8180).
 interface IBLSExposer {
     // ═══════════════════════════════════════════════════════════════════════════════
     // EVENTS
@@ -29,9 +30,6 @@ interface IBLSExposer {
     // ═══════════════════════════════════════════════════════════════════════════════
     // ERRORS
     // ═══════════════════════════════════════════════════════════════════════════════
-
-    /// @notice Thrown when content hash is not verified as registered
-    error NotRegistered(bytes32 contentHash);
 
     /// @notice Thrown when KZG verification fails
     error KZGVerificationFailed();
@@ -75,17 +73,13 @@ interface IBLSExposer {
     /// @return exposed True if message has been exposed
     function isExposed(bytes32 messageHash) external view returns (bool exposed);
 
-    /// @notice Get the Core contract address
-    /// @return coreAddress Address of SocialBlobsCore
+    /// @notice Get the BAM core contract address this exposer is paired with
+    /// @return coreAddress Address of the BAM core
     function core() external view returns (address coreAddress);
 
     /// @notice Get the BLS registry address
     /// @return registryAddress Address of BLSRegistry
     function blsRegistry() external view returns (address registryAddress);
-
-    /// @notice Get the registration verifier address
-    /// @return verifierAddress Address of IRegistrationVerifier
-    function registrationVerifier() external view returns (address verifierAddress);
 
     /// @notice Get the exposure record address
     /// @return recordAddress Address of ExposureRecord (or address(0) if disabled)

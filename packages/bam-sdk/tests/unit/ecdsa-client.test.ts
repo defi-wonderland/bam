@@ -130,13 +130,11 @@ function makeClient(responders: Record<string, (params: readonly unknown[]) => u
     new (opts: {
       chain: typeof sepolia;
       rpcUrl: string;
-      coreAddress: Address;
       account: ReturnType<typeof privateKeyToAccount>;
     }): BAMClient;
   })({
     chain: sepolia,
     rpcUrl: 'http://stub',
-    coreAddress: ('0x' + '00'.repeat(20)) as Address,
     account,
   });
 

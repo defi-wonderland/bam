@@ -15,7 +15,7 @@ Built by [Wonderland](https://wonderland.xyz).
 | [`bam-reader`](packages/bam-reader) | Node service — tails L1 for `BlobBatchRegistered`, fetches blobs (beacon → Blobscan), decodes + verifies signatures, and writes confirmed rows into `bam-store`. Exposes a read-only HTTP surface |
 | [`bam-store`](packages/bam-store) | Shared persistence substrate for the Poster and Reader — SQLite/Postgres `BatchRow` / `MessageRow` schema and adapters |
 | [`bam-cli`](packages/bam-cli) | CLI — key management, message encoding, batch operations, BLS aggregation |
-| [`bam-contracts`](packages/bam-contracts) | Solidity — BlobAuthenticatedMessagingCore, BLSRegistry, ECDSARegistry, SignatureRegistryDispatcher, BLSExposer, verifiers (Foundry) |
+| [`bam-contracts`](packages/bam-contracts) | Solidity — BlobAuthenticatedMessagingCore, BLSRegistry, ECDSARegistry, SignatureRegistryDispatcher, BLSExposer, decoders (Foundry) |
 
 ## Apps
 
@@ -59,21 +59,18 @@ For deploying the Poster and Reader to fly.io, see `fly.poster.toml` / `fly.read
 bam-sdk                              bam-contracts
 ├── Protocol layer                   ├── core/
 │   ├── types, constants, errors     │   ├── BlobAuthenticatedMessagingCore
-│   ├── message encoding             │   ├── SocialBlobsCore
-│   ├── batch encoding               │   ├── BLSRegistry
-│   ├── compression (bpe + zstd dec) │   ├── ECDSARegistry
-│   └── BLS + ECDSA signatures       │   ├── SignatureRegistryDispatcher
-├── On-chain layer                   │   └── BlobSpaceSegments
-│   ├── KZG proof generation         ├── exposers/
-│   ├── blob parsing + exposure      │   └── BLSExposer
-│   └── viem contract client         ├── verifiers/
-├── Browser entrypoint               │   └── SimpleBoolVerifier
-│   └── bam-sdk/browser (no c-kzg,   ├── libraries/
-│       no node:fs/crypto)           │   ├── BLSVerifier, KZGVerifier
-└── Aggregator client                │   └── BLS12381, BLSDecompression
-                                     └── interfaces/
-                                         ├── IERC_BAM_*
-                                         └── IERC_BSS_*
+│   ├── message encoding             │   ├── BLSRegistry
+│   ├── batch encoding               │   ├── ECDSARegistry
+│   ├── compression (bpe + zstd dec) │   ├── SignatureRegistryDispatcher
+│   └── BLS + ECDSA signatures       │   └── BlobSpaceSegments
+├── On-chain layer                   ├── exposers/
+│   ├── KZG proof generation         │   └── BLSExposer
+│   ├── blob parsing + exposure      ├── libraries/
+│   └── viem contract client         │   ├── BLSVerifier, KZGVerifier
+├── Browser entrypoint               │   └── BLS12381, BLSDecompression
+│   └── bam-sdk/browser (no c-kzg,   └── interfaces/
+│       no node:fs/crypto)               ├── IERC_BAM_*
+└── Aggregator client                    └── IERC_BSS_*
 
 bam-poster (Node)                    bam-reader (Node)
 ├── Ingest — envelope, signed-tag,   ├── Discovery — log-scan + cursor

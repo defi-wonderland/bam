@@ -2,23 +2,22 @@
 pragma solidity ^0.8.24;
 
 import { Script, console2 } from "forge-std/Script.sol";
-import { SocialBlobsCore } from "../src/core/SocialBlobsCore.sol";
+import { BlobAuthenticatedMessagingCore } from "../src/core/BlobAuthenticatedMessagingCore.sol";
 import { BLSRegistry } from "../src/core/BLSRegistry.sol";
 import { SignatureRegistryDispatcher } from "../src/core/SignatureRegistryDispatcher.sol";
-import { SimpleBoolVerifier } from "../src/verifiers/SimpleBoolVerifier.sol";
 import { BLSExposer } from "../src/exposers/BLSExposer.sol";
 import { DictionaryRegistry } from "../src/peripheral/DictionaryRegistry.sol";
 import { ExposureRecord } from "../src/peripheral/ExposureRecord.sol";
 import { DisputeManager } from "../src/peripheral/DisputeManager.sol";
 import { StakeManager } from "../src/peripheral/StakeManager.sol";
 
-/// @title DeploySocialBlobs
-/// @notice Deployment script for Social-Blobs protocol contracts
-/// @dev Stateless Core + SimpleBoolVerifier + BLSExposer with pluggable verification
-contract DeploySocialBlobs is Script {
+/// @title DeployBam
+/// @notice Deployment script for BAM protocol contracts
+/// @dev Stateless BAM core + BLSExposer. Registration is proven off-chain from the
+///      core's event log, so no on-chain registration verifier is deployed.
+contract DeployBam is Script {
     // Deployment addresses
-    SocialBlobsCore public core;
-    SimpleBoolVerifier public verifier;
+    BlobAuthenticatedMessagingCore public core;
     BLSRegistry public blsRegistry;
     BLSExposer public blsExposer;
 
@@ -28,30 +27,21 @@ contract DeploySocialBlobs is Script {
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
         address deployer = vm.addr(deployerPrivateKey);
 
-        console2.log("Deploying Social-Blobs contracts...");
+        console2.log("Deploying BAM contracts...");
         console2.log("Deployer:", deployer);
 
         vm.startBroadcast(deployerPrivateKey);
 
-        // 1. Deploy SimpleBoolVerifier (v1 registration verifier)
-        verifier = new SimpleBoolVerifier();
-        console2.log("SimpleBoolVerifier deployed at:", address(verifier));
+        // 1. Deploy BAM core (zero-storage, events-only)
+        core = new BlobAuthenticatedMessagingCore();
+        console2.log("BlobAuthenticatedMessagingCore deployed at:", address(core));
 
-        // 2. Deploy Core with verifier as hook (atomic registration)
-        core = new SocialBlobsCore(address(verifier));
-        console2.log("SocialBlobsCore deployed at:", address(core));
-
-        // 3. Link verifier to core (one-time setup)
-        verifier.setCore(address(core));
-        console2.log("SimpleBoolVerifier linked to core");
-
-        // 4. Deploy BLS Registry (permissionless)
+        // 2. Deploy BLS Registry (permissionless)
         blsRegistry = new BLSRegistry();
         console2.log("BLSRegistry deployed at:", address(blsRegistry));
 
-        // 5. Deploy BLSExposer (4 args: core, blsRegistry, registrationVerifier, exposureRecord)
-        blsExposer =
-            new BLSExposer(address(core), address(blsRegistry), address(verifier), address(0));
+        // 3. Deploy BLSExposer (core, blsRegistry, exposureRecord)
+        blsExposer = new BLSExposer(address(core), address(blsRegistry), address(0));
         console2.log("BLSExposer deployed at:", address(blsExposer));
 
         vm.stopBroadcast();
@@ -59,8 +49,7 @@ contract DeploySocialBlobs is Script {
         // Log summary
         console2.log("");
         console2.log("=== Deployment Summary ===");
-        console2.log("SocialBlobsCore:", address(core));
-        console2.log("SimpleBoolVerifier:", address(verifier));
+        console2.log("BlobAuthenticatedMessagingCore:", address(core));
         console2.log("BLSRegistry:", address(blsRegistry));
         console2.log("BLSExposer:", address(blsExposer));
         console2.log("");
@@ -77,21 +66,16 @@ contract DeploySocialBlobs is Script {
 
         vm.startBroadcast(deployerPrivateKey);
 
-        // Deploy contracts (verifier first so core can hook into it)
-        verifier = new SimpleBoolVerifier();
-        core = new SocialBlobsCore(address(verifier));
-        verifier.setCore(address(core));
+        core = new BlobAuthenticatedMessagingCore();
         blsRegistry = new BLSRegistry();
-        blsExposer =
-            new BLSExposer(address(core), address(blsRegistry), address(verifier), address(0));
+        blsExposer = new BLSExposer(address(core), address(blsRegistry), address(0));
 
         vm.stopBroadcast();
 
         // Output addresses in a format suitable for verification
         console2.log("");
         console2.log("=== Contract Addresses ===");
-        console2.log("SOCIAL_BLOBS_CORE=%s", address(core));
-        console2.log("SIMPLE_BOOL_VERIFIER=%s", address(verifier));
+        console2.log("BAM_CORE=%s", address(core));
         console2.log("BLS_REGISTRY=%s", address(blsRegistry));
         console2.log("BLS_EXPOSER=%s", address(blsExposer));
     }
@@ -114,13 +98,10 @@ contract DeployTestnet is Script {
 
         vm.startBroadcast(deployerPrivateKey);
 
-        // Deploy all contracts (all permissionless, verifier first for hook)
-        SimpleBoolVerifier verifier = new SimpleBoolVerifier();
-        SocialBlobsCore core = new SocialBlobsCore(address(verifier));
-        verifier.setCore(address(core));
+        // Deploy all contracts (all permissionless)
+        BlobAuthenticatedMessagingCore core = new BlobAuthenticatedMessagingCore();
         BLSRegistry blsRegistry = new BLSRegistry();
-        BLSExposer blsExposer =
-            new BLSExposer(address(core), address(blsRegistry), address(verifier), address(0));
+        BLSExposer blsExposer = new BLSExposer(address(core), address(blsRegistry), address(0));
 
         vm.stopBroadcast();
 
@@ -128,15 +109,16 @@ contract DeployTestnet is Script {
         console2.log("");
         console2.log("=== Testnet Deployment Complete ===");
         console2.log("Network:", _getNetworkName());
-        console2.log("SocialBlobsCore:", address(core));
-        console2.log("SimpleBoolVerifier:", address(verifier));
+        console2.log("BlobAuthenticatedMessagingCore:", address(core));
         console2.log("BLSRegistry:", address(blsRegistry));
         console2.log("BLSExposer:", address(blsExposer));
         console2.log("");
         console2.log("All contracts are permissionless!");
         console2.log("");
         console2.log("To verify contracts:");
-        console2.log("forge verify-contract", address(core), "SocialBlobsCore --watch");
+        console2.log(
+            "forge verify-contract", address(core), "BlobAuthenticatedMessagingCore --watch"
+        );
     }
 
     function _getNetworkName() internal view returns (string memory) {
@@ -160,10 +142,8 @@ contract DeployFull is Script {
 
         vm.startBroadcast(deployerPrivateKey);
 
-        // Core contracts (all permissionless, verifier first for hook)
-        SimpleBoolVerifier verifier = new SimpleBoolVerifier();
-        SocialBlobsCore core = new SocialBlobsCore(address(verifier));
-        verifier.setCore(address(core));
+        // Core contracts (all permissionless)
+        BlobAuthenticatedMessagingCore core = new BlobAuthenticatedMessagingCore();
         BLSRegistry blsRegistry = new BLSRegistry();
         SignatureRegistryDispatcher sigDispatcher = new SignatureRegistryDispatcher();
 
@@ -172,9 +152,8 @@ contract DeployFull is Script {
         ExposureRecord exposureRecord = new ExposureRecord();
 
         // BLSExposer with ExposureRecord integration
-        BLSExposer blsExposer = new BLSExposer(
-            address(core), address(blsRegistry), address(verifier), address(exposureRecord)
-        );
+        BLSExposer blsExposer =
+            new BLSExposer(address(core), address(blsRegistry), address(exposureRecord));
 
         // Dispute and stake management (these still have owners for admin functions)
         DisputeManager disputeManager = new DisputeManager(address(exposureRecord), deployer);
@@ -190,8 +169,7 @@ contract DeployFull is Script {
 
         console2.log("");
         console2.log("=== Core Contracts (Permissionless) ===");
-        console2.log("SocialBlobsCore:", address(core));
-        console2.log("SimpleBoolVerifier:", address(verifier));
+        console2.log("BlobAuthenticatedMessagingCore:", address(core));
         console2.log("BLSRegistry:", address(blsRegistry));
         console2.log("SignatureRegistryDispatcher:", address(sigDispatcher));
         console2.log("");
