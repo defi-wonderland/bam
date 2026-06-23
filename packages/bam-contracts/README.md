@@ -4,9 +4,9 @@ Solidity smart contracts for the BAM (Blob Authenticated Messaging) protocol.
 
 ## Overview
 
-The contract system follows a "dumb inbox" architecture where the core contract is stateless
-and only emits events. All verification logic (exposure, signatures, etc.) lives in the
-application layer.
+The contract system follows a "dumb inbox" architecture: the core contract is stateless and
+only emits events (ERC-8180). Decoding, signature verification, and exposure live in the
+application layer. A batch's registration is discovered off-chain from the core's event log.
 
 ## Architecture
 
@@ -17,21 +17,14 @@ application layer.
 │  BLSExposer          │  Other Exposers...   │  Custom Apps          │
 │  - KZG verification  │  - ECDSA Exposer     │  - Voting             │
 │  - BLS signature     │  - ZK Exposer (v2)   │  - Reputation         │
-│  - Registration check│                      │  - etc.               │
+│  - MessageExposed    │                      │  - etc.               │
 ├───────────────────────────────────────────────────────────────────────┤
 │                            CORE LAYER                                │
 ├───────────────────────────────────────────────────────────────────────┤
-│  SocialBlobsCore (Stateless)         │  BLSRegistry                 │
-│  - registerBlob(blobIndex)           │  - register(pubKey, popSig)  │
-│  - registerCalldata(batchData)       │  - rotate(newPubKey, popSig) │
+│  BlobAuthenticatedMessagingCore      │  BLSRegistry                 │
+│  - registerBlobBatch(...)            │  - register(pubKey, popSig)  │
+│  - registerCalldataBatch(...)        │  - rotate(newPubKey, popSig) │
 │  - Emits events only, no storage     │  - revoke()                  │
-│  - Optional IRegistrationHook        │                              │
-├───────────────────────────────────────────────────────────────────────┤
-│                        VERIFICATION LAYER                            │
-├───────────────────────────────────────────────────────────────────────┤
-│  SimpleBoolVerifier (V1)             │  Future: ZK/Receipt Verifiers│
-│  - IRegistrationHook (from Core)     │  - STARK proofs              │
-│  - Boolean mapping                   │  - Transaction receipts      │
 ├───────────────────────────────────────────────────────────────────────┤
 │                           LIBRARIES                                  │
 ├───────────────────────────────────────────────────────────────────────┤
@@ -47,8 +40,7 @@ application layer.
 
 | Contract | Description |
 |----------|-------------|
-| `SocialBlobsCore` | Zero-storage registrar — emits `BlobRegistered` / `CalldataRegistered` events. Optional `IRegistrationHook` for atomic verifier registration |
-| `BlobAuthenticatedMessagingCore` | ERC-BAM compliant wrapper — blob segment declaration + batch registration |
+| `BlobAuthenticatedMessagingCore` | ERC-BAM compliant core — blob segment declaration + batch registration. Zero-storage; emits `BlobBatchRegistered` / `CalldataBatchRegistered` |
 | `BLSRegistry` | BLS12-381 public key registry with Proof of Possession |
 | `ECDSARegistry` | ERC-8180 scheme-`0x01` ECDSA key registry — supports keyed and keyless verification paths |
 | `SignatureRegistryDispatcher` | ERC-8180 dispatcher — routes verification calls to the scheme-specific registry (BLS / ECDSA) |
@@ -59,8 +51,6 @@ application layer.
 | Contract | Description |
 |----------|-------------|
 | `BLSExposer` | On-chain message exposure with KZG proofs + BLS verification |
-| `SimpleBoolVerifier` | V1 registration verifier — implements `IRegistrationHook` for atomic registration from Core. Access-controlled: only the linked Core can register hashes |
-| `IRegistrationHook` | Callback interface for Core to notify verifiers atomically on registration |
 | `ABIDecoder` | Untrusted batch decoder for message extraction |
 
 ### Libraries
@@ -81,34 +71,27 @@ application layer.
 | `DisputeManager` | Challenge/dispute resolution |
 | `StakeManager` | Aggregator staking and slashing |
 
-## Registration Hook
+## Registration verification
 
-`SocialBlobsCore` accepts an optional `IRegistrationHook` at deploy time. When set, the hook is
-called atomically after each `registerBlob` / `registerCalldata`, allowing a verifier to record
-the content hash in the same transaction. When set to `address(0)`, no external call is made
-and the core operates at zero overhead (the default for the demo app).
+The BAM core is events-only: `registerBlobBatch` / `registerCalldataBatch` emit
+`BlobBatchRegistered` / `CalldataBatchRegistered` and write nothing. A batch's registration is
+therefore proven off-chain by reading that event from the log — or, trustlessly, via a
+Merkle-Patricia proof of the transaction receipt against a block header's `receiptsRoot`.
 
-This solves a trust gap: without the hook, the `SimpleBoolVerifier` was permissionless — anyone
-could call `register()` with an arbitrary hash, undermining the exposer's registration check.
-With the hook, only the core contract can register hashes in the verifier.
+`BLSExposer` does not re-check registration on-chain. The KZG proof at exposure time already
+proves the exposed bytes were in the blob behind the versioned hash, and the BLS signature
+proves authorship against the trusted registry — together a stronger guarantee than a stored
+boolean. (Earlier revisions used a `SimpleBoolVerifier` populated by an `IRegistrationHook` on a
+stateful `SocialBlobsCore`; that re-introduced the per-batch `SSTORE` the zero-storage core
+exists to avoid, and has been removed.)
 
-### Deployment patterns
+### Deployment pattern
 
-**Demo app (no on-chain exposure needed):**
 ```solidity
-SocialBlobsCore core = new SocialBlobsCore(address(0));  // no hook
+BlobAuthenticatedMessagingCore core = new BlobAuthenticatedMessagingCore();
+BLSRegistry blsRegistry = new BLSRegistry();
+BLSExposer exposer = new BLSExposer(address(core), address(blsRegistry), address(0));
 ```
-
-**Full deployment (on-chain exposure via BLSExposer):**
-```solidity
-SimpleBoolVerifier verifier = new SimpleBoolVerifier();
-SocialBlobsCore core = new SocialBlobsCore(address(verifier));
-verifier.setCore(address(core));  // one-time link, cannot be changed
-```
-
-`setCore()` resolves the chicken-and-egg problem: the core needs the verifier address at deploy,
-and the verifier needs the core address to restrict `onRegistered()`. The call can only be made
-once — after that, the link is permanent.
 
 ## Development
 
@@ -143,12 +126,12 @@ forge fmt
 | Contract | Address |
 |----------|---------|
 | BlobAuthenticatedMessagingCore | `0xC572A7F6dba1f3cB666b14d357671903685BeDdb` |
-| SocialBlobsCore (legacy) | `0x11a825a0774d0471292eab4706743bffcdd5d137` |
 | BLSRegistry | `0x15866bf5a8724f2aa9fe75e262d8f00ba2818e25` |
 | ECDSARegistry | `0xF4Ce909305a112C2CBEC6b339a42f34bA8bf3381` |
 | SignatureRegistryDispatcher | `0x3431A94c9132b8a1b0c4aE8a80E7Ef0F0EC630Cf` |
-| BLSExposer | _redeploy pending_ (interface changed to bind `contentTag`) |
-| SimpleBoolVerifier | `0xdec5faa3e32d6296e53bae7e359e059b58a482f4` |
+| BLSExposer | _redeploy pending_ (constructor changed; registration gate removed) |
+| SocialBlobsCore (legacy, removed) | `0x11a825a0774d0471292eab4706743bffcdd5d137` |
+| SimpleBoolVerifier (removed) | `0xdec5faa3e32d6296e53bae7e359e059b58a482f4` |
 
 ## Future Work
 

@@ -5,8 +5,6 @@ import { Test } from "forge-std/Test.sol";
 import { BLSExposer } from "../src/exposers/BLSExposer.sol";
 import { IERC_BAM_Exposer } from "../src/interfaces/IERC_BAM_Exposer.sol";
 import { IBLSRegistry } from "../src/interfaces/IBLSRegistry.sol";
-import { IRegistrationVerifier } from "../src/interfaces/IRegistrationVerifier.sol";
-import { ISocialBlobsCore } from "../src/interfaces/ISocialBlobsCore.sol";
 import { IExposureRecord } from "../src/interfaces/IExposureRecord.sol";
 import { SocialBlobsTypes } from "../src/libraries/SocialBlobsTypes.sol";
 
@@ -24,20 +22,6 @@ contract MockBLSRegistry {
     }
 }
 
-/// @title MockRegistrationVerifier
-/// @notice Always returns true for verifyRegistration
-contract MockRegistrationVerifier {
-    bool public shouldPass = true;
-
-    function setShouldPass(bool pass) external {
-        shouldPass = pass;
-    }
-
-    function verifyRegistration(address, bytes32, bytes calldata) external view returns (bool) {
-        return shouldPass;
-    }
-}
-
 /// @title BLSExposerTest
 /// @notice Tests for BLSExposer with ERC-BAM alignment
 /// @dev Tests the calldata exposure path (no KZG/BLS precompiles needed).
@@ -45,11 +29,11 @@ contract MockRegistrationVerifier {
 contract BLSExposerTest is Test {
     BLSExposer public exposer;
     MockBLSRegistry public mockRegistry;
-    MockRegistrationVerifier public mockVerifier;
     address public mockCore;
 
     address public constant ALICE = address(0xA11CE);
-    bytes32 public constant TAG = bytes32(uint256(0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa));
+    bytes32 public constant TAG =
+        bytes32(uint256(0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa));
     bytes public constant FAKE_BLS_PUBKEY =
         hex"aabbccddaabbccddaabbccddaabbccddaabbccddaabbccddaabbccddaabbccddaabbccddaabbccddaabbccddaabbccdd";
     bytes public constant FAKE_BLS_SIG =
@@ -57,10 +41,9 @@ contract BLSExposerTest is Test {
 
     function setUp() public {
         mockRegistry = new MockBLSRegistry();
-        mockVerifier = new MockRegistrationVerifier();
         mockCore = address(0xC04E);
 
-        exposer = new BLSExposer(mockCore, address(mockRegistry), address(mockVerifier), address(0));
+        exposer = new BLSExposer(mockCore, address(mockRegistry), address(0));
 
         // Register ALICE's BLS public key
         mockRegistry.setKey(ALICE, FAKE_BLS_PUBKEY);
@@ -90,7 +73,6 @@ contract BLSExposerTest is Test {
             messageOffset: 0,
             messageBytes: messageBytes,
             signature: FAKE_BLS_SIG,
-            registrationProof: "",
             contentTag: TAG
         });
     }
@@ -287,7 +269,8 @@ contract BLSExposerTest is Test {
         bytes32 id2 = exposer.exposeFromCalldata(p2);
 
         assertTrue(id1 != id2);
-        bytes32 expectedId1 = keccak256(abi.encodePacked(ALICE, TAG, uint64(nonce), batchContentHash));
+        bytes32 expectedId1 =
+            keccak256(abi.encodePacked(ALICE, TAG, uint64(nonce), batchContentHash));
         bytes32 expectedId2 =
             keccak256(abi.encodePacked(ALICE, otherTag, uint64(nonce), batchContentHash));
         assertEq(id1, expectedId1);
@@ -295,20 +278,8 @@ contract BLSExposerTest is Test {
     }
 
     // ═══════════════════════════════════════════════════════════════════════════════
-    // REGISTRATION VERIFICATION TESTS
+    // SENDER REGISTRATION TESTS
     // ═══════════════════════════════════════════════════════════════════════════════
-
-    function test_exposeFromCalldata_revertsOnNotRegistered() public {
-        bytes memory messageBytes = _buildMessage(ALICE, 1_700_000_000, 1, "test");
-
-        mockVerifier.setShouldPass(false);
-
-        bytes32 expectedContentHash = keccak256(messageBytes);
-        vm.expectRevert(
-            abi.encodeWithSelector(IERC_BAM_Exposer.NotRegistered.selector, expectedContentHash)
-        );
-        exposer.exposeFromCalldata(_buildCalldataParams(messageBytes));
-    }
 
     function test_exposeFromCalldata_revertsOnSenderNotRegistered() public {
         address bob = address(0xB0B);
@@ -334,7 +305,6 @@ contract BLSExposerTest is Test {
                 messageOffset: 0,
                 messageBytes: messageBytes,
                 signature: FAKE_BLS_SIG,
-                registrationProof: "",
                 contentTag: TAG
             });
 
@@ -352,7 +322,6 @@ contract BLSExposerTest is Test {
                 messageOffset: batch.length, // offset at end = overflow
                 messageBytes: messageBytes,
                 signature: FAKE_BLS_SIG,
-                registrationProof: "",
                 contentTag: TAG
             });
 

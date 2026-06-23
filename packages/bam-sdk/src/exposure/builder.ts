@@ -61,7 +61,6 @@ export function buildExposureParams(
     byteLength: position.byteLength,
     messageBytes: message.rawBytes,
     blsSignature,
-    registrationProof: new Uint8Array(0),
     contentTag,
   };
 }
@@ -104,7 +103,6 @@ export function buildExposureParamsRaw(
     byteLength,
     messageBytes,
     blsSignature,
-    registrationProof: new Uint8Array(0),
     contentTag,
   };
 }
@@ -127,7 +125,6 @@ export function encodeExposureParams(params: ExposureParams): {
   byteLength: bigint;
   messageBytes: Uint8Array;
   blsSignature: Uint8Array;
-  registrationProof: Uint8Array;
   contentTag: Bytes32;
 } {
   return {
@@ -143,7 +140,6 @@ export function encodeExposureParams(params: ExposureParams): {
     byteLength: BigInt(params.byteLength),
     messageBytes: params.messageBytes,
     blsSignature: params.blsSignature,
-    registrationProof: params.registrationProof,
     contentTag: params.contentTag,
   };
 }
@@ -273,7 +269,6 @@ export function createTestExposureParams(
     byteLength: messageBytes.length,
     messageBytes,
     blsSignature: new Uint8Array(96),
-    registrationProof: new Uint8Array(0),
     contentTag,
   };
 }

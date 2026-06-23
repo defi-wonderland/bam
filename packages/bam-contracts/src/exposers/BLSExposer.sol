@@ -2,10 +2,8 @@
 pragma solidity ^0.8.24;
 
 import { IERC_BAM_Exposer } from "../interfaces/IERC_BAM_Exposer.sol";
-import { ISocialBlobsCore } from "../interfaces/ISocialBlobsCore.sol";
 import { IBLSRegistry } from "../interfaces/IBLSRegistry.sol";
 import { IExposureRecord } from "../interfaces/IExposureRecord.sol";
-import { IRegistrationVerifier } from "../interfaces/IRegistrationVerifier.sol";
 import { SocialBlobsTypes } from "../libraries/SocialBlobsTypes.sol";
 import { KZGVerifier } from "../libraries/KZGVerifier.sol";
 import { BLSVerifier } from "../libraries/BLSVerifier.sol";
@@ -14,8 +12,11 @@ import { ReentrancyGuard } from "@openzeppelin/contracts/utils/ReentrancyGuard.s
 /// @title BLSExposer
 /// @notice Exposes messages with BLS signature verification
 /// @dev Application-layer contract that handles exposure logic for BLS-signed messages.
-///      Verifies registration via IRegistrationVerifier, KZG proofs, BLS signatures,
-///      and optionally records to ExposureRecord.
+///      Verifies KZG proofs (the bytes are in the blob behind the versioned hash) and
+///      BLS signatures (the sender authored them), and optionally records to
+///      ExposureRecord. Batch registration is proven off-chain from the BAM core's
+///      `BlobBatchRegistered` / `CalldataBatchRegistered` event log; per ERC-8180 the
+///      core is events-only, so no on-chain registration check is performed here.
 ///      Implements IERC_BAM_Exposer for standardized event and query interface.
 contract BLSExposer is ReentrancyGuard, IERC_BAM_Exposer {
     // ═══════════════════════════════════════════════════════════════════════════════
@@ -38,14 +39,13 @@ contract BLSExposer is ReentrancyGuard, IERC_BAM_Exposer {
     // IMMUTABLES
     // ═══════════════════════════════════════════════════════════════════════════════
 
-    /// @dev Core contract address (for verifier context)
-    ISocialBlobsCore public immutable core;
+    /// @dev BAM core contract this exposer is paired with. Informational only —
+    ///      kept so consumers can discover the associated core; never called on-chain
+    ///      (registration is proven off-chain from the core's event log).
+    address public immutable core;
 
     /// @dev BLS public key registry
     IBLSRegistry public immutable blsRegistry;
-
-    /// @dev Registration verifier (SimpleBoolVerifier for v1)
-    IRegistrationVerifier public immutable registrationVerifier;
 
     /// @dev Optional exposure record contract (can be address(0))
     IExposureRecord public immutable exposureRecord;
@@ -64,19 +64,12 @@ contract BLSExposer is ReentrancyGuard, IERC_BAM_Exposer {
     // CONSTRUCTOR
     // ═══════════════════════════════════════════════════════════════════════════════
 
-    /// @param core_ Address of SocialBlobsCore contract
+    /// @param core_ Address of the BAM core contract this exposer is paired with
     /// @param blsRegistry_ Address of BLS public key registry
-    /// @param registrationVerifier_ Address of IRegistrationVerifier implementation
     /// @param exposureRecord_ Address of ExposureRecord (or address(0) to disable)
-    constructor(
-        address core_,
-        address blsRegistry_,
-        address registrationVerifier_,
-        address exposureRecord_
-    ) {
-        core = ISocialBlobsCore(core_);
+    constructor(address core_, address blsRegistry_, address exposureRecord_) {
+        core = core_;
         blsRegistry = IBLSRegistry(blsRegistry_);
-        registrationVerifier = IRegistrationVerifier(registrationVerifier_);
         exposureRecord = IExposureRecord(exposureRecord_);
         _DOMAIN = keccak256(abi.encodePacked("ERC-BAM.v1", block.chainid));
     }
@@ -93,51 +86,45 @@ contract BLSExposer is ReentrancyGuard, IERC_BAM_Exposer {
         nonReentrant
         returns (bytes32 messageId)
     {
-        // 1. Verify registration via pluggable verifier
-        if (!registrationVerifier.verifyRegistration(
-                address(core), params.versionedHash, params.registrationProof
-            )) revert NotRegistered(params.versionedHash);
-
-        // 2. Verify KZG proofs and extract bytes (uses versionedHash directly)
+        // 1. Verify KZG proofs and extract bytes (uses versionedHash directly)
         bytes memory extractedBytes = KZGVerifier.verifyAndExtract(
             params.versionedHash, params.kzgProofs, params.byteOffset, params.byteLength
         );
 
-        // 3. Verify extracted bytes match provided message
+        // 2. Verify extracted bytes match provided message
         if (keccak256(extractedBytes) != keccak256(params.messageBytes)) {
             revert MessageMismatch();
         }
 
-        // 4. Parse message fields: [sender(20)][timestamp(4)][nonce(2)][contents...]
+        // 3. Parse message fields: [sender(20)][timestamp(4)][nonce(2)][contents...]
         address sender = _parseSender(params.messageBytes);
         uint64 nonce = _parseNonce(params.messageBytes);
         bytes calldata contents = params.messageBytes[26:];
 
-        // 5. Compute standardized hashes per ERC-8180, with contentTag bound in.
+        // 4. Compute standardized hashes per ERC-8180, with contentTag bound in.
         //    A mismatched contentTag yields a different messageHash and the BLS
         //    signature check below will reject it.
         bytes32 messageHash =
             keccak256(abi.encodePacked(sender, params.contentTag, nonce, contents));
-        messageId = keccak256(
-            abi.encodePacked(sender, params.contentTag, nonce, params.versionedHash)
-        );
+        messageId =
+            keccak256(abi.encodePacked(sender, params.contentTag, nonce, params.versionedHash));
         bytes32 signedHash = keccak256(abi.encodePacked(_DOMAIN, messageHash));
 
-        // 6. Check not already exposed
+        // 5. Check not already exposed
         if (_exposed[messageId]) revert AlreadyExposed(messageId);
 
-        // 7. Verify BLS signature against signedHash (domain-separated)
+        // 6. Verify BLS signature against signedHash (domain-separated)
         _verifyBLSSignature(sender, signedHash, params.blsSignature);
 
-        // 8. Mark as exposed
+        // 7. Mark as exposed
         _exposed[messageId] = true;
 
-        // 9. Emit standardized event
+        // 8. Emit standardized event
         emit MessageExposed(
             params.versionedHash, messageId, sender, msg.sender, uint64(block.timestamp)
         );
 
-        // 10. Optionally record to ExposureRecord
+        // 9. Optionally record to ExposureRecord
         if (address(exposureRecord) != address(0)) {
             _recordExposure(messageId, params.versionedHash, sender, params.messageBytes);
         }
@@ -160,12 +147,7 @@ contract BLSExposer is ReentrancyGuard, IERC_BAM_Exposer {
         // 1. Compute content hash (batch identifier for calldata)
         bytes32 contentHash = keccak256(params.batchData);
 
-        // 2. Verify registration via pluggable verifier
-        if (!registrationVerifier.verifyRegistration(
-                address(core), contentHash, params.registrationProof
-            )) revert NotRegistered(contentHash);
-
-        // 3. Verify message exists at claimed offset
+        // 2. Verify message exists at claimed offset
         if (params.messageOffset + params.messageBytes.length > params.batchData.length) {
             revert MessageMismatch();
         }
@@ -180,33 +162,32 @@ contract BLSExposer is ReentrancyGuard, IERC_BAM_Exposer {
             revert MessageMismatch();
         }
 
-        // 4. Parse message fields: [sender(20)][timestamp(4)][nonce(2)][contents...]
+        // 3. Parse message fields: [sender(20)][timestamp(4)][nonce(2)][contents...]
         address sender = _parseSender(params.messageBytes);
         uint64 nonce = _parseNonce(params.messageBytes);
         bytes calldata contents = params.messageBytes[26:];
 
-        // 5. Compute standardized hashes per ERC-8180, with contentTag bound in.
+        // 4. Compute standardized hashes per ERC-8180, with contentTag bound in.
         //    A mismatched contentTag yields a different messageHash and the BLS
         //    signature check below will reject it.
         bytes32 messageHash =
             keccak256(abi.encodePacked(sender, params.contentTag, nonce, contents));
-        messageId =
-            keccak256(abi.encodePacked(sender, params.contentTag, nonce, contentHash));
+        messageId = keccak256(abi.encodePacked(sender, params.contentTag, nonce, contentHash));
         bytes32 signedHash = keccak256(abi.encodePacked(_DOMAIN, messageHash));
 
-        // 6. Check not already exposed
+        // 5. Check not already exposed
         if (_exposed[messageId]) revert AlreadyExposed(messageId);
 
-        // 7. Verify BLS signature against signedHash (domain-separated)
+        // 6. Verify BLS signature against signedHash (domain-separated)
         _verifyBLSSignature(sender, signedHash, params.signature);
 
-        // 8. Mark as exposed
+        // 7. Mark as exposed
         _exposed[messageId] = true;
 
-        // 9. Emit standardized event
+        // 8. Emit standardized event
         emit MessageExposed(contentHash, messageId, sender, msg.sender, uint64(block.timestamp));
 
-        // 10. Optionally record to ExposureRecord
+        // 9. Optionally record to ExposureRecord
         if (address(exposureRecord) != address(0)) {
             _recordExposure(messageId, contentHash, sender, params.messageBytes);
         }

@@ -10,7 +10,7 @@ export interface DeployedContract {
 export interface ChainDeployment {
   chainId: number;
   name: string;
-  contracts: Partial<Record<'ABIDecoder' | 'BLSExposer' | 'BLSRegistry' | 'BPEDecoderAggregate' | 'BPEDecoderPerMessage' | 'BPEDictionary' | 'BlobAuthenticatedMessagingCore' | 'ECDSARegistry' | 'SignatureRegistryDispatcher' | 'SimpleBoolVerifier' | 'SocialBlobsCore', DeployedContract>>;
+  contracts: Partial<Record<'ABIDecoder' | 'BLSExposer' | 'BLSRegistry' | 'BPEDecoderAggregate' | 'BPEDecoderPerMessage' | 'BPEDictionary' | 'BlobAuthenticatedMessagingCore' | 'ECDSARegistry' | 'SignatureRegistryDispatcher' | 'SocialBlobsCore', DeployedContract>>;
 }
 
 const DEPLOYMENTS: Record<number, ChainDeployment> = {
@@ -19,7 +19,6 @@ const DEPLOYMENTS: Record<number, ChainDeployment> = {
     name: 'sepolia',
     contracts: {
       SocialBlobsCore: { address: '0x11a825a0774d0471292eab4706743bffcdd5d137' },
-      SimpleBoolVerifier: { address: '0xdec5faa3e32d6296e53bae7e359e059b58a482f4' },
       BLSRegistry: { address: '0x15866bf5a8724f2aa9fe75e262d8f00ba2818e25' },
       BLSExposer: { address: '0x443029b4b96fbf2d8feba77d828a394d19615a48' },
       BlobAuthenticatedMessagingCore: { address: '0xC572A7F6dba1f3cB666b14d357671903685BeDdb', deployBlock: 10912245 },

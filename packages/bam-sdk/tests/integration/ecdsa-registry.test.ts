@@ -170,7 +170,6 @@ describeIf('ECDSA registry SDK-vs-contract differential', () => {
     client = new BAMClient({
       chain: foundry,
       rpcUrl: ANVIL_RPC,
-      coreAddress: ('0x' + '00'.repeat(20)) as Address,
       account: deployer,
     });
   }, 30_000);

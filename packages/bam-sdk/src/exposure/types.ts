@@ -80,8 +80,6 @@ export interface ExposureParams {
   messageBytes: Uint8Array;
   /** BLS signature (96 bytes) */
   blsSignature: Uint8Array;
-  /** Registration proof (empty for SimpleBoolVerifier) */
-  registrationProof: Uint8Array;
   /**
    * ERC-8180 contentTag the message was signed under. Bound into the
    * on-chain `messageHash` and `messageId` so a wrong tag yields a
@@ -116,7 +114,6 @@ export interface BlobRegistrationResult {
   /**
    * Protocol/content identifier parsed from the `BlobBatchRegistered` event (indexed
    * topic). Equal to the `contentTag` argument the caller passed to `registerBlobBatch`.
-   * Undefined for legacy `registerBlob` (SocialBlobsCore), which does not emit a tag.
    */
   contentTag?: Bytes32;
   /** Block number */
@@ -134,8 +131,7 @@ export interface CalldataRegistrationResult {
   /**
    * Protocol/content identifier parsed from the `CalldataBatchRegistered` event
    * (indexed topic). Equal to the `contentTag` argument the caller passed to
-   * `registerCalldataBatch`. Undefined for legacy `registerCalldata`
-   * (SocialBlobsCore), which does not emit a tag.
+   * `registerCalldataBatch`.
    */
   contentTag?: Bytes32;
   /** Block number */
@@ -156,8 +152,6 @@ export interface CalldataExposureParams {
   messageBytes: Uint8Array;
   /** Signature (BLS or ECDSA) */
   signature: Uint8Array;
-  /** Registration proof (empty for SimpleBoolVerifier) */
-  registrationProof: Uint8Array;
   /**
    * ERC-8180 contentTag the message was signed under. Bound into the
    * on-chain `messageHash` and `messageId`; source from the
@@ -210,7 +204,7 @@ export interface DecodedExposureBatch {
 export interface ExposureBuilderOptions {
   /** RPC URL for Ethereum node */
   rpcUrl: string;
-  /** SocialBlobsCore contract address */
+  /** BAM core contract address */
   coreContract: Address;
   /** BLSRegistry contract address */
   blsRegistry: Address;

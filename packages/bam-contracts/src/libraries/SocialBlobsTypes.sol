@@ -32,7 +32,6 @@ library SocialBlobsTypes {
     /// @param byteLength Length of message in bytes
     /// @param messageBytes Raw message bytes (for verification)
     /// @param blsSignature BLS signature on the message
-    /// @param registrationProof Proof of registration (empty for SimpleBoolVerifier)
     /// @param contentTag ERC-8180 contentTag the message was signed under; bound into
     ///        messageHash + messageId so a signature can only verify against its
     ///        original tag. Per ERC-8180, the caller asserts this — a mismatch with
@@ -45,7 +44,6 @@ library SocialBlobsTypes {
         uint256 byteLength;
         bytes messageBytes;
         bytes blsSignature;
-        bytes registrationProof;
         bytes32 contentTag;
     }
 
@@ -55,7 +53,6 @@ library SocialBlobsTypes {
     /// @param messageOffset Byte offset of message within batch
     /// @param messageBytes Raw message bytes
     /// @param signature Signature on the message (BLS or ECDSA)
-    /// @param registrationProof Proof of registration (empty for SimpleBoolVerifier)
     /// @param contentTag ERC-8180 contentTag the message was signed under; bound into
     ///        messageHash + messageId. See `ExposureParams` for the binding rationale.
     struct CalldataExposureParams {
@@ -63,7 +60,6 @@ library SocialBlobsTypes {
         uint256 messageOffset;
         bytes messageBytes;
         bytes signature;
-        bytes registrationProof;
         bytes32 contentTag;
     }
 

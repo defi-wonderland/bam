@@ -107,13 +107,13 @@ const deployment = getDeployment(sepolia.id)!;
 const client = new BAMClient({
   chain: sepolia,
   rpcUrl: 'https://rpc.sepolia.org',
-  coreAddress: deployment.contracts.SocialBlobsCore!.address,
+  bamCoreAddress: deployment.contracts.BlobAuthenticatedMessagingCore!.address,
   blsExposerAddress: deployment.contracts.BLSExposer!.address,
   account: privateKeyToAccount('0x...'),
 });
 
-// Register a calldata batch
-const result = await client.registerCalldata(batch.data);
+// Register a calldata batch (ERC-BAM)
+const result = await client.registerCalldataBatch(batch.data, contentTag, decoder, signatureRegistry);
 
 // Expose a message on-chain
 const exposure = await client.expose(exposureParams);
@@ -208,7 +208,7 @@ prefix), so extracted bytes match exactly what the BLSExposer contract verifies.
 
 **Full exposure flow:**
 ```
-encodeExposureBatch() → createBlob() → registerBlob()
+encodeExposureBatch() → createBlob() → registerBlobBatch()
                                      → parseBlob() → buildExposureParams() → BLSExposer.expose()
 ```
 

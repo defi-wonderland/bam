@@ -2,13 +2,10 @@
 pragma solidity ^0.8.24;
 
 import { Script, console2 } from "forge-std/Script.sol";
-import { SocialBlobsCore } from "../src/core/SocialBlobsCore.sol";
+import { BlobAuthenticatedMessagingCore } from "../src/core/BlobAuthenticatedMessagingCore.sol";
 import { BLSRegistry } from "../src/core/BLSRegistry.sol";
 import { BLSExposer } from "../src/exposers/BLSExposer.sol";
-import { SimpleBoolVerifier } from "../src/verifiers/SimpleBoolVerifier.sol";
-import { ISocialBlobsCore } from "../src/interfaces/ISocialBlobsCore.sol";
 import { IBLSRegistry } from "../src/interfaces/IBLSRegistry.sol";
-import { IRegistrationVerifier } from "../src/interfaces/IRegistrationVerifier.sol";
 
 /// @title VerifyDeployment
 /// @notice Post-deployment verification script following Wonderland patterns
@@ -28,11 +25,11 @@ contract VerifyDeployment is Script {
     /// @dev Reads contract addresses from environment variables
     function run() external {
         // Load addresses from environment
-        coreAddress = vm.envAddress("SOCIAL_BLOBS_CORE");
+        coreAddress = vm.envAddress("BAM_CORE");
         blsRegistryAddress = vm.envAddress("BLS_REGISTRY");
         blsExposerAddress = vm.envAddress("BLS_EXPOSER");
 
-        console2.log("=== Social-Blobs Deployment Verification ===");
+        console2.log("=== BAM Deployment Verification ===");
         console2.log("Network:", _getNetworkName());
         console2.log("Block:", block.number);
         console2.log("");
@@ -53,7 +50,7 @@ contract VerifyDeployment is Script {
         blsRegistryAddress = _blsRegistry;
         blsExposerAddress = _blsExposer;
 
-        console2.log("=== Social-Blobs Deployment Verification ===");
+        console2.log("=== BAM Deployment Verification ===");
         console2.log("Network:", _getNetworkName());
         console2.log("");
 
@@ -70,7 +67,7 @@ contract VerifyDeployment is Script {
     // =========================================================================
 
     function _verifyCore() internal {
-        console2.log("--- Verifying SocialBlobsCore ---");
+        console2.log("--- Verifying BlobAuthenticatedMessagingCore ---");
 
         // Check contract exists
         _check("Core: Contract deployed", coreAddress.code.length > 0);
@@ -116,9 +113,9 @@ contract VerifyDeployment is Script {
         BLSExposer exposer = BLSExposer(blsExposerAddress);
 
         // Verify core reference
-        try exposer.core() returns (ISocialBlobsCore core) {
-            _check("BLSExposer: core() returns correct address", address(core) == coreAddress);
-            console2.log("  Core address:", address(core));
+        try exposer.core() returns (address core) {
+            _check("BLSExposer: core() returns correct address", core == coreAddress);
+            console2.log("  Core address:", core);
         } catch {
             _check("BLSExposer: core() callable", false);
         }
@@ -134,14 +131,6 @@ contract VerifyDeployment is Script {
             _check("BLSExposer: blsRegistry() callable", false);
         }
 
-        // Verify registration verifier reference
-        try exposer.registrationVerifier() returns (IRegistrationVerifier verifier) {
-            _check("BLSExposer: registrationVerifier() set", address(verifier) != address(0));
-            console2.log("  Registration Verifier:", address(verifier));
-        } catch {
-            _check("BLSExposer: registrationVerifier() callable", false);
-        }
-
         console2.log("");
     }
 
@@ -149,8 +138,8 @@ contract VerifyDeployment is Script {
         console2.log("--- Verifying Integration ---");
 
         // Test that BLSExposer references correct Core
-        try BLSExposer(blsExposerAddress).core() returns (ISocialBlobsCore core) {
-            _check("Integration: Exposer -> Core connection", address(core) == coreAddress);
+        try BLSExposer(blsExposerAddress).core() returns (address core) {
+            _check("Integration: Exposer -> Core connection", core == coreAddress);
         } catch {
             _check("Integration: Exposer -> Core connection", false);
         }
@@ -205,7 +194,7 @@ contract VerifyDeployment is Script {
 /// @dev Can be called periodically to verify system health
 contract HealthCheck is Script {
     function run() external view {
-        address coreAddress = vm.envAddress("SOCIAL_BLOBS_CORE");
+        address coreAddress = vm.envAddress("BAM_CORE");
 
         console2.log("=== Health Check ===");
         console2.log("Network:", block.chainid);

@@ -24,7 +24,7 @@ forge script script/Deploy.s.sol:DeployTestnet \
   --verify
 
 # 4. Verify deployment
-SOCIAL_BLOBS_CORE=0x... BLS_REGISTRY=0x... BLS_EXPOSER=0x... \
+BAM_CORE=0x... BLS_REGISTRY=0x... BLS_EXPOSER=0x... \
 forge script script/Verify.s.sol:VerifyDeployment \
   --rpc-url $SEPOLIA_RPC_URL
 ```
@@ -70,7 +70,7 @@ forge script script/Verify.s.sol:VerifyDeployment \
 anvil
 
 # Terminal 2: Deploy locally
-forge script script/Deploy.s.sol:DeploySocialBlobs \
+forge script script/Deploy.s.sol:DeployBam \
   --rpc-url http://127.0.0.1:8545 \
   --broadcast
 ```
@@ -78,9 +78,9 @@ forge script script/Deploy.s.sol:DeploySocialBlobs \
 ## Contract Verification on Etherscan
 
 ```bash
-# Verify SocialBlobsCore (no constructor args)
-forge verify-contract $SOCIAL_BLOBS_CORE \
-  src/core/SocialBlobsCore.sol:SocialBlobsCore \
+# Verify BlobAuthenticatedMessagingCore (no constructor args)
+forge verify-contract $BAM_CORE \
+  src/core/BlobAuthenticatedMessagingCore.sol:BlobAuthenticatedMessagingCore \
   --chain-id 11155111 \
   --watch
 
@@ -88,7 +88,7 @@ forge verify-contract $SOCIAL_BLOBS_CORE \
 forge verify-contract $BLS_EXPOSER \
   src/exposers/BLSExposer.sol:BLSExposer \
   --chain-id 11155111 \
-  --constructor-args $(cast abi-encode "constructor(address,address,address)" $SOCIAL_BLOBS_CORE $BLS_REGISTRY 0x0000000000000000000000000000000000000000) \
+  --constructor-args $(cast abi-encode "constructor(address,address,address)" $BAM_CORE $BLS_REGISTRY 0x0000000000000000000000000000000000000000) \
   --watch
 ```
 
@@ -96,11 +96,11 @@ forge verify-contract $BLS_EXPOSER \
 
 ### Sepolia (Testnet)
 
-| Contract        | Address |
-| --------------- | ------- |
-| SocialBlobsCore | `0x...` |
-| BLSRegistry     | `0x...` |
-| BLSExposer      | `0x...` |
+| Contract                       | Address |
+| ------------------------------ | ------- |
+| BlobAuthenticatedMessagingCore | `0x...` |
+| BLSRegistry                    | `0x...` |
+| BLSExposer                     | `0x...` |
 
 > Update these after deployment!
 
