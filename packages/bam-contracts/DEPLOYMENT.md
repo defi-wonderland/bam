@@ -33,9 +33,9 @@ forge script script/Verify.s.sol:VerifyDeployment \
 
 | Script              | Purpose                                      | Command                                              |
 | ------------------- | -------------------------------------------- | ---------------------------------------------------- |
-| `DeploySocialBlobs` | Basic deployment (Core + Registry + Exposer) | `forge script script/Deploy.s.sol:DeploySocialBlobs` |
-| `DeployTestnet`     | Testnet with balance checks                  | `forge script script/Deploy.s.sol:DeployTestnet`     |
-| `DeployFull`        | All contracts including peripherals          | `forge script script/Deploy.s.sol:DeployFull`        |
+| `DeployBam`     | Basic deployment (BAM core + Registry + Exposer) | `forge script script/Deploy.s.sol:DeployBam`     |
+| `DeployTestnet` | Testnet with balance checks                      | `forge script script/Deploy.s.sol:DeployTestnet` |
+| `DeployFull`    | All contracts including peripherals              | `forge script script/Deploy.s.sol:DeployFull`    |
 
 ## Verification Scripts
 

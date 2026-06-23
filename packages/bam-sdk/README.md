@@ -108,15 +108,18 @@ const client = new BAMClient({
   chain: sepolia,
   rpcUrl: 'https://rpc.sepolia.org',
   bamCoreAddress: deployment.contracts.BlobAuthenticatedMessagingCore!.address,
-  blsExposerAddress: deployment.contracts.BLSExposer!.address,
+  // blsExposerAddress: '0x...', // required for expose(); BLSExposer redeploy pending
   account: privateKeyToAccount('0x...'),
 });
 
 // Register a calldata batch (ERC-BAM)
+const contentTag = '0x...'; // keccak256("<protocol>.v<n>") — your protocol/content tag
+const decoder = deployment.contracts.ABIDecoder!.address;
+const signatureRegistry = deployment.contracts.BLSRegistry!.address;
 const result = await client.registerCalldataBatch(batch.data, contentTag, decoder, signatureRegistry);
 
-// Expose a message on-chain
-const exposure = await client.expose(exposureParams);
+// Expose a message on-chain (needs blsExposerAddress set above, once redeployed)
+// const exposure = await client.expose(exposureParams);
 ```
 
 ## Browser Usage

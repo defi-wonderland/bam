@@ -290,6 +290,20 @@ contract BLSExposerTest is Test {
         exposer.exposeFromCalldata(_buildCalldataParams(messageBytes));
     }
 
+    /// @dev Regression: a malformed (wrong-length) signature must fail closed.
+    ///      BLSVerifier validates signature length before the precompile check, so
+    ///      this reverts `InvalidSignatureFormat`; the exposer must surface that as
+    ///      `BLSVerificationFailed` rather than swallowing it as a valid signature
+    ///      (the pre-fix catch-all `catch { valid = true; }` accepted it).
+    function test_exposeFromCalldata_malformedSignature_failsClosed() public {
+        bytes memory messageBytes = _buildMessage(ALICE, 1_700_000_000, 1, "test");
+        SocialBlobsTypes.CalldataExposureParams memory params = _buildCalldataParams(messageBytes);
+        params.signature = hex"deadbeef"; // not 96 bytes
+
+        vm.expectRevert(BLSExposer.BLSVerificationFailed.selector);
+        exposer.exposeFromCalldata(params);
+    }
+
     // ═══════════════════════════════════════════════════════════════════════════════
     // MESSAGE MISMATCH TESTS
     // ═══════════════════════════════════════════════════════════════════════════════

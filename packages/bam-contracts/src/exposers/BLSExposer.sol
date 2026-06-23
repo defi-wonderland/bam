@@ -253,14 +253,25 @@ contract BLSExposer is ReentrancyGuard, IERC_BAM_Exposer {
         bytes memory pubKey = blsRegistry.getKey(sender);
         if (pubKey.length == 0) revert SenderNotRegistered(sender);
 
-        // Verify BLS signature
-        // Note: May fail if EIP-2537 precompiles not available
-        bool valid = false;
+        // Verify the BLS signature. With the registration gate removed, this is the
+        // sole authorship check, so it must fail closed: the only revert we tolerate
+        // is `PrecompilesNotAvailable` (pre-Pectra / local chains where BLS cannot be
+        // checked at all). Every other revert — malformed signature length, invalid
+        // curve point, etc. — is attacker-controllable and MUST NOT be treated as a
+        // valid signature, or exposure would be unauthenticated.
+        bool valid;
         try this.verifyBLSExternal(pubKey, signedHash, signature) returns (bool result) {
             valid = result;
-        } catch {
-            // BLS precompiles not available - for testnet, we trust
-            // In production, this would revert
+        } catch (bytes memory err) {
+            bytes4 sel;
+            if (err.length >= 4) {
+                assembly {
+                    sel := mload(add(err, 0x20))
+                }
+            }
+            if (sel != BLSVerifier.PrecompilesNotAvailable.selector) {
+                revert BLSVerificationFailed();
+            }
             valid = true;
         }
 
